@@ -92,7 +92,7 @@ node scripts/e2e-rec.mjs        # direct recording endpoint verification
 
 ## 🔄 CI builds (GitHub Actions)
 
-A **Build & Release (Windows)** manually-triggered workflow is included: `Actions → Build & Release (Windows) → Run workflow`, enter a version number, and it installs dependencies, type-checks, packages the NSIS installer + portable build, and publishes artifacts to **Releases** (tag: `v<version>`). Optionally commits the version bump back to `main`.
+A **Build & Release (Windows)** manually-triggered workflow is included: `Actions → Build & Release (Windows) → Run workflow`, enter a version number, and it installs dependencies, type-checks, packages the NSIS installer + portable build, and publishes artifacts to **Releases** (tag: `v<version>`).
 
 ### Windows local packaging gotcha
 

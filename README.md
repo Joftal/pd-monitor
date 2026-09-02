@@ -92,7 +92,7 @@ node scripts/e2e-rec.mjs        # 录制端点直连验证
 
 ## 🔄 CI 构建(GitHub Actions)
 
-仓库已配置 **Build & Release (Windows)** 手动触发工作流：`Actions → Build & Release (Windows) → Run workflow` 填写版本号 → 自动安装依赖、类型检查、打包 NSIS 安装包 + 便携版，并把产物推到 **Releases** 页面(tag: `v<版本号>`)。可选择是否将版本号改动自动提交回 main。
+仓库已配置 **Build & Release (Windows)** 手动触发工作流：`Actions → Build & Release (Windows) → Run workflow` 填写版本号 → 自动安装依赖、类型检查、打包 NSIS 安装包 + 便携版，并把产物推到 **Releases** 页面(tag: `v<版本号>`)。
 
 ### Windows 本地打包排坑
 
