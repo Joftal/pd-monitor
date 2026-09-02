@@ -7,7 +7,9 @@ export const UA =
 
 export function dataRoot(): string {
   // 数据放在程序所在目录(便携化): 打包版=exe 所在目录; 开发版=项目根目录
-  if (app.isPackaged) return path.dirname(app.getPath('exe'))
+  // 注意: 便携版运行时会解压到临时目录, app.getPath('exe') 指向临时目录!
+  // electron-builder 为便携版提供 PORTABLE_EXECUTABLE_DIR 指向原始 exe 所在文件夹
+  if (app.isPackaged) return process.env.PORTABLE_EXECUTABLE_DIR || path.dirname(app.getPath('exe'))
   return app.getAppPath()
 }
 
