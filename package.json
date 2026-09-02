@@ -1,6 +1,6 @@
 {
   "name": "pandalive-monitor",
-  "version": "1.8.9",
+  "version": "1.9.0",
   "description": "PandaLive 直播监控 / 观看 / 录制 一体化桌面应用",
   "author": "kbj",
   "private": true,

@@ -25,11 +25,22 @@ function ffmpegPath(): string {
   return app.isPackaged ? p.replace('app.asar', 'app.asar.unpacked') : p
 }
 
-/** 录制文件名: 主播名_直播标题(可选, 截断40)_时间戳; emoji/非法字符统一转下划线 */
-function buildBaseName(nick: string, title: string): string {
-  const n = sanitizeName(nick)
-  const t = title ? sanitizeName(title.slice(0, 40)) : ''
-  return t ? `${n}_${t}_${tsName()}` : `${n}_${tsName()}`
+/** 严格清理路径用名: 非法字符直接去除(不下划线替代), 收拢空白, 去除首尾点空格(NTFS 约束) */
+export function strictName(s: string): string {
+  return (
+    String(s || '')
+      .replace(/[\\/:*?"<>|]/g, '')
+      .replace(/\s+/g, ' ')
+      .replace(/[.\s]+$/g, '')
+      .trim() || '未命名'
+  )
+}
+
+/** 录制文件名: 主播名(主播ID)_直播标题(可选,截40)_时间戳; 非法字符直接剔除 */
+function buildBaseName(nick: string, userId: string, title: string): string {
+  const n = strictName(nick)
+  const t = title ? strictName(title.slice(0, 40)).replace(/ /g, '_') : ''
+  return t ? `${n}(${userId})_${t}_${tsName()}` : `${n}(${userId})_${tsName()}`
 }
 
 export interface StartRecOptions {
@@ -74,12 +85,12 @@ class Task implements RecTask {
     this.auto = !!opt.auto
     this.startedAt = Date.now()
     this.dirPath = dirPath
-    this.baseName = buildBaseName(opt.nick, opt.title)
+    this.baseName = buildBaseName(opt.nick, opt.userId, opt.title)
   }
 
   private refreshBaseName(): void {
-    // 录制开始前(拿到最新标题后)统一命名: 主播名_直播标题_时间戳
-    this.baseName = buildBaseName(this.nick, this.title)
+    // 录制开始前(拿到最新标题后)统一命名: 主播名(主播ID)_直播标题_时间戳
+    this.baseName = buildBaseName(this.nick, this.userId, this.title)
   }
 
   get outputPattern(): string {
@@ -330,7 +341,7 @@ class Recorder {
     }
     const cfg = store.getSettings()
     const root = cfg.savePath || path.join(app.getPath('videos'), 'PandaLive')
-    const dir = path.join(root, sanitizeName(opt.nick))
+    const dir = path.join(root, `${strictName(opt.nick)}(${opt.userId})`)
     if (diskFreeGb(dir) < cfg.diskLimitGb) {
       const err = new Error(`磁盘剩余空间不足 ${cfg.diskLimitGb}GB, 无法开始录制`)
       sendToast({ type: 'error', title: '录制失败', body: String(err.message) })
