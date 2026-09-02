@@ -1,0 +1,170 @@
+import { app, BrowserWindow, Tray, Menu, nativeImage, session } from 'electron'
+import * as path from 'path'
+import { registerIpc, pushAccount } from './ipc'
+import { api, SESSION_PARTITION, applyProxy } from './services/pandalive'
+import { store } from './services/store'
+import { watcher } from './services/watcher'
+import { recorder } from './services/recorder'
+import { UA } from './util'
+
+// ============ 应用入口 ============
+
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+}
+
+let mainWin: BrowserWindow | null = null
+let tray: Tray | null = null
+let quitting = false
+
+/** pandalive 的流(AWS IVS)校验 Origin; 仅对流域注入 Origin/Referer 并补 CORS 响应头 */
+function setupHeaderInjection(): void {
+  const ses = sessionMain()
+  // 注意: 只作用于流域名(live-video.net / cloudfront.net)
+  // 绝不可动 api/www.pandalive.co.kr —— 官网带凭证(credentials: include)的请求
+  // 遇到 ACAO:* 会被浏览器整体拦截(就是我们之前登录窗 Failed to fetch 的根因)
+  const filter = {
+    urls: ['https://*.live-video.net/*', 'https://*.cloudfront.net/*']
+  }
+  ses.webRequest.onBeforeSendHeaders(filter, (details, callback) => {
+    const headers = { ...details.requestHeaders }
+    headers['Origin'] = 'https://www.pandalive.co.kr'
+    headers['Referer'] = 'https://www.pandalive.co.kr/'
+    callback({ requestHeaders: headers })
+  })
+  ses.webRequest.onHeadersReceived(filter, (details, callback) => {
+    const headers = { ...details.responseHeaders }
+    headers['Access-Control-Allow-Origin'] = ['*']
+    headers['Access-Control-Allow-Headers'] = ['*']
+    callback({ responseHeaders: headers })
+  })
+}
+
+function sessionMain(): Electron.Session {
+  // 与登录窗共享持久化 partition, 网页登录态直接生效
+  return session.fromPartition(SESSION_PARTITION)
+}
+
+function createWindow(): void {
+  const cfg = store.getSettings()
+  mainWin = new BrowserWindow({
+    width: 1380,
+    height: 880,
+    minWidth: 1024,
+    minHeight: 660,
+    frame: false,
+    show: false,
+    backgroundColor: '#0b0d12',
+    title: 'PandaLive Monitor',
+    icon: path.join(__dirname, '../../resources/icon.png'),
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/index.js'),
+      session: sessionMain(),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  })
+
+  mainWin.once('ready-to-show', () => mainWin?.show())
+
+  mainWin.on('close', (e) => {
+    const c = store.getSettings()
+    if (c.closeToTray && !quitting && tray) {
+      e.preventDefault()
+      mainWin?.hide()
+    }
+  })
+  mainWin.on('closed', () => {
+    mainWin = null
+  })
+
+  void cfg
+  if (process.env.ELECTRON_RENDERER_URL) {
+    void mainWin.loadURL(process.env.ELECTRON_RENDERER_URL)
+  } else {
+    void mainWin.loadFile(path.join(__dirname, '../renderer/index.html'))
+  }
+}
+
+function createTray(): void {
+  try {
+    const iconPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'icon.png')
+      : path.join(__dirname, '../../resources/icon.png')
+    const img = nativeImage.createFromPath(iconPath)
+    tray = new Tray(img.isEmpty() ? nativeImage.createEmpty() : img.resize({ width: 18, height: 18 }))
+    tray.setToolTip('PandaLive Monitor')
+    tray.setContextMenu(
+      Menu.buildFromTemplate([
+        { label: '显示主窗口', click: () => (mainWin ? mainWin.show() : createWindow()) },
+        {
+          label: '退出',
+          click: () => {
+            quitting = true
+            app.quit()
+          }
+        }
+      ])
+    )
+    tray.on('click', () => {
+      if (mainWin) {
+        mainWin.isVisible() ? mainWin.hide() : mainWin.show()
+      } else {
+        createWindow()
+      }
+    })
+  } catch (e) {
+    console.warn('tray init failed', e)
+  }
+}
+
+app.whenReady().then(() => {
+  // 初始化服务
+  const cfg = store.getSettings()
+  api.restoreCookies()
+  applyProxy(cfg.proxyUrl)
+  sessionMain().setUserAgent(UA)
+  setupHeaderInjection()
+  registerIpc()
+  createWindow()
+  createTray()
+  pushAccount()
+
+  // 启动轮询
+  watcher.start()
+
+  app.on('second-instance', () => {
+    if (mainWin) {
+      mainWin.show()
+      mainWin.focus()
+    }
+  })
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+})
+
+let stoppingForQuit = false
+app.on('before-quit', (e) => {
+  quitting = true
+  const hasActive = recorder.list().some((t) => t.status === 'recording')
+  if (hasActive && !stoppingForQuit) {
+    e.preventDefault()
+    stoppingForQuit = true
+    void recorder.stopAll().then(() => {
+      store.flush()
+      app.quit()
+    })
+    return
+  }
+  store.flush()
+})
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin' && !store.getSettings().closeToTray) {
+    app.quit()
+  }
+})

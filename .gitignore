@@ -1,0 +1,21 @@
+# ===== 依赖与构建产物 =====
+node_modules/
+out/
+release/
+win-unpacked/
+*.blockmap
+
+# ===== 本地数据(隐私) =====
+data/
+
+# ===== 测试与临时文件 =====
+tmp-rec/
+tmp-pjs/
+shots/
+scripts/**/*.tmp
+*.log
+*.tmp
+
+# ===== 系统 =====
+.DS_Store
+Thumbs.db

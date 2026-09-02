@@ -1,0 +1,37 @@
+{
+  "name": "pandalive-monitor",
+  "version": "1.7.0",
+  "description": "PandaLive 直播监控 / 观看 / 录制 一体化桌面应用",
+  "author": "kbj",
+  "private": true,
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && vue-tsc --noEmit -p tsconfig.web.json",
+    "gen:icon": "node scripts/gen-icon.mjs",
+    "pack": "npm run build && electron-builder --win --x64",
+    "pack:dir": "npm run build && electron-builder --win --x64 --dir",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.2.0",
+    "hls.js": "^1.6.0",
+    "naive-ui": "^2.40.1",
+    "pinia": "^2.3.1",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "autoprefixer": "^10.4.20",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.16",
+    "typescript": "^5.7.2",
+    "vue-tsc": "^2.1.10"
+  }
+}

@@ -1,0 +1,30 @@
+appId: com.kbj.pandalivemonitor
+productName: PandaLive Monitor
+copyright: Copyright © 2026
+directories:
+  output: release
+files:
+  - out/**
+  - package.json
+  - resources/icon.png
+  - node_modules/ffmpeg-static/**
+asarUnpack:
+  - '**/node_modules/ffmpeg-static/**'
+extraResources:
+  - from: resources/icon.png
+    to: icon.png
+win:
+  target:
+    - nsis
+    - portable
+  icon: resources/icon.ico
+  artifactName: '${productName}-${version}-${arch}.${ext}'
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: PandaLive Monitor
+  createDesktopShortcut: true
+  artifactName: '${productName}-Setup-${version}.${ext}'
+portable:
+  artifactName: '${productName}-Portable-${version}.${ext}'

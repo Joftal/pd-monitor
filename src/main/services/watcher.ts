@@ -1,0 +1,292 @@
+import { BrowserWindow } from 'electron'
+import { api, RiskError, LiveItem } from './pandalive'
+import { store } from './store'
+import { EV, WatcherStatus, Anchor, DiscoveryItem } from '../../shared/types'
+import { recorder } from './recorder'
+import { sendToast } from './notify'
+
+// ============ 轮询引擎 ============
+// list 模式: 每轮拉全站直播列表(分页, 每页一个请求), 本地匹配监控主播 —— 防封核心
+// per-anchor 模式: 逐个 member/bj (兜底, 限速队列生效)
+// 熔断: 连续失败 N 轮 -> 暂停 + 指数退避, 并通知 UI
+// ==================================
+
+const MAX_PAGES = 5
+const PAGE_SIZE = 100
+
+class Watcher {
+  running = false
+  private timer: NodeJS.Timeout | null = null
+  private errorStreak = 0
+  private cooldownUntil = 0
+  private roundInFlight = false
+  private discovery: DiscoveryItem[] = []
+  private missCursor = 0
+  private static FALLBACK_BATCH = 3
+  status: WatcherStatus = {
+    running: false,
+    mode: 'list',
+    lastRoundAt: null,
+    roundMs: 0,
+    liveCount: 0,
+    monitored: 0,
+    liveFound: 0,
+    circuitOpen: false,
+    message: ''
+  }
+
+  getDiscovery(): DiscoveryItem[] {
+    return this.discovery
+  }
+
+  private push(): void {
+    const win = BrowserWindow.getAllWindows()[0]
+    this.status.running = this.running
+    win?.webContents.send(EV.watcher, { ...this.status })
+  }
+
+  start(): void {
+    if (this.running) return
+    this.running = true
+    this.errorStreak = 0
+    this.cooldownUntil = 0
+    this.schedule(300)
+    this.push()
+  }
+
+  stop(): void {
+    this.running = false
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = null
+    this.push()
+  }
+
+  /** 立即触发一轮(不等待定时器); 一轮进行中则跳过; schedule() 会覆盖未触发的旧定时器, 连续 tick 自然合并为一轮 */
+  tick(): void {
+    if (this.running && !this.roundInFlight) this.schedule(0)
+  }
+
+  private schedule(delay: number): void {
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = setTimeout(() => void this.round(), delay)
+  }
+
+  private async round(): Promise<void> {
+    if (!this.running || this.roundInFlight) return
+    this.roundInFlight = true
+    const begin = Date.now()
+    const cfg = store.getSettings()
+    this.status.mode = cfg.watchMode
+    api.setGap(cfg.requestGapMs)
+
+    try {
+      if (Date.now() < this.cooldownUntil) {
+        const remain = Math.ceil((this.cooldownUntil - Date.now()) / 1000)
+        this.status.message = `风控冷却中, ${remain}s 后恢复`
+        this.schedule(Math.min(this.cooldownUntil - Date.now() + 500, 30000))
+        this.push()
+        return
+      }
+
+      const anchors = store.listAnchors()
+      this.status.monitored = anchors.length
+
+      if (cfg.watchMode === 'list') {
+        await this.roundByList(anchors)
+      } else {
+        // 逐个模式下大厅无数据源: 清空并广播, 让大厅显示"模式不可用"空态
+        if (this.discovery.length) {
+          this.discovery = []
+          this.pushDiscovery()
+        }
+        await this.roundByBj(anchors)
+      }
+
+      this.errorStreak = 0
+      this.status.circuitOpen = false
+      this.status.message = ''
+    } catch (e) {
+      this.errorStreak++
+      const msg = e instanceof Error ? e.message : String(e)
+      if (e instanceof RiskError || this.errorStreak >= 3) {
+        // 指数退避: 1min -> 2 -> 4 -> ... 上限 15min
+        const minutes = Math.min(15, 2 ** Math.min(4, this.errorStreak - 1))
+        this.cooldownUntil = Date.now() + minutes * 60_000
+        this.status.circuitOpen = true
+        this.status.message = `检测到风控/连续失败(${msg}), 已熔断 ${minutes} 分钟`
+        sendToast({ type: 'error', title: '监控熔断', body: this.status.message })
+      } else {
+        this.status.message = `本轮失败: ${msg}`
+      }
+    } finally {
+      this.roundInFlight = false
+      this.status.lastRoundAt = Date.now()
+      this.status.roundMs = Date.now() - begin
+      this.push()
+      if (this.running) {
+        store.flush()
+        const interval = this.status.circuitOpen ? 30_000 : store.getSettings().pollIntervalSec * 1000
+        this.schedule(interval)
+      }
+    }
+  }
+
+  /** list 模式: 拉全站列表, 本地匹配; 全量列表同时作为大厅数据源 */
+  private async roundByList(anchors: Anchor[]): Promise<void> {
+    const liveMap = new Map<string, LiveItem>()
+    let page = 0
+    let loginInfo: unknown = undefined
+    while (page < MAX_PAGES) {
+      const { list, loginInfo: li } = await api.fetchLivePage(page * PAGE_SIZE, PAGE_SIZE)
+      loginInfo = li
+      for (const item of list) liveMap.set(item.userId, item)
+      // 没到满页即已到列表底部
+      if (list.length < PAGE_SIZE) break
+      page++
+    }
+    this.status.liveCount = liveMap.size
+
+    // 全量在播列表 -> 大厅(按观众数降序)
+    this.discovery = [...liveMap.values()]
+      .sort((a, b) => (b.user || 0) - (a.user || 0))
+      .map((x) => ({
+        userId: x.userId,
+        userIdx: x.userIdx ?? null,
+        nick: x.userNick || x.userId,
+        title: x.title || '',
+        isAdult: !!x.isAdult,
+        isPw: !!x.isPw,
+        type: x.type || '',
+        liveType: x.liveType || '',
+        viewers: x.user || 0,
+        likes: x.likeCnt || 0,
+        fans: x.fanCnt || 0,
+        bookmarks: x.bookmarkCnt || 0,
+        plays: x.playCnt || 0,
+        startTime: x.startTime || '',
+        thumbUrl: x.thumbUrl || '',
+        userImg: x.userImg || ''
+      }))
+    this.pushDiscovery()
+
+    const now = Date.now()
+    let liveFound = 0
+    const missing: Anchor[] = []
+    for (const a of anchors) {
+      const item = liveMap.get(a.userId)
+      if (!item) {
+        missing.push(a)
+        continue
+      }
+      const wasLive = a.isLive
+      liveFound++
+      const patch: Partial<Anchor> = {
+        isLive: true,
+        nick: item.userNick || a.nick,
+        userIdx: item.userIdx ?? a.userIdx,
+        userImg: item.userImg || a.userImg,
+        title: item.title || '',
+        tags: { isAdult: !!item.isAdult, isPw: !!item.isPw, type: item.type || '', liveType: item.liveType || '' },
+        startTime: item.startTime || '',
+        viewerCount: item.user || 0,
+        likes: item.likeCnt || 0,
+        fans: item.fanCnt || 0,
+        thumbUrl: item.thumbUrl || '',
+        lastSeenAt: now
+      }
+      store.updateAnchor(a.userId, patch)
+      if (!wasLive) this.onLiveStart({ ...a, ...patch } as Anchor)
+    }
+
+    // 兜底: 列表不可见的关注主播(19+/隐藏房)用 member/bj 节流复查
+    // - urgent: 上轮还在播的, 全部立即复查(防止误判下播)
+    // - rotate: 其余离线主播, 每轮轮换小批量复查(发现列表外新开播, 含成人房)
+    const urgent = missing.filter((a) => a.isLive)
+    const rest = missing.filter((a) => !a.isLive)
+    const queue: Anchor[] = [...urgent]
+    if (rest.length > 0) {
+      const k = Math.min(Watcher.FALLBACK_BATCH, rest.length)
+      this.missCursor = this.missCursor % rest.length
+      for (let i = 0; i < k; i++) queue.push(rest[(this.missCursor + i) % rest.length])
+      this.missCursor = (this.missCursor + k) % rest.length
+    }
+    for (const a of queue) {
+      const info = await api.fetchBj(a.userId)
+      liveFound += await this.applyBj(a, info)
+    }
+
+    this.status.liveFound = liveFound
+    // 登录态检测: loginInfo 非空即视为 cookie 有效(结构宽容)
+    if (api.hasSession()) api.cookieValid = Boolean(loginInfo)
+    if (!api.hasSession()) api.cookieValid = false
+    this.pushAnchors()
+  }
+
+  /** 用 member/bj 的响应更新主播状态, 返回 1=在播 0=离线 */
+  private async applyBj(
+    a: Anchor,
+    info: { nick: string; userIdx: number | null; userImg: string; media: LiveItem | null }
+  ): Promise<number> {
+    const now = Date.now()
+    const { nick, userIdx, userImg, media } = info
+    if (media && media.isLive) {
+      const patch: Partial<Anchor> = {
+        isLive: true,
+        nick: media.userNick || nick,
+        userIdx,
+        userImg: (media as unknown as { userImg?: string }).userImg || userImg,
+        title: media.title || '',
+        tags: { isAdult: !!media.isAdult, isPw: !!media.isPw, type: media.type || '', liveType: media.liveType || '' },
+        startTime: media.startTime || '',
+        viewerCount: media.user || 0,
+        likes: media.likeCnt || 0,
+        fans: media.fanCnt || 0,
+        thumbUrl: (media as unknown as { thumbUrl?: string }).thumbUrl || '',
+        lastSeenAt: now
+      }
+      store.updateAnchor(a.userId, patch)
+      if (!a.isLive) this.onLiveStart({ ...a, ...patch } as Anchor)
+      return 1
+    }
+    if (a.isLive) {
+      store.updateAnchor(a.userId, { isLive: false, title: '', tags: null, startTime: '', viewerCount: 0, thumbUrl: '' })
+      this.onLiveEnd(a)
+    }
+    if (nick && nick !== a.nick) store.updateAnchor(a.userId, { nick })
+    return 0
+  }
+
+  /** per-anchor 模式: 逐个 member/bj */
+  private async roundByBj(anchors: Anchor[]): Promise<void> {
+    let liveFound = 0
+    for (const a of anchors) {
+      liveFound += await this.applyBj(a, await api.fetchBj(a.userId))
+    }
+    this.status.liveFound = liveFound
+    this.pushAnchors()
+  }
+
+  private onLiveStart(a: Anchor): void {
+    sendToast({ type: 'live', title: `${a.nick} 开播了`, body: a.title || '点击观看' })
+    const cfg = store.getSettings()
+    if (a.autoRecord && cfg) {
+      void recorder.start({ userId: a.userId, nick: a.nick, title: a.title, password: '', auto: true }).catch(() => undefined)
+    }
+  }
+
+  private onLiveEnd(a: Anchor): void {
+    sendToast({ type: 'offline', title: `${a.nick} 下播了`, body: '' })
+  }
+
+  private pushAnchors(): void {
+    const win = BrowserWindow.getAllWindows()[0]
+    win?.webContents.send(EV.anchors, store.listAnchors())
+  }
+
+  private pushDiscovery(): void {
+    const win = BrowserWindow.getAllWindows()[0]
+    win?.webContents.send(EV.discovery, this.discovery)
+  }
+}
+
+export const watcher = new Watcher()
