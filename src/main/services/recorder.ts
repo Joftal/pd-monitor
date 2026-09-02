@@ -25,6 +25,13 @@ function ffmpegPath(): string {
   return app.isPackaged ? p.replace('app.asar', 'app.asar.unpacked') : p
 }
 
+/** 录制文件名: 主播名_直播标题(可选, 截断40)_时间戳; emoji/非法字符统一转下划线 */
+function buildBaseName(nick: string, title: string): string {
+  const n = sanitizeName(nick)
+  const t = title ? sanitizeName(title.slice(0, 40)) : ''
+  return t ? `${n}_${t}_${tsName()}` : `${n}_${tsName()}`
+}
+
 export interface StartRecOptions {
   userId: string
   nick: string
@@ -67,7 +74,12 @@ class Task implements RecTask {
     this.auto = !!opt.auto
     this.startedAt = Date.now()
     this.dirPath = dirPath
-    this.baseName = `${sanitizeName(opt.nick)}_${tsName()}`
+    this.baseName = buildBaseName(opt.nick, opt.title)
+  }
+
+  private refreshBaseName(): void {
+    // 录制开始前(拿到最新标题后)统一命名: 主播名_直播标题_时间戳
+    this.baseName = buildBaseName(this.nick, this.title)
   }
 
   get outputPattern(): string {
@@ -87,6 +99,7 @@ class Task implements RecTask {
       throw err
     }
     if (play.title) this.title = play.title
+    this.refreshBaseName() // 拿到最终标题后再定文件名(首次可能任选项带标题)
     if (this.lastBytesAt === 0) this.lastBytesAt = Date.now() // 停滞计时起点: 从未写入也能被检出
     // master URL 仅 10 分钟有效: 录制改用具象变体地址(最高档/原画)
     this.spawnFfmpeg(play.variants?.[0]?.url || play.m3u8)
