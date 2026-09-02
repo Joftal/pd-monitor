@@ -133,27 +133,51 @@ class Task implements RecTask {
       this.statFiles()
       if (expected) return
       if (this.status !== 'recording') return
-      // 不再自动换源: 录制中断直接提示, 交由用户手动重新开始
       const reason =
         code === 0
           ? '流连接结束'
           : errBuf.split('\n').filter(Boolean).slice(-3).join(' | ') || `ffmpeg 退出码 ${code}`
-      this.error = `录制中断(${reason}), 请手动重新开始录制`
-      void this.finalize('error')
+      void this.handleUnexpectedExit(reason)
     })
   }
 
-  /** 停滞检测: 字节长时间无增长 = 源实际上已失效(token 过期/连接假死) */
+  /** 意外退出统一语义: 拉一次现行流判下播/中断 —— 真下播按完成收尾, 还在播才记错误(不自动换源) */
+  private async handleUnexpectedExit(reason: string): Promise<void> {
+    let stillLive = false
+    try {
+      const play = await api.fetchPlay(this.userId, this.password)
+      stillLive = !!(play.ok && play.m3u8)
+    } catch {
+      stillLive = false // 拉不出也按下播论
+    }
+    if (stillLive) {
+      this.error = `录制中断(${reason}), 主播仍在播, 请手动重新开始录制`
+      await this.finalize('error')
+    } else {
+      await this.finalize('done') // 正常下播: 完成态收尾
+    }
+  }
+
+  /** 停滞检测(60s 字节无增长=源失效) + 磁盘监控(跨天录制保护) */
+  private diskCheckCnt = 0
   private checkStall(): void {
     if (this.status !== 'recording' || this.stopping || !this.proc) return
     if (this.bytes !== this.lastBytes) {
       this.lastBytes = this.bytes
       this.lastBytesAt = Date.now()
-      return
-    }
-    if (this.lastBytesAt && Date.now() - this.lastBytesAt > STALL_MS) {
+    } else if (this.lastBytesAt && Date.now() - this.lastBytesAt > STALL_MS) {
       this.error = '源停滞无数据(可能已失效), 请手动重新开始录制'
       void this.finalize('error')
+      return
+    }
+    // 每 ~30s 检查一次磁盘, 避免跨天录制把磁盘写满
+    if (++this.diskCheckCnt >= 3) {
+      this.diskCheckCnt = 0
+      const limit = store.getSettings().diskLimitGb
+      if (diskFreeGb(this.dirPath) < limit) {
+        this.error = `磁盘剩余空间不足 ${limit}GB, 已停止录制`
+        void this.finalize('error')
+      }
     }
   }
 
