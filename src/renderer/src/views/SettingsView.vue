@@ -120,6 +120,13 @@ async function save() {
           <n-switch v-model:value="form.deleteTs" />
         </div>
         <div class="flex items-center justify-between gap-4">
+          <div>
+            <div class="text-[13px] text-gray-700">开播预取直播源</div>
+            <div class="text-[11.5px] text-gray-400 mt-0.5">监到开播即在后台节流预取源, 点进房间零等待</div>
+          </div>
+          <n-switch v-model:value="form.prefetchStream" />
+        </div>
+        <div class="flex items-center justify-between gap-4">
           <div class="text-[13px] text-gray-700">新增主播默认开启「开播自动录制」</div>
           <n-switch v-model:value="form.autoRecordDefault" />
         </div>

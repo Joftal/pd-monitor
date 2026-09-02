@@ -59,6 +59,8 @@ export interface Settings {
   autoRecordDefault: boolean
   closeToTray: boolean
   diskLimitGb: number
+  /** 开播即预取直播源(后台节流泵), 点进房间零等待 */
+  prefetchStream: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -74,7 +76,8 @@ export const DEFAULT_SETTINGS: Settings = {
   notifySound: true,
   autoRecordDefault: false,
   closeToTray: true,
-  diskLimitGb: 1
+  diskLimitGb: 1,
+  prefetchStream: true
 }
 
 export interface AccountState {

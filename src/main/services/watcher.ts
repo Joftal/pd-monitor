@@ -4,6 +4,7 @@ import { store } from './store'
 import { EV, WatcherStatus, Anchor, DiscoveryItem } from '../../shared/types'
 import { recorder } from './recorder'
 import { sendToast } from './notify'
+import { sleep } from '../util'
 
 // ============ 轮询引擎 ============
 // list 模式: 每轮拉全站直播列表(分页, 每页一个请求), 本地匹配监控主播 —— 防封核心
@@ -266,10 +267,42 @@ class Watcher {
     this.pushAnchors()
   }
 
+  // ---- 开播预取源泵: 逐个节流拉源写缓存, 点进房间即命中 ----
+  private prewarmQueue: string[] = []
+  private prewarmPumping = false
+
+  private enqueuePrewarm(userId: string): void {
+    if (this.prewarmQueue.includes(userId)) return
+    this.prewarmQueue.push(userId)
+    void this.pumpPrewarm()
+  }
+
+  private async pumpPrewarm(): Promise<void> {
+    if (this.prewarmPumping) return
+    this.prewarmPumping = true
+    try {
+      while (this.prewarmQueue.length) {
+        // 熔断期间不预取(避免高压撞墙)
+        if (this.status.circuitOpen) {
+          this.prewarmQueue.length = 0
+          break
+        }
+        const uid = this.prewarmQueue.shift()!
+        const cfg = store.getSettings()
+        api.setGap(cfg.requestGapMs)
+        await api.getPlayCached(uid).catch(() => undefined) // 失败静默(不打扰用户流)
+        await sleep(Math.max(1200, cfg.requestGapMs) * (0.8 + Math.random() * 0.4))
+      }
+    } finally {
+      this.prewarmPumping = false
+    }
+  }
+
   private onLiveStart(a: Anchor): void {
     api.invalidatePlay(a.userId) // 主播(重)开播: 旧源作废
-    sendToast({ type: 'live', title: `${a.nick} 开播了`, body: a.title || '点击观看' })
     const cfg = store.getSettings()
+    if (cfg.prefetchStream) this.enqueuePrewarm(a.userId) // 后台预取新源写缓存
+    sendToast({ type: 'live', title: `${a.nick} 开播了`, body: a.title || '点击观看' })
     if (a.autoRecord && cfg) {
       void recorder.start({ userId: a.userId, nick: a.nick, title: a.title, password: '', auto: true }).catch(() => undefined)
     }
