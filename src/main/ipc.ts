@@ -165,13 +165,20 @@ export function registerIpc(): void {
 
   // ---------- 播放 ----------
   ipcMain.handle(CH.livePlay, async (_e, userId: string, password?: string): Promise<PlayInfo> => {
-    const r = await api.fetchPlay(userId, password || '')
+    let r
+    try {
+      r = await api.fetchPlay(userId, password || '')
+    } catch (e) {
+      // 网络异常/风控(403/429 等)——必须回落为 ok:false, 否则前端永远停在"获取直播流…"
+      return { ok: false, error: `获取直播流失败: ${(e as Error).message || String(e)}(可能是临时风控或网络问题, 稍后重试)` }
+    }
     if (!r.ok) {
       return { ok: false, needPassword: r.needPassword, error: r.error }
     }
     return {
       ok: true,
       m3u8: r.m3u8,
+      variants: r.variants,
       hlsBackups: r.hlsBackups,
       title: r.title || '',
       nick: r.nick || '',

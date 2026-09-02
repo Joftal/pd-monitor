@@ -27,24 +27,29 @@ const tags = ref<AnchorTag | null>(anchor.value?.tags || null)
 const needPw = ref(false)
 const pwdInput = ref('')
 const playerRef = ref<InstanceType<typeof HlsPlayer> | null>(null)
-const quality = ref(-1)
-
-let refreshTimer: number | null = null
+const quality = ref(0)
+const variants = ref<{ url: string; bandwidth: number; resolution: string }[]>([])
 
 const recording = computed(() => store.isRecording(userId))
 const discoveryItem = computed(() => store.discovery.find((d) => d.userId === userId))
 const viewers = computed(() => anchor.value?.viewerCount || discoveryItem.value?.viewers || 0)
-const levelOptions = computed(() => {
-  const opts = [{ label: '自动', value: -1 }]
-  const lv = playerRef.value?.levels || []
-  for (const l of lv) {
-    opts.push({ label: l.height ? `${l.height}P  ${(l.bitrate / 1000).toFixed(0)}k` : `档位 ${l.index + 1}`, value: l.index })
-  }
-  return opts
-})
+// master 短寿, 变体长寿: 清晰度选项来自主进程解析后的变体列表
+const levelOptions = computed(() =>
+  variants.value.map((v, i) => ({
+    label: v.resolution && v.resolution !== 'master' ? `${v.resolution.split('x')[1]}P` : i === 0 ? '最高档' : `档位 ${i + 1}`,
+    value: i
+  }))
+)
 
 async function loadPlay(password = ''): Promise<boolean> {
-  const r = await api.livePlay(userId, password)
+  let r
+  try {
+    r = await api.livePlay(userId, password)
+  } catch (e) {
+    errorMsg.value = '获取直播流失败: ' + String((e as Error).message || e).replace(/^.*Error: /, '')
+    loading.value = false
+    return false
+  }
   if (!r.ok) {
     if (r.needPassword) {
       needPw.value = true
@@ -58,7 +63,10 @@ async function loadPlay(password = ''): Promise<boolean> {
   }
   needPw.value = false
   errorMsg.value = ''
-  const newUrl = r.m3u8 || ''
+  variants.value = r.variants || (r.m3u8 ? [{ url: r.m3u8, bandwidth: 0, resolution: 'master' }] : [])
+  // 默认最高档变体(长效地址)
+  const qi = Math.min(quality.value, Math.max(0, variants.value.length - 1))
+  const newUrl = variants.value[qi]?.url || r.m3u8 || ''
   if (newUrl && newUrl !== m3u8.value) m3u8.value = newUrl
   if (r.title) title.value = r.title
   if (r.nick) nick.value = r.nick
@@ -107,15 +115,60 @@ async function toggleRecord() {
 
 onMounted(async () => {
   await loadPlay()
-  // IVS token ~10 分钟过期, 每 4 分钟静默刷新
-  refreshTimer = window.setInterval(() => {
-    void loadPlay(pwdInput.value)
-  }, 4 * 60 * 1000)
 })
 
-onUnmounted(() => {
-  if (refreshTimer) clearInterval(refreshTimer)
-})
+/** 切换清晰度 = 直接换用对应变体的长效地址 */
+function switchQuality(i: number) {
+  quality.value = i
+  const v = variants.value[i]
+  if (v?.url) {
+    m3u8.value = v.url
+    message.success(`已切换到 ${levelOptions.value[i]?.label || '新档位'}`)
+  }
+}
+
+/** 复制当前播放源链接 */
+async function copyUrl() {
+  if (!m3u8.value) {
+    message.warning('当前没有可复制的源链接')
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(m3u8.value)
+    message.success('源链接已复制')
+  } catch {
+    // Electron 旧路径兜底
+    const ta = document.createElement('textarea')
+    ta.value = m3u8.value
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+    message.success('源链接已复制')
+  }
+}
+
+/** 播放源失效(403/404): 不自动换源, 提示用户手动获取 */
+function onUrlDead() {
+  if (errorMsg.value) return // 已提示过, 等待手动
+  errorMsg.value = '播放源已失效, 请点击「重试」手动获取新源'
+  loading.value = false
+  m3u8.value = '' // 切到错误面板, 提供重试入口
+  message.warning('播放源已失效, 请点击重试获取新源')
+}
+
+/** 手动刷新: 对当前直播间重新拉取一次数据 */
+const manualRefreshing = ref(false)
+async function manualRefresh() {
+  if (manualRefreshing.value) return
+  manualRefreshing.value = true
+  try {
+    const ok = await loadPlay(pwdInput.value)
+    ok ? message.success('已刷新') : undefined
+  } finally {
+    manualRefreshing.value = false
+  }
+}
 </script>
 
 <template>
@@ -130,7 +183,7 @@ onUnmounted(() => {
       </div>
 
       <div class="flex-1 min-h-0 rounded-2xl overflow-hidden bg-black relative shadow-card">
-        <HlsPlayer v-if="m3u8" ref="playerRef" :src="m3u8" autoplay @fatal="(m) => (errorMsg = m)" />
+        <HlsPlayer v-if="m3u8" ref="playerRef" :src="m3u8" autoplay @fatal="(m) => (errorMsg = m)" @url-dead="onUrlDead" />
         <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-gray-900/95">
           <template v-if="loading">
             <n-skeleton class="!w-24 !h-3 rounded" :sharp="false" />
@@ -164,9 +217,12 @@ onUnmounted(() => {
           class="!w-36"
           :value="quality"
           :options="levelOptions"
-          @update:value="(v: number) => { quality = v; playerRef?.setLevel(v) }"
+          @update:value="switchQuality"
         />
         <div class="flex-1"></div>
+        <n-button size="small" secondary type="primary" round :loading="manualRefreshing" @click="manualRefresh" class="!w-[72px]">
+          刷新
+        </n-button>
         <n-button size="small" round :secondary="following" :type="following ? 'default' : 'primary'" @click="toggleFollow">
           {{ following ? '已关注' : '+ 关注' }}
         </n-button>
@@ -205,8 +261,19 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+      <!-- 当前源链接(可复制) -->
+      <div class="rounded-2xl bg-white border border-gray-200/70 shadow-card p-4 space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-[12.5px] font-semibold text-ink1">当前播放源</span>
+          <div class="flex gap-1.5">
+            <n-button size="tiny" tertiary round @click="copyUrl">复制</n-button>
+          </div>
+        </div>
+        <p class="text-[11px] text-ink3 break-all leading-relaxed font-mono select-all">{{ m3u8 || '未获取到(源失效或未开播)' }}</p>
+      </div>
+
       <div class="rounded-2xl bg-live/5 border border-live/15 p-4 text-[12px] text-live/80 leading-relaxed">
-        播放地址约 10 分钟自动静默续期; 若长时间卡顿, 返回大厅重新进入。密码房录制会使用本次输入的密码。
+        播放源失效后会提示你手动获取; 卡顿可点左侧"刷新"立即换源。密码房录制会使用本次输入的密码。
       </div>
     </aside>
   </div>

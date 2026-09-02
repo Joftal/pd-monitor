@@ -16,7 +16,7 @@ import { sendToast } from './notify'
 // - 停止: stdin 写 'q' 优雅退出; 可选 remux 为 mp4
 // ==================================
 
-const REFRESH_MS = 4 * 60 * 1000
+const STALL_MS = 60 * 1000 // 字节数 60s 无增长视为源失效
 
 function ffmpegPath(): string {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -52,10 +52,11 @@ class Task implements RecTask {
   private proc: ChildProcessByStdio<Writable, null, Readable> | null = null
   private segIndex = 0
   private baseName = ''
-  private refreshTimer: NodeJS.Timeout | null = null
   private statTimer: NodeJS.Timeout | null = null
+  private stallTimer: NodeJS.Timeout | null = null
   private stopping = false
-  private restarting = false
+  private lastBytes = 0
+  private lastBytesAt = 0
 
   constructor(opt: StartRecOptions, dirPath: string) {
     this.id = `${opt.userId}_${Date.now()}`
@@ -86,9 +87,11 @@ class Task implements RecTask {
       throw err
     }
     if (play.title) this.title = play.title
-    this.spawnFfmpeg(play.m3u8)
+    if (this.lastBytesAt === 0) this.lastBytesAt = Date.now() // 停滞计时起点: 从未写入也能被检出
+    // master URL 仅 10 分钟有效: 录制改用具象变体地址(最高档/原画)
+    this.spawnFfmpeg(play.variants?.[0]?.url || play.m3u8)
     this.statTimer = setInterval(() => this.statFiles(), 2000)
-    this.refreshTimer = setInterval(() => void this.refreshUrl(), REFRESH_MS)
+    this.stallTimer = setInterval(() => this.checkStall(), 10000)
     this.push()
   }
 
@@ -125,45 +128,32 @@ class Task implements RecTask {
       errBuf = (errBuf + d.toString()).slice(-4000)
     })
     ff.on('exit', (code) => {
-      const expected = this.stopping || this.restarting
+      const expected = this.stopping
       this.proc = null
       this.statFiles()
       if (expected) return
       if (this.status !== 'recording') return
-      if (code === 0) {
-        void this.finalize('done')
-      } else {
-        this.error = errBuf.split('\n').filter(Boolean).slice(-3).join(' | ') || `ffmpeg 退出码 ${code}`
-        void this.finalize('error')
-      }
+      // 不再自动换源: 录制中断直接提示, 交由用户手动重新开始
+      const reason =
+        code === 0
+          ? '流连接结束'
+          : errBuf.split('\n').filter(Boolean).slice(-3).join(' | ') || `ffmpeg 退出码 ${code}`
+      this.error = `录制中断(${reason}), 请手动重新开始录制`
+      void this.finalize('error')
     })
   }
 
-  /** token 续期: 重新 play 拿新 URL, 无缝接下一段 */
-  private async refreshUrl(): Promise<void> {
-    if (this.status !== 'recording' || this.stopping || this.restarting) return
-    try {
-      const play = await api.fetchPlay(this.userId, this.password)
-      if (!play.ok || !play.m3u8) {
-        // 大概率已下播
-        await this.finalize('done')
-        return
-      }
-      this.restarting = true
-      await this.killProc()
-      this.restarting = false
-      // 竞态防护: 续期期间用户可能已手动停止
-      if (this.stopping || this.status !== 'recording') return
-      this.statFiles()
-      this.segIndex = this.files.length + 1
-      this.spawnFfmpeg(play.m3u8)
-    } catch (e) {
-      this.restarting = false
-      // 刷新失败不致命, 当前 ffmpeg 还在跑的话继续; 否则按错误收尾
-      if (!this.proc && !this.stopping && this.status === 'recording') {
-        this.error = 'URL 续期失败: ' + (e instanceof Error ? e.message : String(e))
-        await this.finalize('error')
-      }
+  /** 停滞检测: 字节长时间无增长 = 源实际上已失效(token 过期/连接假死) */
+  private checkStall(): void {
+    if (this.status !== 'recording' || this.stopping || !this.proc) return
+    if (this.bytes !== this.lastBytes) {
+      this.lastBytes = this.bytes
+      this.lastBytesAt = Date.now()
+      return
+    }
+    if (this.lastBytesAt && Date.now() - this.lastBytesAt > STALL_MS) {
+      this.error = '源停滞无数据(可能已失效), 请手动重新开始录制'
+      void this.finalize('error')
     }
   }
 
@@ -218,17 +208,16 @@ class Task implements RecTask {
   async stop(): Promise<void> {
     if (this.status !== 'recording') return
     this.stopping = true
-    if (this.refreshTimer) clearInterval(this.refreshTimer)
     await this.killProc()
     await this.finalize('stopped')
   }
 
   /** 收尾: remux / 入库 / 通知 */
   private async finalize(status: RecTask['status']): Promise<void> {
-    if (this.refreshTimer) clearInterval(this.refreshTimer)
     if (this.statTimer) clearInterval(this.statTimer)
-    this.refreshTimer = null
+    if (this.stallTimer) clearInterval(this.stallTimer)
     this.statTimer = null
+    this.stallTimer = null
     await this.killProc()
     this.statFiles()
 

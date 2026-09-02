@@ -51,12 +51,20 @@ export interface PlayResult {
   needPassword?: boolean
   error?: string
   m3u8?: string
+  /** 解析 master 得到的变体分档(带宽降序, 第一个为最高档) */
+  variants?: VariantInfo[]
   hlsBackups?: string[]
   title?: string
   nick?: string
   thumbUrl?: string
   userImg?: string
   media?: Record<string, unknown>
+}
+
+export interface VariantInfo {
+  url: string
+  bandwidth: number
+  resolution: string
 }
 
 interface QueueJob<T> {
@@ -166,6 +174,55 @@ async function nodeHttpRequest(
 }
 
 class PandaApi {
+  /** 拉取任意绝对 URL 文本(带 pandalive Origin/Referer, 经 session/代理/Node 兜底) */
+  private async fetchText(url: string): Promise<string> {
+    const headers: Record<string, string> = {
+      'User-Agent': UA,
+      Origin: 'https://www.pandalive.co.kr',
+      Referer: 'https://www.pandalive.co.kr/'
+    }
+    if (this.hasSession()) headers['Cookie'] = this.cookieHeader
+    const ses = session.fromPartition(SESSION_PARTITION)
+    try {
+      const sesFetch = (ses as unknown as { fetch?: typeof net.fetch }).fetch
+      const res = sesFetch ? await sesFetch.call(ses, url, { headers }) : await net.fetch(url, { headers })
+      if (res.status !== 200) throw new Error(`HTTP ${res.status}`)
+      return await res.text()
+    } catch (e) {
+      const res = await nodeHttpRequest('GET', url, headers, undefined, nodeProxyUrl)
+      if (res.status !== 200) throw new Error(`HTTP ${res.status}`)
+      return res.text
+    }
+  }
+
+  /** 解析 master m3u8, 取变体分档列表(带宽降序); 取不到时回退为 master 本身 */
+  async fetchVariants(masterUrl: string): Promise<VariantInfo[]> {
+    try {
+      const text = await this.fetchText(masterUrl)
+      const lines = text.split('\n')
+      const out: VariantInfo[] = []
+      for (let i = 0; i < lines.length; i++) {
+        const l = lines[i]
+        if (!l.startsWith('#EXT-X-STREAM-INF')) continue
+        const bw = Number(/BANDWIDTH=(\d+)/.exec(l)?.[1] || 0)
+        const res = /RESOLUTION=(\d+x\d+)/.exec(l)?.[1] || ''
+        // 下一行非注释即分档地址
+        for (let j = i + 1; j < lines.length; j++) {
+          const v = lines[j].trim()
+          if (!v) continue
+          if (v.startsWith('#')) break
+          out.push({ url: new URL(v, masterUrl).href, bandwidth: bw, resolution: res })
+          break
+        }
+      }
+      out.sort((a, b) => b.bandwidth - a.bandwidth)
+      if (out.length) return out
+    } catch (e) {
+      console.warn('fetchVariants failed, fallback to master:', String(e))
+    }
+    return [{ url: masterUrl, bandwidth: 0, resolution: 'master' }]
+  }
+
   private jar: CookieJar = {}
   private queue: QueueJob<unknown>[] = []
   private pumping = false
@@ -416,6 +473,10 @@ class PandaApi {
       if (code === 'needAdult') return { ok: false, error: '成人限制房: 需要已成人认证的登录Cookie' }
       if (code === 'needLogin') return { ok: false, error: '需要登录后观看' }
       if (code === 'needFan') return { ok: false, error: '粉丝团专属: 当前账号无权限' }
+      if (code === 'needUnlimitItem')
+        return { ok: false, error: '该房间已满员: 平台要求购买「满员入场券」道具才能进入(付费门槛)' }
+      if (code === 'needCoinPurchase')
+        return { ok: false, error: '付费直播间: 账号爱心余额不足, 需在平台充值爱心后观看(付费门槛)' }
       if (/pw|password/i.test(code)) return { ok: false, needPassword: true, error: '密码房: 需要正确密码' }
       return { ok: false, error: `${code}: ${j.message || '无法播放'}` }
     }
@@ -430,9 +491,12 @@ class PandaApi {
     const backups: string[] = []
     if (pl?.hls2?.[0]?.url) backups.push(pl.hls2[0].url)
     if (pl?.hls3?.[0]?.url) backups.push(pl.hls3[0].url)
+    // master 只活 10 分钟: 解析出长效变体地址供播放/录制直接使用
+    const variants = await this.fetchVariants(hls)
     return {
       ok: true,
       m3u8: hls,
+      variants,
       hlsBackups: backups,
       title: (j.media?.title as string) || '',
       nick: (j.media?.userNick as string) || '',

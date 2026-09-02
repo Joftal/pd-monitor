@@ -107,6 +107,8 @@ export interface PlayInfo {
   needPassword?: boolean
   error?: string
   m3u8?: string
+  /** 变体分档(带宽降序, 第一个是最高档; 用于替代短寿 master 地址) */
+  variants?: { url: string; bandwidth: number; resolution: string }[]
   title?: string
   nick?: string
   thumbUrl?: string

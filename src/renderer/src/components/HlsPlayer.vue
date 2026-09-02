@@ -3,7 +3,10 @@ import { onMounted, onUnmounted, ref, watch } from 'vue'
 import Hls from 'hls.js'
 
 const props = defineProps<{ src: string; autoplay?: boolean }>()
-const emit = defineEmits<{ (e: 'fatal', msg: string): void }>()
+const emit = defineEmits<{
+  (e: 'fatal', msg: string): void
+  (e: 'url-dead'): void
+}>()
 
 const videoEl = ref<HTMLVideoElement | null>(null)
 const levels = ref<{ height: number; bitrate: number; index: number }[]>([])
@@ -25,7 +28,7 @@ function load(src: string): void {
       backBufferLength: 30,
       liveSyncDurationCount: 3,
       manifestLoadingMaxRetry: 2,
-      levelLoadingMaxRetry: 3,
+      levelLoadingMaxRetry: 2,
       fragLoadingMaxRetry: 4
     })
     hls.loadSource(src)
@@ -35,14 +38,19 @@ function load(src: string): void {
       video.play().catch(() => undefined)
     })
     hls.on(Hls.Events.ERROR, (_e, data) => {
-      if (data.fatal) {
-        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-          hls?.startLoad()
-        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-          hls?.recoverMediaError()
+      if (!data.fatal) return
+      if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+        // 403/404 = 播放令牌失效, 上抛让上层换源; 其余网络错误本层重试
+        const code = data.response?.code
+        if (code === 403 || code === 404 || data.details === 'manifestLoadError') {
+          emit('url-dead')
         } else {
-          emit('fatal', data.details || '播放出错')
+          hls?.startLoad()
         }
+      } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+        hls?.recoverMediaError()
+      } else {
+        emit('url-dead')
       }
     })
   } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
