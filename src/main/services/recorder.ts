@@ -6,14 +6,13 @@ import * as path from 'path'
 import { EV, RecTask } from '../../shared/types'
 import { api } from './pandalive'
 import { store } from './store'
-import { sanitizeName, tsName, diskFreeGb, UA, sleep } from '../util'
+import { tsName, diskFreeGb, UA, sleep } from '../util'
 import { sendToast } from './notify'
 
 // ============ 录制引擎 ============
-// - ffmpeg -c copy 分段录制 m3u8
-// - pandalive 流为 AWS IVS, m3u8 URL 的 JWT token ~10 分钟过期
-//   -> 每 4 分钟静默重新 play 拿新 URL, 优雅重启 ffmpeg 续接分段(-segment_start_number)
-// - 停止: stdin 写 'q' 优雅退出; 可选 remux 为 mp4
+// - ffmpeg -c copy 分段录制; 直接使用长效 IVS 变体地址(master 一次性: 源缓存复用)
+// - 意外退出过"直播探针": 真下播=done; 仍在播=error(按策略不自动换源, 提示手动)
+// - 停滞检测(60s 零字节) + 磁盘监控(30s) + 停止: stdin 写 'q' 优雅退出; 可选 remux
 // ==================================
 
 const STALL_MS = 60 * 1000 // 字节数 60s 无增长视为源失效

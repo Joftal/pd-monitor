@@ -240,7 +240,7 @@ async function manualRefresh() {
         <n-button size="small" round :secondary="following" :type="following ? 'default' : 'primary'" @click="toggleFollow">
           {{ following ? '已关注' : '+ 关注' }}
         </n-button>
-        <n-button size="small" round :type="recording ? 'error' : 'error'" :secondary="!recording" @click="toggleRecord">
+        <n-button size="small" round type="error" :secondary="!recording" @click="toggleRecord">
           {{ recording ? '■ 停止录制' : '⏺ 开始录制' }}
         </n-button>
       </div>

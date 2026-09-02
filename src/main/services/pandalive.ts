@@ -373,7 +373,7 @@ class PandaApi {
     })
   }
 
-  /** 绕过限速队列的紧急请求(如录制刷新URL), 仍走风控检测 */
+  /** 绕过限速队列的请求(拉源/意外退出探针等用户意图驱动场景), 仍走风控检测 */
   async jsonPriority<T>(method: 'GET' | 'POST', path: string, form?: Record<string, string>): Promise<T> {
     const { text } = await this.rawFetch(method, path, form)
     return this.parseText<T>(text)

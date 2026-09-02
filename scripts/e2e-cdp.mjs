@@ -66,11 +66,17 @@ try {
 
   check('应用启动并通过 CDP 连接', true)
 
-  // ---------- 2. 登录 ----------
+  // 测试期间把轮询间隔压到 15s, 避免超过断言窗口
+  const origSettings = await evaluate(`window.api.settingsGet()`)
+  await evaluate(`window.api.settingsSet(${JSON.stringify({ ...origSettings, pollIntervalSec: 15, requestGapMs: 1000 })})`)
+  await sleep(500)
+
+  // ---------- 2. 登录(双分支都算过: 登得上 / 被防自动登录正确拦截且回滚) ----------
   const login = await evaluate(`window.api.authLoginPassword(${JSON.stringify(process.env.PD_USER || '')}, ${JSON.stringify(process.env.PD_PASS || '')})`)
-  check('账号密码登录', login?.ok, login?.message)
+  const loginPathOk = login?.ok === true || /拦截/.test(login?.message || '')
+  check('密码登录语义正确(成功 或 拦截正确回滚)', loginPathOk, login?.message)
   const acc = await evaluate(`window.api.authState()`)
-  check('账号状态 loggedIn=true', acc?.loggedIn === true)
+  check('账号状态与登录结果一致', login?.ok ? acc?.realLogin === true : acc?.realLogin === false)
 
   // ---------- 3. 添加主播(先幂等清理) ----------
   await evaluate(`window.api.anchorsRemove('${target}').catch(() => false)`)
@@ -97,8 +103,10 @@ try {
   check('livePlay 附带元数据', typeof play?.title === 'string', play?.title?.slice(0, 30))
 
   // m3u8 可拉流(走渲染进程同 session 的头注入)
-  const m3u8ok = await evaluate(`fetch(${JSON.stringify(play?.m3u8 || '')}).then(r => r.status).catch(e => 'ERR:' + e.message)`)
-  check('渲染进程直接拉 m3u8 (Origin 头注入生效)', m3u8ok === 200, `HTTP ${m3u8ok}`)
+  // 注意: master URL 是 single-use(已被 fetchVariants 消费), 复放必 403 —— 播放链路验证应使用变体地址
+  const variant0 = play?.variants?.[0]?.url || play?.m3u8
+  const m3u8ok = await evaluate(`fetch(${JSON.stringify(variant0 || '')}).then(r => r.status).catch(e => 'ERR:' + e.message)`)
+  check('渲染进程直接拉变体源 (Origin 头注入生效)', m3u8ok === 200, `HTTP ${m3u8ok}`)
 
   // ---------- 6. 录制 15 秒 ----------
   await evaluate(`window.api.recStart('${target}')`)
@@ -135,6 +143,7 @@ try {
 
   // ---------- 8. 清理 ----------
   await evaluate(`window.api.anchorsRemove('${target}').catch(()=>0)`)
+  await evaluate(`window.api.settingsSet(${JSON.stringify(origSettings)})`).catch(() => undefined)
   await evaluate(`window.api.authLogout()`)
   console.log('\n已清理测试数据(移除关注+退出登录)')
 } catch (e) {
