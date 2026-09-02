@@ -25,6 +25,7 @@ A Bilibili-inspired light-themed desktop client built with **Electron + Vue 3**.
 ### ❤️ Following
 - Two tabs — "Live" and "Offline" — each independently paginated (same pager style as the hall)
 - Go-live notifications (system toast + sound), per-streamer "auto-record on live" toggle
+- **Source pre-warm on go-live**: sources fetched in the background on live detection, so opening a room is instant (toggleable)
 - Follow by pasting a room URL or typing a streamer ID; followed streamers light up instantly in the hall
 
 ### ▶️ Watching
@@ -61,7 +62,12 @@ Download from [Releases](../../releases):
 | `PandaLive Monitor-Setup-x.x.x.exe` | NSIS installer (desktop shortcut included) |
 | `PandaLive Monitor-Portable-x.x.x.exe` | Portable build — unzip and run; data stays with the app folder |
 
-**App data location**: `data/` next to the executable (`db.json` for follows/settings/history + `vault.dat` for encrypted cookies). Nothing is written to the system drive — move the whole folder anywhere.
+**App data location** (everything sits next to the executable — nothing on the system drive, move the whole folder anywhere):
+
+| Directory | Contents |
+|---|---|
+| `data/` | `db.json` follows/settings/history + `vault.dat` encrypted cookies |
+| `recording/` | Recordings (default location; overridable in settings) |
 
 ## 🚀 Quick start
 
