@@ -10,7 +10,7 @@ import { watcher } from './services/watcher'
 import { recorder } from './services/recorder'
 import { openLoginWindow } from './services/authWin'
 import { sendToast } from './services/notify'
-import { dataDir, diskFreeGb } from './util'
+import { dataDir, defaultRecordRoot, diskFreeGb } from './util'
 
 async function pushAccount(): Promise<AccountState> {
   let realLogin = false
@@ -245,8 +245,7 @@ export function registerIpc(): void {
 
   ipcMain.handle(CH.recDiskFree, () => {
     const cfg = store.getSettings()
-    const root = cfg.savePath || path.join(app.getPath('videos'), 'PandaLive')
-    return diskFreeGb(root)
+    return diskFreeGb(cfg.savePath || defaultRecordRoot())
   })
 
   // ---------- 设置 ----------

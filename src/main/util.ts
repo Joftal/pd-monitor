@@ -20,6 +20,11 @@ export function dataDir(): string {
   return dir
 }
 
+/** 默认录制根目录: 程序所在目录/recording(未配置 savePath 时使用) */
+export function defaultRecordRoot(): string {
+  return path.join(dataRoot(), 'recording')
+}
+
 // 旧版本数据在 %APPDATA%/pandalive-monitor/plm-data, 首次运行自动迁移过来
 let migrated = false
 function migrateLegacyData(target: string): void {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { NButton, NInput, NInputNumber, NSwitch, NRadioGroup, NRadioButton, useMessage } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api'
@@ -18,6 +18,11 @@ onMounted(async () => {
 async function openDataDir() {
   await api.recOpenFolder(dataDir.value)
 }
+
+const defaultRecPath = computed(() => {
+  if (!dataDir.value) return '…'
+  return dataDir.value.replace(/[/\\]data$/, '/recording')
+})
 
 watch(
   () => store.settings,
@@ -100,7 +105,9 @@ async function save() {
         <div class="flex items-center justify-between gap-4">
           <div>
             <div class="text-[13px] text-gray-700">保存目录</div>
-            <div class="text-[11.5px] text-gray-400 mt-0.5 truncate max-w-[320px]">{{ form.savePath || '(默认: 视频/PandaLive)' }}</div>
+            <div class="text-[11.5px] text-gray-400 mt-0.5 truncate max-w-[320px]">
+              {{ form.savePath || '(默认: ' + defaultRecPath + ')' }}
+            </div>
           </div>
           <n-button size="small" secondary round @click="pickDir">选择目录</n-button>
         </div>

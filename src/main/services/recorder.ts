@@ -6,7 +6,7 @@ import * as path from 'path'
 import { EV, RecTask } from '../../shared/types'
 import { api } from './pandalive'
 import { store } from './store'
-import { tsName, diskFreeGb, UA, sleep } from '../util'
+import { tsName, diskFreeGb, UA, sleep, defaultRecordRoot } from '../util'
 import { sendToast } from './notify'
 
 // ============ 录制引擎 ============
@@ -339,7 +339,7 @@ class Recorder {
       return Recorder.publicTask(exist)
     }
     const cfg = store.getSettings()
-    const root = cfg.savePath || path.join(app.getPath('videos'), 'PandaLive')
+    const root = cfg.savePath || defaultRecordRoot()
     const dir = path.join(root, `${strictName(opt.nick)}(${opt.userId})`)
     if (diskFreeGb(dir) < cfg.diskLimitGb) {
       const err = new Error(`磁盘剩余空间不足 ${cfg.diskLimitGb}GB, 无法开始录制`)
