@@ -29,6 +29,7 @@ const pwdInput = ref('')
 const playerRef = ref<InstanceType<typeof HlsPlayer> | null>(null)
 const quality = ref(0)
 const variants = ref<{ url: string; bandwidth: number; resolution: string }[]>([])
+const lastFailedUrl = ref('') // 上一次失效的源(仅展示)
 
 const recording = computed(() => store.isRecording(userId))
 const discoveryItem = computed(() => store.discovery.find((d) => d.userId === userId))
@@ -41,10 +42,10 @@ const levelOptions = computed(() =>
   }))
 )
 
-async function loadPlay(password = ''): Promise<boolean> {
+async function loadPlay(password = '', forceFresh = false): Promise<boolean> {
   let r
   try {
-    r = await api.livePlay(userId, password)
+    r = await api.livePlay(userId, password, forceFresh)
   } catch (e) {
     errorMsg.value = '获取直播流失败: ' + String((e as Error).message || e).replace(/^.*Error: /, '')
     loading.value = false
@@ -127,6 +128,18 @@ function switchQuality(i: number) {
   }
 }
 
+/** 紧凑展示源链接(host + 路径前缀, 不展开占版面) */
+function shortUrl(u: string): string {
+  if (!u) return '—'
+  try {
+    const x = new URL(u)
+    const tail = x.pathname.split('/').filter(Boolean).pop() || ''
+    return `${x.host}/…/${tail.slice(0, 22)}${tail.length > 22 ? '…' : ''}`
+  } catch {
+    return u.slice(0, 40) + '…'
+  }
+}
+
 /** 复制当前播放源链接 */
 async function copyUrl() {
   if (!m3u8.value) {
@@ -151,6 +164,7 @@ async function copyUrl() {
 /** 播放源失效(403/404): 不自动换源, 提示用户手动获取 */
 function onUrlDead() {
   if (errorMsg.value) return // 已提示过, 等待手动
+  lastFailedUrl.value = m3u8.value // 保留上一次失效的源做展示
   errorMsg.value = '播放源已失效, 请点击「重试」手动获取新源'
   loading.value = false
   m3u8.value = '' // 切到错误面板, 提供重试入口
@@ -163,7 +177,7 @@ async function manualRefresh() {
   if (manualRefreshing.value) return
   manualRefreshing.value = true
   try {
-    const ok = await loadPlay(pwdInput.value)
+    const ok = await loadPlay(pwdInput.value, true) // 手动刷新强取新源
     ok ? message.success('已刷新') : undefined
   } finally {
     manualRefreshing.value = false
@@ -203,7 +217,7 @@ async function manualRefresh() {
             <p class="text-[13px] text-gray-400 max-w-[320px] text-center leading-relaxed">{{ errorMsg || '主播未开播' }}</p>
             <div class="flex gap-2">
               <n-button size="small" secondary @click="router.back()">返回大厅</n-button>
-              <n-button size="small" type="primary" @click="loadPlay(pwdInput)">重试</n-button>
+              <n-button size="small" type="primary" @click="loadPlay(pwdInput, true)">重试</n-button>
             </div>
           </template>
         </div>
@@ -261,15 +275,18 @@ async function manualRefresh() {
           </div>
         </div>
       </div>
-      <!-- 当前源链接(可复制) -->
-      <div class="rounded-2xl bg-white border border-gray-200/70 shadow-card p-4 space-y-2">
+      <!-- 当前源链接(单行截断 + 复制, 附上次失效记录) -->
+      <div class="rounded-2xl bg-white border border-gray-200/70 shadow-card p-4 space-y-1.5">
         <div class="flex items-center justify-between">
           <span class="text-[12.5px] font-semibold text-ink1">当前播放源</span>
-          <div class="flex gap-1.5">
-            <n-button size="tiny" tertiary round @click="copyUrl">复制</n-button>
-          </div>
+          <n-button size="tiny" tertiary round @click="copyUrl" :disabled="!m3u8">复制</n-button>
         </div>
-        <p class="text-[11px] text-ink3 break-all leading-relaxed font-mono select-all">{{ m3u8 || '未获取到(源失效或未开播)' }}</p>
+        <p class="text-[11px] text-ink2 font-mono truncate" :title="m3u8">
+          {{ m3u8 ? shortUrl(m3u8) + ' · ' + (levelOptions[quality]?.label || '') : '未获取到(源失效或未开播)' }}
+        </p>
+        <p v-if="lastFailedUrl" class="text-[10.5px] text-ink3/80 font-mono truncate" :title="lastFailedUrl">
+          上次失效： {{ shortUrl(lastFailedUrl) }}
+        </p>
       </div>
 
       <div class="rounded-2xl bg-live/5 border border-live/15 p-4 text-[12px] text-live/80 leading-relaxed">

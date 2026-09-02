@@ -29,7 +29,8 @@ const apiBridge = {
   anchorsRefresh: (): Promise<boolean> => ipcRenderer.invoke(CH.anchorsRefresh),
 
   // 播放
-  livePlay: (userId: string, password?: string): Promise<PlayInfo> => ipcRenderer.invoke(CH.livePlay, userId, password),
+  livePlay: (userId: string, password?: string, fresh?: boolean): Promise<PlayInfo> =>
+    ipcRenderer.invoke(CH.livePlay, userId, password, fresh),
 
   // 大厅
   discoveryList: (): Promise<DiscoveryItem[]> => ipcRenderer.invoke(CH.discoveryList),

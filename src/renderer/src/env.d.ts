@@ -23,7 +23,7 @@ declare global {
       anchorsRemove(userId: string): Promise<boolean>
       anchorsSetAuto(userId: string, auto: boolean): Promise<boolean>
       anchorsRefresh(): Promise<boolean>
-      livePlay(userId: string, password?: string): Promise<PlayInfo>
+      livePlay(userId: string, password?: string, fresh?: boolean): Promise<PlayInfo>
       discoveryList(): Promise<DiscoveryItem[]>
       recList(): Promise<RecTask[]>
       recHistory(): Promise<RecHistoryItem[]>

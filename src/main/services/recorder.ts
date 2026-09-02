@@ -80,7 +80,7 @@ class Task implements RecTask {
 
   async run(): Promise<void> {
     fs.mkdirSync(this.dirPath, { recursive: true })
-    const play = await api.fetchPlay(this.userId, this.password)
+    const play = await api.getPlayCached(this.userId, this.password)
     if (!play.ok || !play.m3u8) {
       const err = new Error(play.error || '获取直播流失败')
       ;(err as Error & { needPassword?: boolean }).needPassword = play.needPassword
@@ -239,6 +239,10 @@ class Task implements RecTask {
 
     this.status = status
     this.endedAt = Date.now()
+    if (status === 'error') {
+      // 录制出错(源死/中断): 立即作废该主播的源缓存, 避免下次重录复用尸源
+      api.invalidatePlay(this.userId)
+    }
     store.addHistory(Recorder.publicTask(this))
     recorder.removeTask(this.userId)
     this.push()

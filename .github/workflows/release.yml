@@ -1,0 +1,79 @@
+name: Build & Release (Windows)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (如 1.8.7, 不需要 v 前缀)'
+        required: true
+        type: string
+      commit_bump:
+        description: '是否把版本号改动提交回 main'
+        required: false
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # npm 会默认拦截部分 postinstall 脚本(electron/ffmpeg 二进制下载), 手动补跑
+      - name: Run blocked postinstall scripts
+        run: |
+          node node_modules/esbuild/install.js
+          node node_modules/ffmpeg-static/install.js
+          node node_modules/electron/install.js
+
+      - name: Bump version
+        run: npm version ${{ inputs.version }} --no-git-tag-version
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build app bundle
+        run: npm run build
+
+      - name: Generate icon
+        run: node scripts/gen-icon.mjs
+
+      - name: Package Windows (NSIS + Portable)
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder --win --x64 --publish never
+
+      - name: Commit version bump
+        if: inputs.commit_bump == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "chore(release): v${{ inputs.version }}"
+          git push
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: PandaLive Monitor v${{ inputs.version }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            release/PandaLive Monitor-Setup-${{ inputs.version }}.exe
+            release/PandaLive Monitor-Portable-${{ inputs.version }}.exe

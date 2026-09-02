@@ -267,6 +267,7 @@ class Watcher {
   }
 
   private onLiveStart(a: Anchor): void {
+    api.invalidatePlay(a.userId) // 主播(重)开播: 旧源作废
     sendToast({ type: 'live', title: `${a.nick} 开播了`, body: a.title || '点击观看' })
     const cfg = store.getSettings()
     if (a.autoRecord && cfg) {

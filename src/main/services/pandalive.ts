@@ -246,6 +246,7 @@ class PandaApi {
   clearCookies(): void {
     this.jar = {}
     vault.clear()
+    this.clearPlayCache() // 登出/换号: 旧账号签发的源凭证全部作废
   }
 
   hasSession(): boolean {
@@ -423,6 +424,7 @@ class PandaApi {
   async importCookies(jar: CookieJar): Promise<void> {
     this.jar = { ...this.jar, ...jar }
     this.saveCookies()
+    this.clearPlayCache() // 新会话生效: 旧会话签发的源清空重来
     const info = await this.checkLoginInfo()
     this.cookieValid = info.isLogin
     this.accountIsAdult = info.isAdult
@@ -457,6 +459,27 @@ class PandaApi {
       userImg: media?.userImg || j.bjInfo?.img || j.bjInfo?.profileImage || '',
       media
     }
+  }
+
+  // ---- 拉源缓存: 不设时限, 源能用就一直用; 仅显式事件作废(重开播/录制出错/换号/手动强刷) ----
+  private playCache = new Map<string, { r: PlayResult; at: number }>()
+
+  invalidatePlay(userId: string): void {
+    this.playCache.delete(userId)
+  }
+
+  clearPlayCache(): void {
+    this.playCache.clear()
+  }
+
+  async getPlayCached(userId: string, password = '', forceFresh = false): Promise<PlayResult> {
+    if (!forceFresh) {
+      const c = this.playCache.get(userId)
+      if (c && c.r.ok) return c.r
+    }
+    const r = await this.fetchPlay(userId, password)
+    if (r.ok) this.playCache.set(userId, { r, at: Date.now() })
+    return r
   }
 
   async fetchPlay(userId: string, password = ''): Promise<PlayResult> {

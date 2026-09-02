@@ -85,6 +85,10 @@ node scripts/e2e-rec-curve.mjs  # 录制增长曲线
 node scripts/e2e-rec.mjs        # 录制端点直连验证
 ```
 
+### CI 构建(GitHub Actions)
+
+仓库已配置 **Build & Release (Windows)** 手动触发工作流:`Actions → Build & Release (Windows) → Run workflow` 填写版本号 → 自动安装依赖、类型检查、打包 NSIS 安装包 + 便携版，并把产物推到 **Releases** 页面(tag: `v<版本号>`)。可选择是否将版本号改动自动提交回 main。
+
 ### 技术栈
 Electron 33 · electron-vite · Vue 3 · TypeScript · Naive UI · Tailwind CSS · Pinia · hls.js · ffmpeg-static · electron-builder
 
