@@ -472,14 +472,27 @@ class PandaApi {
     this.playCache.clear()
   }
 
+  private playInflight = new Map<string, Promise<PlayResult>>()
+
   async getPlayCached(userId: string, password = '', forceFresh = false): Promise<PlayResult> {
     if (!forceFresh) {
       const c = this.playCache.get(userId)
       if (c && c.r.ok) return c.r
+      // 在途复用: 预取泵/自动录制/手动进房并发时, 同一主播只有一发在途请求
+      const flying = this.playInflight.get(userId)
+      if (flying) return flying
     }
-    const r = await this.fetchPlay(userId, password)
-    if (r.ok) this.playCache.set(userId, { r, at: Date.now() })
-    return r
+    const p = (async () => {
+      try {
+        const r = await this.fetchPlay(userId, password)
+        if (r.ok) this.playCache.set(userId, { r, at: Date.now() })
+        return r
+      } finally {
+        this.playInflight.delete(userId)
+      }
+    })()
+    this.playInflight.set(userId, p)
+    return p
   }
 
   async fetchPlay(userId: string, password = ''): Promise<PlayResult> {
