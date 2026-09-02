@@ -19,3 +19,6 @@ scripts/**/*.tmp
 # ===== 系统 =====
 .DS_Store
 Thumbs.db
+
+# ===== 录制产物(默认位置=程序目录/recording) =====
+recording/

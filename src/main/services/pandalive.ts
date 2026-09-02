@@ -475,11 +475,13 @@ class PandaApi {
   private playInflight = new Map<string, Promise<PlayResult>>()
 
   async getPlayCached(userId: string, password = '', forceFresh = false): Promise<PlayResult> {
+    // 去重键带密码槽位: 无密码预取与用户手动输密码不共享在途(避免结果错配)
+    const key = password ? userId + '#pw' : userId
     if (!forceFresh) {
       const c = this.playCache.get(userId)
       if (c && c.r.ok) return c.r
-      // 在途复用: 预取泵/自动录制/手动进房并发时, 同一主播只有一发在途请求
-      const flying = this.playInflight.get(userId)
+      // 在途复用: 预取泵/自动录制/手动进房并发时, 同一目标只有一发在途请求
+      const flying = this.playInflight.get(key)
       if (flying) return flying
     }
     const p = (async () => {
@@ -488,10 +490,10 @@ class PandaApi {
         if (r.ok) this.playCache.set(userId, { r, at: Date.now() })
         return r
       } finally {
-        this.playInflight.delete(userId)
+        this.playInflight.delete(key)
       }
     })()
-    this.playInflight.set(userId, p)
+    this.playInflight.set(key, p)
     return p
   }
 
