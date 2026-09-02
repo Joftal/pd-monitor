@@ -43,6 +43,7 @@ const apiBridge = {
   recStop: (userId: string): Promise<void> => ipcRenderer.invoke(CH.recStop, userId),
   recOpenFolder: (dir: string): Promise<boolean> => ipcRenderer.invoke(CH.recOpenFolder, dir),
   recClearHistory: (): Promise<boolean> => ipcRenderer.invoke(CH.recClearHistory),
+  recDiskFree: (): Promise<number> => ipcRenderer.invoke(CH.recDiskFree),
 
   // 设置
   settingsGet: (): Promise<Settings> => ipcRenderer.invoke(CH.settingsGet),

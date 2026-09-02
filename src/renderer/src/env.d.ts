@@ -31,6 +31,7 @@ declare global {
       recStop(userId: string): Promise<void>
       recOpenFolder(dir: string): Promise<boolean>
       recClearHistory(): Promise<boolean>
+      recDiskFree(): Promise<number>
       settingsGet(): Promise<Settings>
       settingsSet(patch: Partial<Settings>): Promise<Settings>
       settingsSelectDir(): Promise<string>

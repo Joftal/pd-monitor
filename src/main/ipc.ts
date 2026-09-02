@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron'
+import * as path from 'path'
 import {
   CH, EV, AccountState, Anchor, PlayInfo, Settings
 } from '../shared/types'
@@ -9,7 +10,7 @@ import { watcher } from './services/watcher'
 import { recorder } from './services/recorder'
 import { openLoginWindow } from './services/authWin'
 import { sendToast } from './services/notify'
-import { dataDir } from './util'
+import { dataDir, diskFreeGb } from './util'
 
 async function pushAccount(): Promise<AccountState> {
   let realLogin = false
@@ -240,6 +241,12 @@ export function registerIpc(): void {
   ipcMain.handle(CH.recClearHistory, () => {
     store.clearHistory()
     return true
+  })
+
+  ipcMain.handle(CH.recDiskFree, () => {
+    const cfg = store.getSettings()
+    const root = cfg.savePath || path.join(app.getPath('videos'), 'PandaLive')
+    return diskFreeGb(root)
   })
 
   // ---------- 设置 ----------

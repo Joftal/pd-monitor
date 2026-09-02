@@ -164,6 +164,7 @@ export const CH = {
   recStop: 'rec:stop',
   recOpenFolder: 'rec:open-folder',
   recClearHistory: 'rec:clear-history',
+  recDiskFree: 'rec:disk-free',
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
   settingsSelectDir: 'settings:select-dir',
