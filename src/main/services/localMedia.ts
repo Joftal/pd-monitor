@@ -1,8 +1,9 @@
-import { protocol } from 'electron'
+import { protocol, session } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import { Readable } from 'stream'
 import { store } from './store'
+import { SESSION_PARTITION } from './pandalive'
 import { defaultRecordRoot } from '../util'
 import { logger } from './logger'
 
@@ -17,11 +18,22 @@ import { logger } from './logger'
 
 const SCHEME = 'plocal'
 
-/** 必须在 app ready 前调用: 声明流媒体特权 */
+/** 必须在 app ready 前调用: 声明流媒体特权。
+ *  corsEnabled: false 关键 —— 应用内协议, 否则从 http://localhost / file:// 源 fetch/<video>
+ *  会被 CORS 整体拦截(表现为 Failed to fetch / MEDIA_ERR_SRC_NOT_SUPPORTED) */
 export function registerMediaScheme(): void {
   protocol.registerSchemesAsPrivileged([
-    { scheme: SCHEME, privileges: { stream: true, supportFetchAPI: true } }
+    { scheme: SCHEME, privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: false } }
   ])
+}
+
+/** 统一响应头(双保险: 即便将来 corsEnabled 语义变动也稳) */
+const CORS_HEADERS = { 'Access-Control-Allow-Origin': '*' }
+
+function withCors(res: Response): Response {
+  const h = new Headers(res.headers)
+  for (const [k, v] of Object.entries(CORS_HEADERS)) h.set(k, v)
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h })
 }
 
 /** 允许访问的根: 当前录制根 ∪ 默认录制根 ∪ 历史出现过的任务目录(兼容换过保存路径)
@@ -96,21 +108,24 @@ function fileResponse(abs: string, rangeHeader: string | null): Response {
   })
 }
 
-/** app ready 后调用: 安装协议处理器 */
+/** app ready 后调用: 安装协议处理器。
+ *  关键: 必须挂在应用实际使用的持久化 partition 会话上 —— 顶层 protocol.handle
+ *  只作用于 default session, 而主窗口用的是 persist:pl, 挂错会话=请求根本到不了处理器 */
 export function installMediaHandler(): void {
-  protocol.handle(SCHEME, async (req) => {
+  const ses = session.fromPartition(SESSION_PARTITION)
+  ses.protocol.handle(SCHEME, async (req) => {
     try {
       const u = new URL(req.url)
       const b64 = u.pathname.replace(/^\//, '')
       const abs = Buffer.from(b64, 'base64url').toString('utf-8')
       if (!isAllowed(abs)) {
         logger.warn('media', `拒绝访问(白名单外或非 mp4): ${abs.slice(0, 200)}`)
-        return new Response('forbidden', { status: 403 })
+        return withCors(new Response('forbidden', { status: 403 }))
       }
-      if (!fs.existsSync(abs)) return new Response('not found', { status: 404 })
-      return fileResponse(abs, req.headers.get('range'))
+      if (!fs.existsSync(abs)) return withCors(new Response('not found', { status: 404 }))
+      return withCors(fileResponse(abs, req.headers.get('range')))
     } catch (e) {
-      return new Response(String((e as Error).message || e), { status: 500 })
+      return withCors(new Response(String((e as Error).message || e), { status: 500 }))
     }
   })
 }

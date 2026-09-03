@@ -13,16 +13,29 @@ const props = defineProps<{ show: boolean; task: RecHistoryItem | null }>()
 const emit = defineEmits<{ (e: 'update:show', v: boolean): void }>()
 
 const current = ref('')
+const playError = ref('')
 
 const files = computed(() => (props.task?.files || []).filter((f) => f.toLowerCase().endsWith('.mp4')))
 
 watch(
   () => [props.show, props.task?.id],
   () => {
-    if (props.show) current.value = files.value[0] || ''
+    if (props.show) {
+      current.value = files.value[0] || ''
+      playError.value = ''
+    }
   },
   { immediate: true }
 )
+
+function onVideoError(): void {
+  playError.value = '该文件无法播放(可能已被移动/删除, 或格式不受支持)'
+}
+
+// 切换分段时清除错误态, 允许尝试其他分段
+watch(current, () => {
+  playError.value = ''
+})
 
 const src = computed(() => (props.show && current.value ? api.localFileUrl(current.value) : ''))
 
@@ -49,10 +62,10 @@ function fmtClock(ts: number): string {
     <div class="flex gap-4 min-h-0">
       <!-- 播放区 -->
       <div class="flex-1 min-w-0">
-        <div class="rounded-xl overflow-hidden bg-black aspect-video">
-          <video v-if="src" :key="src" :src="src" controls autoplay class="w-full h-full"></video>
+        <div class="rounded-xl overflow-hidden bg-black aspect-video relative">
+          <video v-if="src && !playError" :key="src" :src="src" controls autoplay class="w-full h-full" @error="onVideoError"></video>
           <div v-else class="w-full h-full grid place-items-center">
-            <n-empty description="该任务没有可播放的 MP4 文件(仅 TS 或文件已移动)" size="small" class="text-gray-400" />
+            <n-empty :description="playError || '该任务没有可播放的 MP4 文件(仅 TS 或文件已移动)'" size="small" class="text-ink3" />
           </div>
         </div>
         <p class="mt-2.5 text-[13px] text-ink1 font-medium truncate" :title="task?.title">{{ task?.title || '—' }}</p>
@@ -71,7 +84,7 @@ function fmtClock(ts: number): string {
             class="w-full text-left px-3 py-2 rounded-lg border text-[12px] transition-colors truncate"
             :class="f === current
               ? 'border-live/50 bg-live/5 text-live font-semibold'
-              : 'border-line bg-white text-ink2 hover:border-live/40 hover:text-ink1'"
+              : 'border-line bg-card text-ink2 hover:border-live/40 hover:text-ink1'"
             :title="fname(f)"
             @click="current = f"
           >

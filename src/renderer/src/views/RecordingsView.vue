@@ -221,7 +221,7 @@ async function clearHistory() {
           <h1 class="text-[21px] font-extrabold text-ink1 tracking-tight">录制</h1>
           <div class="text-[12px] text-ink3 mt-0.5">ffmpeg 内核 · TS 分段无损收集 · 收尾自动 remux / 合并 MP4</div>
         </div>
-        <div class="ml-auto flex items-stretch bg-white border border-line rounded-2xl shadow-card overflow-hidden divide-x divide-line/70">
+        <div class="ml-auto flex items-stretch bg-card border border-line rounded-2xl shadow-card overflow-hidden divide-x divide-line/70">
           <div class="px-5 py-2 min-w-[100px]">
             <div class="text-[11px] text-ink3 flex items-center gap-1.5">
               <span class="w-[7px] h-[7px] rounded-full bg-red-500" :class="active.length ? 'animate-breathe' : ''"></span>进行中
@@ -260,7 +260,7 @@ async function clearHistory() {
         <div
           v-for="t in active"
           :key="t.id"
-          class="relative bg-white border border-line rounded-2xl shadow-card hover:shadow-card-hover transition-all duration-200 px-5 pt-[18px] pb-4 overflow-hidden animate-pop"
+          class="relative bg-card border border-line rounded-2xl shadow-card hover:shadow-card-hover transition-all duration-200 px-5 pt-[18px] pb-4 overflow-hidden animate-pop"
         >
           <div class="flex items-center gap-4">
             <!-- 直播间封面 + 呼吸点(无封面时回退昵称首字) -->
@@ -279,7 +279,7 @@ async function clearHistory() {
                 {{ t.nick.slice(0, 1) }}
               </div>
               <span
-                class="absolute -right-[3px] -bottom-[3px] w-3.5 h-3.5 rounded-full ring-[2.5px] ring-white animate-breathe"
+                class="absolute -right-[3px] -bottom-[3px] w-3.5 h-3.5 rounded-full ring-[2.5px] ring-card animate-breathe"
                 :class="t.vod ? 'bg-[#f0a020]' : 'bg-red-500'"
               ></span>
             </div>
@@ -320,7 +320,7 @@ async function clearHistory() {
           </div>
           <!-- 底部进度带 -->
           <div class="flex items-center gap-3.5 mt-3.5 pl-[72px]">
-            <div class="flex-1 h-1.5 rounded bg-gray-100 overflow-hidden relative">
+            <div class="flex-1 h-1.5 rounded bg-fill overflow-hidden relative">
               <span
                 v-if="!t.vod || vodPct(t) === null"
                 class="absolute top-0 bottom-0 w-[40%] rounded bg-gradient-to-r from-transparent to-transparent bar-slide"
@@ -340,7 +340,7 @@ async function clearHistory() {
           </div>
         </div>
       </div>
-      <div v-else class="rounded-2xl border border-dashed border-line py-10 grid place-items-center bg-white/40">
+      <div v-else class="rounded-2xl border border-dashed border-line py-10 grid place-items-center bg-card/40">
         <div class="text-center">
           <div class="text-3xl mb-2">🎬</div>
           <p class="text-[13px] text-ink3">暂无进行中的录制</p>
@@ -371,13 +371,13 @@ async function clearHistory() {
         </div>
       </div>
 
-      <div v-if="histGroups.length" class="bg-white border border-line rounded-2xl shadow-card overflow-hidden">
+      <div v-if="histGroups.length" class="bg-card border border-line rounded-2xl shadow-card overflow-hidden">
         <template v-for="g in histGroups" :key="g.label">
-          <div class="px-5 pt-3 pb-1.5 text-[11.5px] font-bold text-ink3 border-t border-line/60 first:border-t-0 bg-gray-50/50">{{ g.label }}</div>
+          <div class="px-5 pt-3 pb-1.5 text-[11.5px] font-bold text-ink3 border-t border-line/60 first:border-t-0 bg-fill">{{ g.label }}</div>
           <div
             v-for="h in g.rows"
             :key="h.id"
-            class="flex items-center gap-3.5 px-5 py-2.5 border-t border-line/60 hover:bg-gray-50/70 transition-colors"
+            class="flex items-center gap-3.5 px-5 py-2.5 border-t border-line/60 hover:bg-fill transition-colors"
           >
             <span class="w-2 h-2 rounded-full shrink-0" :class="statusMeta[h.status]?.dot"></span>
             <div class="flex-1 min-w-0">
@@ -401,10 +401,6 @@ async function clearHistory() {
               <div class="text-[13px] font-bold text-ink1">{{ fmtBytes(h.bytes) }}</div>
               <div class="text-[10.5px] text-ink3">{{ avgMbps(h) }} Mbps</div>
             </div>
-            <div class="w-[56px] text-right shrink-0 tabular-nums">
-              <div class="text-[13px] font-bold text-ink1">{{ h.files?.length || 0 }} 个</div>
-              <div class="text-[10.5px] text-ink3">{{ isSingleFile(h) || h.vod ? '文件' : '分段' }}</div>
-            </div>
             <div class="w-[62px] text-center shrink-0">
               <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold" :class="statusMeta[h.status]?.cls">
                 {{ statusMeta[h.status]?.label }}
@@ -412,13 +408,13 @@ async function clearHistory() {
             </div>
             <div class="w-[92px] shrink-0 flex justify-end gap-0.5">
               <n-tooltip v-if="playable(h)" trigger="hover" :delay="300"><template #trigger>
-                <button class="w-7 h-7 rounded-lg grid place-items-center text-ink3 hover:bg-gray-100 hover:text-live transition-colors" @click="play(h)">
+                <button class="w-7 h-7 rounded-lg grid place-items-center text-ink3 hover:bg-fillh hover:text-live transition-colors" @click="play(h)">
                   <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>
                 </button>
               </template>应用内播放</n-tooltip>
               <n-tooltip v-if="mergeable(h)" trigger="hover" :delay="300"><template #trigger>
                 <button
-                  class="w-7 h-7 rounded-lg grid place-items-center text-ink3 hover:bg-gray-100 hover:text-ink1 transition-colors"
+                  class="w-7 h-7 rounded-lg grid place-items-center text-ink3 hover:bg-fillh hover:text-ink1 transition-colors"
                   :class="mergingId === h.id ? 'opacity-40 pointer-events-none' : ''"
                   @click="merge(h)"
                 >
@@ -426,7 +422,7 @@ async function clearHistory() {
                 </button>
               </template>合并分段为单文件</n-tooltip>
               <n-tooltip trigger="hover" :delay="300"><template #trigger>
-                <button class="w-7 h-7 rounded-lg grid place-items-center text-ink3 hover:bg-gray-100 hover:text-ink1 transition-colors" @click="openFolder(h.dirPath)" v-if="h.dirPath">
+                <button class="w-7 h-7 rounded-lg grid place-items-center text-ink3 hover:bg-fillh hover:text-ink1 transition-colors" @click="openFolder(h.dirPath)" v-if="h.dirPath">
                   <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
                 </button>
               </template>打开目录</n-tooltip>
@@ -434,7 +430,7 @@ async function clearHistory() {
           </div>
         </template>
       </div>
-      <div v-else class="rounded-2xl border border-dashed border-line py-8 grid place-items-center bg-white/40">
+      <div v-else class="rounded-2xl border border-dashed border-line py-8 grid place-items-center bg-card/40">
         <n-empty :description="filterChip === 'all' ? '暂无历史记录' : '没有匹配的历史记录'" size="small" class="text-ink3" />
       </div>
     </div>
