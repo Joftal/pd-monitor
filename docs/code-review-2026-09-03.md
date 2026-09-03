@@ -1,46 +1,61 @@
-# 全面代码审查报告（2026-09-03 · 已逐条核销）
+# 全面代码审查报告（2026-09-03 · 终版：修复 + 实证）
 
 **范围**：主进程 14 文件 · 渲染层 28+ 文件 · 契约/工程配置 10+ 文件。
-**方法**：分区初审 → **每一条逐一代码核销**；以下清单仅保留确证为真的问题（原初审中 1 条"潜伏性非缺陷"已剔除、1 条描述收窄）。
-**结论速览**：架构健康，但存在 **6 个高严重问题**（录制状态机 2 个真实竞态、CI 版本错位、定时器泄漏、英文数值错 10 倍、失效样式 token)，建议按本节优先级处理。
+**历程**：分区初审 → 逐条核销 → **全部修复** → 逐项独立重验。
+**终审结论**:H6 + M15 + L37 共 58 项全部修复完毕；验证共 **49 项专项断言 + 31 项功能回测全绿**，期间顺带发现并修复 2 个验证期暴露的连带缺陷（沙箱 base64url 编码、mpegts 稀疏关键帧空产出）。提交于 `7c3566b`，前置备份分支 `backup@0480ff1`。
 
 ---
 
-## 一、高严重度（建议立即修复）★全部已核销
+## 〇、终审证据链（验证方式备忘）
 
-### H1. 录制引擎：停滞/磁盘触发的收尾会与 ffmpeg exit 处理器**重复 finalize**
+| 验证层 | 内容 | 结果 |
+|---|---|---|
+| 静态核销 | 37 项低危逐项 grep/结构断言（引用图谱+直读） | 37/37 |
+| utils 单测 | `fmtNum`zh/en、`fmtDurHMS`、`baseName`、`errText`、`isMergedTask/mergeableTask` 三态 | 5/5 |
+| 实机 C 段 | 死 API `undefined`+在册可用、首帧 `0 KB`、**plocal HTTP 200 回环（中文+括号路径）**、浮层链路、行内删段、整体删除 | 7/7 |
+| 全功能回测 | 六页面/主题/语言/五档筛选/角标/分组/索引/搜索/缩略图（含纯 TS)/浮层全链/白名单负例 | 31/31 |
+
+**验证期连带修复（真实缺陷，随本轮一并入库）**:
+1. **`preload localFileUrl` 沙箱化后 Buffer polyfill 不支持 `base64url` 编码** → `Unknown encoding` 异常，影院浮层挂载失败。修复：纯 JS 实现（`TextEncoder → btoa → +/ 替换`)，并以 plocal HTTP 200 回环自证。
+2. **mpegts 关键帧稀疏时 `-ss` 输入级 seek 空产出**（退出码 0 但 0 字节，ffmpeg 提示 "Output file is empty")→ 纯 TS 任务九宫格永远失败。修复：失败/空文件自动退化无 seek 直抽首帧；附抽帧失败 stderr 摘记日志。
+
+---
+
+## 一、高严重度（6/6 已核销, 全部已修复+实证）
+
+### H1. 录制引擎：停滞/磁盘触发的收尾会与 ffmpeg exit 处理器**重复 finalize** ✅已修复
 - **位置**:`src/main/services/recorder.ts` `checkStall():276,285` × `spawnFfmpeg exit 回调(226-247)` × `finalize()`
 - **实锤**：错误路径调 `finalize('error')` → `killProc()` 写 'q' → ffmpeg 先注册在 spawnFfmpeg 的 `exit` 监听器被触发，此时 `stopping=false`（错误路径从不置位）、`status` 仍 `recording` → 进入 `handleUnexpectedExit` → **再做网络探针 + 二次 finalize** → 同一任务历史入库两条、toast 双发、状态甚至改判（error↔done)。`stop()` 因先置 `stopping=true` 不受影响
 - **修法**:`finalize()` 入口置 `finalized=true` 守卫（早于一切 await);exit 回调同查
 
-### H2. 录制引擎：`run()` 与 `stop()` 启动窗口竞态 → **孤儿 ffmpeg 无限写盘**
+### H2. 录制引擎：`run()` 与 `stop()` 启动窗口竞态 → **孤儿 ffmpeg 无限写盘** ✅已修复
 - **位置**:`recorder.ts run():144-168`
 - **实锤**:`await api.getPlayCached()`（网络往返）期间 `stop()` 可完成全套收尾（proc 为 null 直通、入库、移除）;`run()` 随后无条件 `spawnFfmpeg()+setInterval` → 产生无人管理的录制进程持续写盘，`checkStall` 因 status≠recording 永久短路，用户再无入口停止
 - **修法**:`getPlayCached` 与 `fetchPlaylistDurationSec` 之后、`spawnFfmpeg` 之前检查 `this.stopping || this.status !== 'recording'` 并直接返回
 
-### H3. CI 发版：打包 job 检出 bump 前提交 → **产物版本号与 Release 错位**
+### H3. CI 发版：打包 job 检出 bump 前提交 → **产物版本号与 Release 错位** ✅已修复
 - **位置**:`.github/workflows/release.yml` package job 的 `actions/checkout@v4`
 - **实锤**:`checkout` 不传 `ref` = 检出触发时刻 SHA；版本提交是 bump job 运行中才推的 → 三平台产物文件名与 `app.getVersion()` 全是旧版本，却挂到新 tag 下，Asset Guide 中文件名对不上实物
 - **修法**:checkout 加 `with: { ref: main }`（依赖 needs:bump,tip 即 bump 提交）
 
-### H4. 大厅页：1 秒定时器注册在 setup 顶层，全文件**无任何清理钩子**
+### H4. 大厅页：1 秒定时器注册在 setup 顶层，全文件**无任何清理钩子** ✅已修复
 - **位置**:`src/renderer/src/views/ExploreView.vue:68-69`
 - **实锤**：该文件无 onMounted/onUnmounted；无 keep-alive 切换即卸载组件而 interval 永活，反复进出累积 N 个每秒定时器并滞留卸载组件的闭包状态
 - **修法**：移到 `onMounted` + `onUnmounted` 清理
 
-### H5. 英文界面"万"折算错误：**数值错 10 倍**
+### H5. 英文界面"万"折算错误：**数值错 10 倍** ✅已修复(B1 单测: 23456→23.5k)
 - **位置**:`en-US.ts:common.myriad='0k'` + `AnchorCard.vue:31 / ExploreCard.vue:30 fmtNum`(/10000 两语言共用）
 - **实锤**：英文 23456 → "2.30k"（实为 23k)
 - **修法**：按 locale 分支 zh `/10000+'万'` / en `/1000+'k'`，并收敛 fmtNum 到 utils
 
-### H6. `live-dark` token 不存在 → 渐变/hover 静默失效
+### H6. `live-dark` token 不存在 → 渐变/hover 静默失效 ✅已修复(全局 class 核验)
 - **位置**:`LibraryView.vue:324`(`to-live-dark/80`)、`CinemaOverlay.vue:255`(`hover:bg-live-dark`)
 - **实锤**:tailwind.config 只有 `live` 与 `brand.dark`，无 `live-dark` → JIT 不生成该类
 - **修法**：改 `brand-dark`
 
 ---
 
-## 二、中严重度（建议尽快处理）★全部已核销
+## 二、中严重度（15/15 已核销, 全部已修复+实证）
 
 | # | 位置 | 问题（实锤摘要） | 修法 |
 |---|---|---|---|
@@ -62,7 +77,7 @@
 
 ---
 
-## 三、低严重度（清理项）★逐条已核销
+## 三、低严重度（37/37 已核销, 全部已修复+逐项实证 L01-L37 ✓）
 
 **死代码 / 死状态**
 - `recorder.ts openFolder()` 无人调用 · `thumbs.root` 属性 · `pandalive saveCookies` 应收窄 private（调用点全在类内） · playCache 元素 `at` 字段写了从不读 · `store.ready` 全局写入后无人读 · router `meta.title` 硬编码中文且全项目无消费 · HlsPlayer `defineExpose(setLevel/levels/currentLevel)` + PlayerView `playerRef`（声明后从未读取；清晰度走自身 variants) · styles.css `live-sweep/@keyframes sweep` 无使用方 · env.d.ts `recClearHistory/watcherStart/watcherStop` 无渲染调用方（recClearHistory 还是无 UI 入口的危险操作） · electron-builder.yml `win.artifactName` 被子级 nsis/portable 覆盖 · index.ts `void cfg` · `AccountState.nick/loginAt` 恒空
