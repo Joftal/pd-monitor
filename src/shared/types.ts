@@ -162,7 +162,7 @@ export interface DiscoveryItem {
 }
 
 export interface Toast {
-  type: 'live' | 'offline' | 'rec' | 'error' | 'info'
+  type: 'live' | 'fanLive' | 'offline' | 'rec' | 'error' | 'info'
   title: string
   body: string
 }

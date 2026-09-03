@@ -35,6 +35,7 @@ export default {
     sortRecent: 'Recently started',
     onlyFollowed: 'Followed only',
     onlyAdult: '19+ only',
+    onlyFan: 'Fan rooms only',
     searchResult: 'Results for "{kw}"',
     autoRefresh: 'Auto-refresh every {sec}s',
     updateInfo: 'Updated {last} · next ~{next} (in {remain}s)',

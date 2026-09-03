@@ -37,6 +37,7 @@ export default {
     sortRecent: '最新开播',
     onlyFollowed: '只看已关注',
     onlyAdult: '仅看 19+',
+    onlyFan: '仅看粉丝房',
     searchResult: '「{kw}」的搜索结果',
     autoRefresh: '每 {sec} 秒自动刷新',
     updateInfo: '上次更新 {last} · 下次预计 {next}({remain}s 后)',

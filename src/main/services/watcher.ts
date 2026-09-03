@@ -305,7 +305,12 @@ class Watcher {
     api.invalidatePlay(a.userId) // 主播(重)开播: 旧源作废
     const cfg = store.getSettings()
     if (cfg.prefetchStream) this.enqueuePrewarm(a.userId) // 后台预取新源写缓存
-    sendToast({ type: 'live', title: mt('watcher.liveStart', { nick: a.nick }), body: a.title || mt('watcher.clickWatch') })
+    if (a.tags?.type === 'fan') {
+      // 粉丝房开播: 专用通知(与普通开播区分, 仍进系统通知与应用内气泡)
+      sendToast({ type: 'fanLive', title: mt('watcher.fanLiveStart', { nick: a.nick }), body: a.title || mt('watcher.clickWatch') })
+    } else {
+      sendToast({ type: 'live', title: mt('watcher.liveStart', { nick: a.nick }), body: a.title || mt('watcher.clickWatch') })
+    }
     if (a.autoRecord) {
       // getSettings 恒返回对象(恒真判定已移除)
       void recorder.start({ userId: a.userId, nick: a.nick, title: a.title, password: '', auto: true }).catch(() => undefined)

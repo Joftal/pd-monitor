@@ -13,6 +13,7 @@ const message = useMessage()
 const sortBy = ref<'viewers' | 'likes' | 'fans' | 'recent'>('viewers')
 const onlyFollowed = ref(false)
 const onlyAdult = ref(false)
+const onlyFan = ref(false)
 const refreshing = ref(false)
 
 const PAGE_SIZE = 20
@@ -35,6 +36,7 @@ const list = computed(() => {
   let items = [...store.discovery]
   if (onlyFollowed.value) items = items.filter((x) => store.isFollowing(x.userId))
   if (onlyAdult.value) items = items.filter((x) => x.isAdult)
+  if (onlyFan.value) items = items.filter((x) => x.type === 'fan')
   items.sort((a, b) => {
     const av = sortVal(a, sortBy.value)
     const bv = sortVal(b, sortBy.value)
@@ -52,7 +54,7 @@ const list = computed(() => {
 const pageCount = computed(() => Math.max(1, Math.ceil(list.value.length / PAGE_SIZE)))
 const paged = computed(() => list.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
 
-watch([keyword, sortBy, onlyFollowed, onlyAdult], () => {
+watch([keyword, sortBy, onlyFollowed, onlyAdult, onlyFan], () => {
   page.value = 1
 })
 watch(pageCount, (n) => {
@@ -146,6 +148,13 @@ async function refresh() {
           @click="onlyAdult = !onlyAdult"
         >
           {{ t('explore.onlyAdult') }}
+        </button>
+        <button
+          class="text-[13px] pb-0.5 border-b-2 transition-all shrink-0"
+          :class="onlyFan ? 'text-live font-semibold border-live' : 'text-ink2 border-transparent hover:text-ink1'"
+          @click="onlyFan = !onlyFan"
+        >
+          {{ t('explore.onlyFan') }}
         </button>
         <div class="flex-1"></div>
         <span v-if="keyword" class="text-[12px] text-ink3 shrink-0">{{ t('explore.searchResult', { kw: keyword }) }}</span>

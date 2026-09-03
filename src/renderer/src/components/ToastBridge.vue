@@ -11,13 +11,14 @@ let off: (() => void) | null = null
 
 onMounted(() => {
   off = api.onToast((t: Toast) => {
-    const typeMap = {
+    const typeMap: Record<Toast['type'], 'success' | 'default' | 'info' | 'error' | 'warning'> = {
       live: 'success',
+      fanLive: 'warning', // 粉丝房开播: 琥珀色与普通开播区分
       offline: 'default',
       rec: 'info',
       error: 'error',
       info: 'default'
-    } as const
+    }
     notification.create({
       title: t.title,
       content: t.body || undefined,
@@ -25,7 +26,7 @@ onMounted(() => {
       duration: 4500,
       keepAliveOnHover: true
     })
-    if (t.type === 'live' && store.settings?.notifySound) playDing()
+    if ((t.type === 'live' || t.type === 'fanLive') && store.settings?.notifySound) playDing()
   })
 })
 

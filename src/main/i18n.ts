@@ -16,6 +16,7 @@ type Dict = Record<string, string>
 const zh: Dict = {
   // watcher
   'watcher.liveStart': '{nick} 开播了',
+  'watcher.fanLiveStart': '粉丝房开播: {nick}',
   'watcher.clickWatch': '点击观看',
   'watcher.liveEnd': '{nick} 下播了',
   'watcher.circuitTitle': '监控熔断',
@@ -93,6 +94,7 @@ const zh: Dict = {
 
 const en: Dict = {
   'watcher.liveStart': '{nick} is live',
+  'watcher.fanLiveStart': 'Fan room live: {nick}',
   'watcher.clickWatch': 'Tap to watch',
   'watcher.liveEnd': '{nick} went offline',
   'watcher.circuitTitle': 'Monitor paused',
