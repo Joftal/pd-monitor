@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NButton, NInput, NSelect, NSkeleton, NTag, useMessage } from 'naive-ui'
+import { NButton, NInput, NSkeleton, useMessage } from 'naive-ui'
 import { api } from '@/api'
 import { useAppStore } from '@/stores/app'
 import HlsPlayer from '@/components/HlsPlayer.vue'
 import SpinIcon from '@/components/SpinIcon.vue'
 import { useI18n } from 'vue-i18n'
-const { t } = useI18n()
 import type { AnchorTag } from '@shared/types'
 
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const store = useAppStore()
@@ -39,13 +39,33 @@ const activeLine = ref(0) // 0=主线, 1..N=备用线路
 const recording = computed(() => store.isRecording(userId))
 const discoveryItem = computed(() => store.discovery.find((d) => d.userId === userId))
 const viewers = computed(() => anchor.value?.viewerCount || discoveryItem.value?.viewers || 0)
-// master 短寿, 变体长寿: 清晰度选项来自主进程解析后的变体列表
+
+const isVod = computed(() => tags.value?.liveType === 'rec')
+
+/** 档位选项: 解析出分辨率 → N P; 否则最高档/档位 N */
 const levelOptions = computed(() =>
   variants.value.map((v, i) => ({
     label: v.resolution && v.resolution !== 'master' ? `${v.resolution.split('x')[1]}P` : i === 0 ? t('player.qBest') : t('player.qLevel', { n: i + 1 }),
     value: i
   }))
 )
+
+/** 开播时长(来自关注卡/大厅的 startTime) */
+const liveDuration = computed(() => {
+  const st = anchor.value?.startTime || discoveryItem.value?.startTime
+  if (!st) return ''
+  const ts = new Date(st.replace(' ', 'T')).getTime()
+  if (Number.isNaN(ts)) return ''
+  const sec = Math.max(0, Math.floor((Date.now() - ts) / 1000))
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  return t(h > 0 ? 'card.h' : 'card.m', { h, m })
+})
+
+const sinceText = computed(() => {
+  const st = anchor.value?.startTime || discoveryItem.value?.startTime
+  return st ? t('player.liveSince', { t: st.slice(5, 16) }) : ''
+})
 
 async function loadPlay(password = '', forceFresh = false): Promise<boolean> {
   let r
@@ -166,7 +186,6 @@ async function copyUrl() {
     await navigator.clipboard.writeText(m3u8.value)
     message.success(t('player.copied'))
   } catch {
-    // Electron 旧路径兜底
     const ta = document.createElement('textarea')
     ta.value = m3u8.value
     document.body.appendChild(ta)
@@ -194,7 +213,7 @@ async function manualRefresh() {
   manualRefreshing.value = true
   try {
     const ok = await loadPlay(pwdInput.value, true) // 手动刷新强取新源
-    ok ? message.success(t('player.refreshed')) : undefined
+    if (ok) message.success(t('player.refreshed'))
   } finally {
     manualRefreshing.value = false
   }
@@ -202,127 +221,183 @@ async function manualRefresh() {
 </script>
 
 <template>
-  <div class="h-full flex flex-col lg:flex-row min-h-0 overflow-y-auto lg:overflow-hidden">
-    <!-- 播放区 -->
-    <div class="flex-1 min-w-0 flex flex-col p-5 gap-3.5">
-      <div class="flex items-center gap-3 shrink-0">
-        <button class="flex items-center gap-1.5 text-[12.5px] text-ink2 hover:text-ink1 transition-colors" @click="router.back()">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M15 6l-6 6 6 6"/></svg>
-          {{ t('player.back') }}
-        </button>
-      </div>
-
-      <div class="flex-1 min-h-0 rounded-2xl overflow-hidden bg-black relative shadow-card">
-        <HlsPlayer v-if="m3u8" ref="playerRef" :src="m3u8" autoplay @fatal="(m) => (errorMsg = m)" @url-dead="onUrlDead" />
-        <div v-else class="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-gray-900/95">
-          <template v-if="loading">
-            <n-skeleton class="!w-24 !h-3 rounded" :sharp="false" />
-            <n-skeleton class="!w-40 !h-3 rounded" :sharp="false" />
-            <span class="text-[12.5px] text-ink3">{{ t('player.loading') }}</span>
-          </template>
-          <template v-else-if="needPw">
-            <div class="text-3xl">🔒</div>
-            <p class="text-[13px] text-gray-200">{{ t('player.pwRoom') }}</p>
-            <div class="flex gap-2">
-              <n-input v-model:value="pwdInput" type="password" :placeholder="t('player.pwPh')" class="!w-52" @keyup.enter="submitPwd" />
-              <n-button type="primary" @click="submitPwd">{{ t('player.pwEnter') }}</n-button>
-            </div>
-          </template>
-          <template v-else>
-            <div class="text-3xl">📡</div>
-            <p class="text-[13px] text-ink3 max-w-[320px] text-center leading-relaxed">{{ errorMsg || t('player.offline') }}</p>
-            <div class="flex gap-2">
-              <n-button size="small" secondary @click="router.back()">{{ t('player.backExplore') }}</n-button>
-              <n-button size="small" type="primary" @click="loadPlay(pwdInput, true)">{{ t('player.retry') }}</n-button>
-            </div>
-          </template>
-        </div>
-      </div>
-
-      <!-- 控制条 -->
-      <div class="shrink-0 flex items-center gap-3 px-5 py-3.5 rounded-2xl bg-card border border-gray-200/70 shadow-card">
-        <span class="text-[12px] text-ink2">{{ t('player.quality') }}</span>
-        <n-select
-          size="small"
-          class="!w-36"
-          :value="quality"
-          :options="levelOptions"
-          :disabled="activeLine !== 0"
-          @update:value="switchQuality"
-        />
-        <span v-if="activeLine !== 0" class="text-[11.5px] text-ink3">{{ t('player.lineAuto') }}</span>
-        <div class="flex-1"></div>
-        <n-button size="small" secondary type="primary" round :disabled="manualRefreshing" @click="manualRefresh" class="!w-[72px]">
-          <span class="inline-flex items-center justify-center gap-1"><SpinIcon v-if="manualRefreshing" :size="12" />{{ t('player.refresh') }}</span>
-        </n-button>
-        <n-button size="small" round :secondary="following" :type="following ? 'default' : 'primary'" @click="toggleFollow">
-          {{ following ? t('player.unfollow') : t('player.follow') }}
-        </n-button>
-        <n-button size="small" round type="error" :secondary="!recording" @click="toggleRecord">
-          {{ recording ? t('player.stopRec') : tags?.liveType === 'rec' ? t('player.dlVod') : t('player.startRec') }}
-        </n-button>
-      </div>
+  <div class="h-full min-h-0 flex flex-col p-5 gap-3 overflow-y-auto">
+    <!-- ① 顶部工具行 -->
+    <div class="flex items-center gap-3 shrink-0">
+      <button class="flex items-center gap-1.5 text-[12.5px] text-ink2 hover:text-ink1 transition-colors" @click="router.back()">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M15 6l-6 6 6 6"/></svg>
+        {{ t('player.back') }}
+      </button>
+      <div class="flex-1"></div>
+      <span
+        class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold"
+        :class="errorMsg ? 'bg-[#f0a020]/[0.14] text-[#d98a08]' : 'bg-[#61666d]/10 text-ink2'"
+      >{{ errorMsg ? t('player.srcDead') : t('player.srcOk') }}</span>
     </div>
 
-    <!-- 信息侧栏 -->
-    <aside class="w-full lg:w-[316px] shrink-0 p-5 lg:pl-0 flex flex-col gap-4 overflow-y-auto">
-      <div class="rounded-2xl bg-card border border-gray-200/70 shadow-card overflow-hidden">
-        <img v-if="thumb" :src="thumb" class="w-full aspect-video object-cover" referrerpolicy="no-referrer" />
-        <div class="p-4 space-y-3">
-          <div class="flex items-center gap-3">
-            <img v-if="userImg" :src="userImg" class="w-11 h-11 rounded-full object-cover ring-2 ring-gray-100" referrerpolicy="no-referrer" />
-            <div class="w-11 h-11 rounded-full bg-fill grid place-items-center text-xl text-ink3" v-else>{{ nick.slice(0, 1) }}</div>
-            <div class="min-w-0 flex-1">
-              <div class="text-[14.5px] font-bold text-ink1 truncate">{{ nick }}</div>
-              <div class="text-[11.5px] text-ink3 truncate">@{{ userId }}</div>
-            </div>
-            <span v-if="viewers" class="flex items-center gap-1 text-[12px] text-ink2">
-              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5c-5 0-9 3.5-10.5 7C3 15.5 7 19 12 19s9-3.5 10.5-7C21 8.5 17 5 12 5zm0 11.5a4.5 4.5 0 110-9 4.5 4.5 0 010 9zm0-7.5a3 3 0 100 6 3 3 0 000-6z"/></svg>
-              {{ viewers }}
+    <div class="flex-1 min-h-0 flex gap-4">
+      <!-- ② 舞台列 -->
+      <div class="flex-1 min-w-0 flex flex-col gap-3">
+        <!-- 播放器黑卡(限高 + 角标) -->
+        <div class="relative flex-1 min-h-[260px] rounded-2xl overflow-hidden bg-black shadow-card">
+          <HlsPlayer v-if="m3u8" ref="playerRef" :src="m3u8" autoplay class="absolute inset-0" @fatal="(m) => (errorMsg = m)" @url-dead="onUrlDead" />
+          <!-- 角标: 状态 + 观看数 -->
+          <div v-if="m3u8" class="absolute top-3 left-3 flex gap-1.5 pointer-events-none">
+            <span class="inline-flex items-center gap-1 px-2 py-[3px] rounded bg-live text-[11px] font-bold text-white shadow-sm">
+              <span class="w-1.5 h-1.5 rounded-full bg-white animate-breathe"></span>{{ isVod ? t('account.tagRec') : t('card.live') }}
+            </span>
+            <span v-if="recording" class="inline-flex items-center gap-1 px-2 py-[3px] rounded bg-black/60 text-[11px] font-bold text-white">
+              <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-breathe"></span>REC
             </span>
           </div>
-          <div class="flex flex-wrap gap-1.5">
-            <n-tag v-if="tags?.liveType === 'rec'" size="small" :bordered="false" type="warning">{{ t('account.tagRec') }}</n-tag>
-            <n-tag v-if="tags?.isPw" size="small" :bordered="false" type="info">{{ t('account.tagPw') }}</n-tag>
-            <n-tag v-if="tags?.isAdult" size="small" :bordered="false" type="error">19+</n-tag>
-            <n-tag v-if="tags?.type === 'fan'" size="small" :bordered="false" type="warning">{{ t('account.tagFan') }}</n-tag>
+          <div v-if="m3u8 && viewers" class="absolute top-3 right-3 inline-flex items-center gap-1 px-2 py-[3px] rounded bg-black/50 text-[11px] text-white tabular-nums">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5c-5 0-9 3.5-10.5 7C3 15.5 7 19 12 19s9-3.5 10.5-7C21 8.5 17 5 12 5zm0 11.5a4.5 4.5 0 110-9 4.5 4.5 0 010 9zm0-7.5a3 3 0 100 6 3 3 0 000-6z"/></svg>
+            {{ viewers }}
           </div>
-          <p class="text-[12.5px] text-ink2 leading-relaxed break-words">{{ title || '—' }}</p>
-          <div class="text-[11.5px] text-ink3" v-if="anchor?.startTime || discoveryItem?.startTime">
-            {{ t('player.liveSince', { t: (anchor?.startTime || discoveryItem?.startTime || '').slice(5, 16) }) }}
+          <!-- 非播放态: 加载/密码房/错误 遮罩 -->
+          <div v-if="!m3u8" class="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-gray-900/95">
+            <template v-if="loading">
+              <n-skeleton class="!w-24 !h-3 rounded" :sharp="false" />
+              <n-skeleton class="!w-40 !h-3 rounded" :sharp="false" />
+              <span class="text-[12.5px] text-gray-400">{{ t('player.loading') }}</span>
+            </template>
+            <template v-else-if="needPw">
+              <div class="text-3xl">🔒</div>
+              <p class="text-[13px] text-gray-200">{{ t('player.pwRoom') }}</p>
+              <div class="flex gap-2">
+                <n-input v-model:value="pwdInput" type="password" :placeholder="t('player.pwPh')" class="!w-52" @keyup.enter="submitPwd" />
+                <n-button type="primary" @click="submitPwd">{{ t('player.pwEnter') }}</n-button>
+              </div>
+            </template>
+            <template v-else>
+              <div class="text-3xl">📡</div>
+              <p class="text-[13px] text-gray-400 max-w-[320px] text-center leading-relaxed">{{ errorMsg || t('player.offline') }}</p>
+              <div class="flex gap-2">
+                <n-button size="small" secondary @click="router.back()">{{ t('player.backExplore') }}</n-button>
+                <n-button size="small" type="primary" @click="loadPlay(pwdInput, true)">{{ t('player.retry') }}</n-button>
+              </div>
+            </template>
           </div>
         </div>
-      </div>
-      <!-- 当前源链接(单行截断 + 复制, 附上次失效记录) -->
-      <div class="rounded-2xl bg-card border border-gray-200/70 shadow-card p-4 space-y-1.5">
-        <div class="flex items-center justify-between">
-          <span class="text-[12.5px] font-semibold text-ink1">{{ t('player.curSource') }}</span>
-          <n-button size="tiny" tertiary round @click="copyUrl" :disabled="!m3u8">{{ t('player.copy') }}</n-button>
+
+        <!-- ③ 标题 + 元信息 -->
+        <div class="shrink-0">
+          <h1 class="text-[17px] font-extrabold text-ink1 leading-snug tracking-tight clamp-2" :title="title">{{ title || t('card.roomOf', { nick }) }}</h1>
+          <div class="flex items-center gap-2 mt-1.5 flex-wrap">
+            <span v-if="isVod" class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#f0a020]/[0.14] text-[#d98a08]">{{ t('account.tagRec') }}</span>
+            <span v-if="tags?.isPw" class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-sky-500/10 text-sky-600">{{ t('account.tagPw') }}</span>
+            <span v-if="tags?.isAdult" class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-red-500/10 text-red-500">19+</span>
+            <span v-if="tags?.type === 'fan'" class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-violet-500/10 text-violet-600">{{ t('account.tagFan') }}</span>
+            <span v-if="sinceText" class="text-[12px] text-ink3">{{ sinceText }}</span>
+            <template v-if="viewers">
+              <span class="text-[12px] text-ink3">·</span>
+              <span class="text-[12px] text-ink3 flex items-center gap-1 tabular-nums">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5c-5 0-9 3.5-10.5 7C3 15.5 7 19 12 19s9-3.5 10.5-7C21 8.5 17 5 12 5zm0 11.5a4.5 4.5 0 110-9 4.5 4.5 0 010 9zm0-7.5a3 3 0 100 6 3 3 0 000-6z"/></svg>
+                {{ viewers }}
+              </span>
+            </template>
+          </div>
         </div>
-        <p class="text-[11px] text-ink2 font-mono truncate" :title="m3u8">
-          {{ m3u8 ? shortUrl(m3u8) + ' · ' + (activeLine === 0 ? levelOptions[quality]?.label || '' : t('player.lineTag')) : t('player.noSource') }}
-        </p>
-        <!-- 线路切换: 主线 + hls2/hls3 备用(master 地址, hls.js 自动选档) -->
-        <div v-if="backups.length" class="flex items-center gap-1.5 pt-1.5">
-          <span class="text-[11px] text-ink3 shrink-0">{{ t('player.line') }}</span>
+
+        <!-- ④ 控制条: 清晰度直选 + 线路直选 + 操作 -->
+        <div class="shrink-0 flex items-center gap-3 px-3.5 py-2.5 rounded-xl bg-card shadow-card flex-wrap">
+          <span class="text-[11px] text-ink3">{{ t('player.quality') }}</span>
+          <div class="inline-flex bg-fill rounded-lg p-0.5 gap-px" :class="activeLine !== 0 ? 'opacity-50 pointer-events-none' : ''">
+            <button
+              v-for="opt in levelOptions"
+              :key="opt.value"
+              class="px-2.5 py-1 rounded-md text-[12px] transition-colors tabular-nums"
+              :class="quality === opt.value ? 'bg-card text-ink1 font-semibold shadow-card' : 'text-ink2 hover:text-ink1'"
+              @click="switchQuality(opt.value)"
+            >{{ opt.label }}</button>
+          </div>
+          <span v-if="activeLine !== 0" class="text-[11.5px] text-ink3">{{ t('player.lineAuto') }}</span>
+          <template v-if="backups.length">
+            <span class="w-px h-5 bg-line/70"></span>
+            <span class="text-[11px] text-ink3">{{ t('player.line') }}</span>
+            <div class="inline-flex bg-fill rounded-lg p-0.5 gap-px">
+              <button
+                v-for="i in backups.length + 1"
+                :key="i"
+                class="px-2.5 py-1 rounded-md text-[12px] transition-colors"
+                :class="activeLine === i - 1 ? 'bg-card text-ink1 font-semibold shadow-card' : 'text-ink2 hover:text-ink1'"
+                @click="switchLine(i - 1)"
+              >{{ i === 1 ? t('player.lineMain') : t('player.lineBak', { n: i - 1 }) }}</button>
+            </div>
+          </template>
+          <div class="flex-1"></div>
+          <n-button size="small" secondary type="primary" round :disabled="manualRefreshing" @click="manualRefresh" class="!w-[72px]">
+            <span class="inline-flex items-center justify-center gap-1"><SpinIcon v-if="manualRefreshing" :size="12" />{{ t('player.refresh') }}</span>
+          </n-button>
+          <n-button size="small" round :secondary="following" :type="following ? 'default' : 'primary'" @click="toggleFollow">
+            {{ following ? t('player.unfollow') : t('player.follow') }}
+          </n-button>
+          <n-button v-if="!isVod" size="small" round type="error" :secondary="!recording" @click="toggleRecord">
+            {{ recording ? t('player.stopRec') : t('player.startRec') }}
+          </n-button>
           <button
-            v-for="i in backups.length + 1"
-            :key="i"
-            class="px-2 py-0.5 rounded text-[11px] transition-colors"
-            :class="activeLine === i - 1
-              ? 'bg-live/10 text-live font-semibold'
-              : 'text-ink3 hover:text-ink1 bg-fill hover:bg-fillh'"
-            @click="switchLine(i - 1)"
-          >{{ i === 1 ? t('player.lineMain') : t('player.lineBak', { n: i - 1 }) }}</button>
+            v-else
+            class="h-[30px] px-4 rounded-full text-[12.5px] font-semibold text-white bg-[#f0a020] hover:bg-[#d98a08] active:scale-[0.97] transition-all"
+            @click="toggleRecord"
+          >{{ recording ? t('player.stopRec') : t('player.dlVod') }}</button>
         </div>
-        <p v-if="lastFailedUrl" class="text-[10.5px] text-ink3/80 font-mono truncate" :title="lastFailedUrl">
-          {{ t('player.lastFailed') }}{{ shortUrl(lastFailedUrl) }}
-        </p>
       </div>
 
-      <div class="rounded-2xl bg-live/5 border border-live/15 p-4 text-[12px] text-live/80 leading-relaxed">
-        {{ t('player.tips') }}
-      </div>
-    </aside>
+      <!-- ⑤ 侧栏(300px) -->
+      <aside class="w-[300px] shrink-0 flex flex-col gap-3 overflow-y-auto">
+        <!-- 主播卡 -->
+        <div class="bg-card rounded-xl shadow-card overflow-hidden">
+          <img v-if="thumb" :src="thumb" class="w-full aspect-video object-cover" referrerpolicy="no-referrer" />
+          <div class="flex items-center gap-2.5 px-3.5 pt-3 pb-2.5">
+            <img v-if="userImg" :src="userImg" class="w-[42px] h-[42px] rounded-full object-cover shrink-0" referrerpolicy="no-referrer" />
+            <div v-else class="w-[42px] h-[42px] rounded-full bg-fill grid place-items-center text-lg text-ink3 font-bold shrink-0">{{ nick.slice(0, 1) }}</div>
+            <div class="min-w-0 flex-1">
+              <div class="text-[14px] font-bold text-ink1 truncate">{{ nick }}</div>
+              <div class="text-[11px] text-ink3 truncate">@{{ userId }}</div>
+            </div>
+          </div>
+          <div class="px-3.5 pb-3">
+            <div class="flex items-center justify-between text-[11.5px] py-1.5">
+              <span class="text-ink3">{{ t('player.viewers') }}</span>
+              <span class="text-ink1 font-medium tabular-nums">{{ viewers || '—' }}</span>
+            </div>
+            <div class="flex items-center justify-between text-[11.5px] py-1.5 border-t border-line/50">
+              <span class="text-ink3">{{ t('player.liveDur') }}</span>
+              <span class="text-ink1 font-medium tabular-nums">{{ liveDuration || '—' }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 播放源卡 -->
+        <div class="bg-card rounded-xl shadow-card overflow-hidden">
+          <div class="flex items-center justify-between px-3.5 pt-3 pb-2">
+            <span class="text-[12.5px] font-bold text-ink1">{{ t('player.curSource') }}</span>
+            <button class="text-[11px] text-ink3 hover:text-live hover:bg-live/10 rounded px-1.5 py-0.5 transition-colors" @click="copyUrl">{{ t('player.copy') }}</button>
+          </div>
+          <div class="px-3.5 pb-3">
+            <div class="flex items-center gap-2 bg-fill rounded-lg px-2.5 py-[7px]">
+              <span class="flex-1 min-w-0 truncate font-mono text-[11px] text-ink2" :title="m3u8">{{ m3u8 ? shortUrl(m3u8) : t('player.noSource') }}</span>
+            </div>
+            <div class="flex items-center justify-between text-[11.5px] py-1.5 mt-1">
+              <span class="text-ink3">{{ t('player.line') }}</span>
+              <span class="text-ink1 font-medium">{{ activeLine === 0 ? t('player.lineMain') : t('player.lineBak', { n: activeLine }) }}</span>
+            </div>
+            <div class="flex items-center justify-between text-[11.5px] py-1.5 border-t border-line/50">
+              <span class="text-ink3">{{ t('player.quality') }}</span>
+              <span class="text-ink1 font-medium tabular-nums">{{ activeLine === 0 ? (levelOptions[quality]?.label || '—') : t('player.lineAuto') }}</span>
+            </div>
+            <div v-if="lastFailedUrl" class="flex items-center justify-between text-[11.5px] py-1.5 border-t border-line/50">
+              <span class="text-ink3">{{ t('player.lastFailed').trim() }}</span>
+              <span class="text-ink3/80 font-mono truncate max-w-[170px]" :title="lastFailedUrl">{{ shortUrl(lastFailedUrl) }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 提示卡(弱化) -->
+        <div class="rounded-xl bg-live/5 p-3.5 text-[11.5px] text-live/80 leading-relaxed">
+          {{ t('player.tips') }}
+        </div>
+      </aside>
+    </div>
   </div>
 </template>

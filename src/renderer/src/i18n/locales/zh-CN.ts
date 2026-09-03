@@ -138,6 +138,10 @@ export default {
     playFail: '获取直播流失败: ',
     noPlay: '无法播放',
     liveSince: '开播于 {t}',
+    srcOk: '源状态 · 正常',
+    srcDead: '源状态 · 失效',
+    viewers: '观众',
+    liveDur: '开播时长',
     tips: '播放源失效后会提示你手动获取; 卡顿可点左侧"刷新"立即换源。密码房录制会使用本次输入的密码。'
   },
   rec: {
@@ -286,7 +290,7 @@ export default {
     appearance: '外观',
     appearanceDesc: '主题立即生效并随设置保存持久化',
     lightTheme: '亮色主题',
-    lightDesc: '默认 · B 站风浅色',
+    lightDesc: '默认 · 清爽浅色',
     darkTheme: '深色主题',
     darkDesc: '护眼暗色 · 全控件适配',
     language: '语言',

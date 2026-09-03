@@ -136,6 +136,10 @@ export default {
     playFail: 'Failed to get stream: ',
     noPlay: 'Unable to play',
     liveSince: 'On air since {t}',
+    srcOk: 'Source · OK',
+    srcDead: 'Source · dead',
+    viewers: 'Viewers',
+    liveDur: 'On-air time',
     tips: 'You will be prompted to fetch manually when the source expires; use "Refresh" on the left to re-source instantly. Room recording uses the password entered this time.'
   },
   rec: {
@@ -284,7 +288,7 @@ export default {
     appearance: 'Appearance',
     appearanceDesc: 'Theme applies instantly and persists',
     lightTheme: 'Light',
-    lightDesc: 'Default · Bilibili-style',
+    lightDesc: 'Default · clean light',
     darkTheme: 'Dark',
     darkDesc: 'VSCode Dark Modern style',
     language: 'Language',
