@@ -1,133 +1,77 @@
-# PandaLive Monitor (pd-monitor)
+# PandaLive Monitor
 
-[English](./README_EN.md) | 中文
+> pandalive.co.kr 直播 **监控 / 观看 / 录制 / 回放** 一体化 Windows 桌面客户端
 
-> pandalive.co.kr 直播监控 / 观看 / 录制 一体化 Windows 桌面应用
+[![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows-00a1d6)]()
+[![Electron](https://img.shields.io/badge/electron-33-47848f)]()
+[![Vue](https://img.shields.io/badge/vue-3-42b883)]()
+[![Release](https://img.shields.io/github/v/release/Joftal/pd-monitor)](https://github.com/Joftal/pd-monitor/releases)
 
-基于 **Electron + Vue 3** 的 B 站风亮色桌面客户端。聚合平台全部在播直播间，一键观看、一键录制、长期监控心仪主播。
-
-![License](https://img.shields.io/badge/license-MIT-blue)
-![Platform](https://img.shields.io/badge/platform-Windows-00a1d6)
-![Electron](https://img.shields.io/badge/electron-v33-47848f)
-![Vue](https://img.shields.io/badge/vue-3.x-42b883)
+基于 **Electron + Vue 3**，B 站风亮色界面。聚合全站在播直播间，一键观看、一键录制、长期监控心仪主播；录制产物支持应用内回看与无损合并。
 
 ---
 
 ## ✨ 功能特性
 
 ### 🏠 直播大厅
-- 聚合平台**全量在播直播间**（每页 20 个，分页浏览）
-- 多维排序：人气最高 / 点赞最多 / 粉丝团最多 / 最新开播 / 只看已关注 / 仅看 19+
-- 卡片信息：封面、标题、标签（密码/回放/粉丝团/19+）、头像、主播ID、**观众数 · 点赞数 · 粉丝团数 · 直播时长**
-- 一键进入播放 / 一键关注 / 一键录制 / 全局搜索
-- 状态栏实时显示上次/预计下次更新时间
+全站在播聚合（分页浏览）· 人气 / 点赞 / 粉丝团 / 最新 多维排序 · 搜索与 19+ 筛选 · 卡片含观众、点赞、粉丝团、开播时长
 
-### ❤️ 已关注
-- 关注列表分"直播中 / 离线"两个 Tab，各自独立分页（与大厅同款分页栏）
-- 开播提醒（系统通知 + 提示音）、开播自动录制（按主播独立开关）
-- **开播预取直播源**：监到开播即后台节流备好源，点进房间零等待（可关）
-- 粘贴直播间链接或输入主播 ID 即可关注；大厅里关注过的主播即时点亮
+### ❤️ 关注监控
+开播提醒（系统通知 + 提示音） · 开播自动录制（按主播开关） · **开播预取直播源**（进房零等待） · 链接粘贴即关注
 
 ### ▶️ 观看
-- 内置 HLS 播放器（hls.js），清晰度按 IVS 分档直连切换
-- 密码房密码输入、19+/粉丝团权限房（凭登录态解锁）
-- **播放源采用长效变体地址**（避开 10 分钟过期 master)；失效时给出手动重试入口，绝不后台私自重拉
-- **主线 + 备用线路（hls2/hls3）一键切换**：主线卡顿时手动换线，备用线路由 hls.js 自动选档
-- 当前播放源链接卡片：单行截断展示 + 一键复制 + 上次失效记录
+内置 HLS 播放器（hls.js） · 清晰度按 IVS 分档切换 · **主线 / 备用线路（hls2/hls3）一键切换** · 密码房 / 19+ / 粉丝团权限房支持
+播放源采用**长效变体地址**（绕开 10 分钟过期 master），失效给手动重试入口，绝不后台私自重拉
 
 ### ⏺ 录制
-- 内置 ffmpeg，零外部依赖；TS 分段录制（时长可配）→ 完成自动无损 remux MP4
-- **可选分段合并**：收尾自动无损合并为单个 MP4（合并后是否删分段由开关控制，合并失败永远保留原分段）；历史任务可随时手动合并（幂等）
-- **应用内回看**：历史记录一键播放本地 MP4（`plocal://` 白名单协议，多分段列表切换），不用跳外部播放器
-- 录制直接用长效变体地址，一路长跑；ffmpeg 异常退出或 60 秒字节零增长自动记错并提示，不擅自换源
-- 任务管理（实时时长/大小）、历史记录（上限 500 条）、磁盘阈值保护、退出优雅停止
+内置 ffmpeg 零外部依赖 · TS 分段 → 自动无损 remux MP4 · 可选**合并为单文件**（历史任务亦可手动合并）
+60s 停滞检测 + 磁盘阈值保护 + 退出优雅停止 · **应用内回看**（plocal 协议，多分段切换）
 
 ### 📼 回放（VOD）
-- 大厅 `[回放]` 房间可直接进播放页观看（进度条可拖）；点「下载回放」走录制管线单文件落盘
-- 回放流地址采用**宽口径解析 + 原始响应落日志**的可校准设计；若遇到解析失败，请附 `data/logs/` 当日日志反馈
-
-### 🧾 运行日志
-- 风控识别 / 熔断 / 录制事件 / 回放解析失败均落盘 `data/logs/`（按日切分，保留 14 天）
-- 设置页一键打开日志目录；日志可能含临时签名 URL，仅本机留存，分享前请留意
+`[回放]` 房间可直接观看（进度条可拖） · 一键下载为单文件 · 下载进度与估算全长实时可见
 
 ### 🔐 账号
-- 三种登录方式：账号密码 / 内置官网登录窗（**事件驱动、零轮询**) / **Cookie 导入**（防自动登录拦截时的终极方案）
-- 登录态经官方 `login_info` 校验，假登录自动识别回滚；成人认证状态直接显示
-- Cookie 经 **Windows DPAPI 加密** 持久化，仅保存在本机数据目录
+三种登录：账号密码 / 内置官网登录窗（事件驱动零轮询） / **Cookie 导入** · 官方 `login_info` 校验，假登录自动识别回滚 · Cookie 经 **Windows DPAPI 加密** 存储 · 成人认证状态直接显示
 
-### 🛡️ 防风控设计
-- 列表模式每轮仅 1~5 个请求：拉全站列表**本地匹配**，请求量与关注数无关
-- 全局限速队列（间隔 + 随机抖动）、风控特征识别、熔断指数退避并通知
-- 平台列表不可见的房间（19+/隐藏）使用**限量兜底复查**（紧急档 + 轮换档）
-- **源拉取 100% 用户意图驱动**：进房/开录才取，缓存无限期复用，仅 重开播/录制出错/换号/手动强刷 四种事件作废
-- 请求头注入等效 Header Editor 插件（流域名自动带 Origin/Referer)
+### 🛡️ 工程化设计
+全局限速队列 + 随机抖动 · 风控特征识别 + 熔断指数退避 · 列表模式本地匹配（请求量与关注数无关）
+源拉取 100% 用户意图驱动 · 运行日志落盘（`data/logs/`，按日切分） · 设置内置**检查更新**
 
 ---
 
-## 📦 安装使用
+## 📦 下载安装
 
-到 [Releases](../../releases) 下载：
+到 [Releases](https://github.com/Joftal/pd-monitor/releases) 下载：
 
 | 文件 | 说明 |
 |---|---|
 | `PandaLive Monitor-Setup-x.x.x.exe` | NSIS 安装包（创建桌面快捷方式） |
 | `PandaLive Monitor-Portable-x.x.x.exe` | 便携版，解压即用，数据随程序目录走 |
 
-**应用数据位置**(全部在程序所在目录下，不写系统盘，随文件夹整体迁移）:
+**数据位置**（全部在程序目录下，不写系统盘，文件夹整体迁移即可）：
+`data/`（关注 · 设置 · 历史 · 日志 · 加密 Cookie） + `recording/`（录制产物，可在设置中更改）
 
-| 目录 | 内容 |
-|---|---|
-| `data/` | `db.json` 关注/设置/历史 + `vault.dat` 加密 Cookie |
-| `data/logs/` | 运行日志（按日切分，保留 14 天） |
-| `recording/` | 录制产物（默认位置，可在设置中改自定义目录） |
+**快速上手**：账号 → 登录（推荐 Cookie 导入） → 大厅浏览/搜索 → 点封面观看，心形关注，⏺ 录制。
 
-## 🚀 快速上手
-
-1. **账号 → 登录**（推荐 Cookie 导入，三步 30 秒）
-2. **直播大厅**：浏览 / 搜索 / 排序，点封面直接看直播
-3. 心形按钮关注喜欢的主播 → **已关注** 页持续监控
-4. ⏺ 按钮随时开录（或在关注卡菜单里开"开播自动录制"）
+---
 
 ## 🛠️ 构建开发
 
 ```bash
-npm install            # 安装依赖(若 npm 拦截 postinstall: node node_modules/{electron,esbuild,ffmpeg-static}/install.js 逐个执行)
+npm install            # 若 npm 拦截 postinstall: 逐个执行 node node_modules/{electron,esbuild,ffmpeg-static}/install.js
 npm run dev            # 开发模式(HMR)
 npm run build          # 产物构建(out/)
-npm run pack           # 打包 Windows 安装包 + 便携版 (release/ 目录)
+npm run pack           # 打包 Windows 安装包 + 便携版(release/)
 npm run typecheck      # 双端类型检查
-npm run gen:icon       # 重新生成应用图标(纯 Node 生成, 无依赖)
 ```
 
-E2E 回归脚本（CDP 驱动真实应用，账号经环境变量注入）:
+**发版**：`Actions → Build & Release (Windows)` 填版本号即可——自动把版本号写回 `package.json` 并提交（唯一版本源）、打包并推送 Releases（tag: `v<版本号>`），应用内「检查更新」即读取该 tag。
 
-```bash
-set PD_USER=你的账号 && set PD_PASS=你的密码
-node scripts/e2e-cdp.mjs        # 全链路: 登录→关注→检测→播放→录制→历史
-node scripts/e2e-rec-curve.mjs  # 录制增长曲线
-node scripts/e2e-rec.mjs        # 录制端点直连验证
-```
+**E2E 回归**（CDP 驱动真实应用，账号经环境变量注入）：`scripts/e2e-cdp.mjs` 等。
 
-## 🔄 CI 构建(GitHub Actions)
-
-仓库已配置 **Build & Release (Windows)** 手动触发工作流：`Actions → Build & Release (Windows) → Run workflow` 填写版本号 → 先把该版本号写入 `package.json` 并提交回 main（**版本号唯一事实源 = 仓库 package.json**，应用内显示版本 = CI 输入版本 = 安装包文件名一致），再自动类型检查、打包 NSIS 安装包 + 便携版，并把产物推到 **Releases** 页面(tag: `v<版本号>`)。
-
-本地手动构建时请先同步版本号：`npm version x.y.z --no-git-tag-version && npm run pack`。
-
-### Windows 本地打包排坑
-
-- **winCodeSign 解压报"客户端没有所需的特权"**: electron-builder 解压 `winCodeSign-2.6.0.7z` 需创建符号链接（仅 mac 签名用），非管理员账户失败。解法：用 7zip 手动排除两个 mac dylib 解压到缓存：
-  ```
-  7za x -y -bd "-x!darwin/10.12/lib/libcrypto.dylib" "-x!darwin/10.12/lib/libssl.dylib" ^
-    -o"%LOCALAPPDATA%/electron-builder/Cache/winCodeSign/winCodeSign-2.6.0" ^
-    "%LOCALAPPDATA%/electron-builder/Cache/winCodeSign/<已下载的任意 .7z>"
-  ```
-  或开启 Windows 开发者模式后重跑打包。
-
-### 技术栈
-Electron 33 · electron-vite · Vue 3 · TypeScript · Naive UI · Tailwind CSS · Pinia · hls.js · ffmpeg-static · electron-builder
-
-### 代码结构
+<details>
+<summary><b>代码结构</b></summary>
 
 ```
 src/
@@ -135,26 +79,39 @@ src/
 │  ├─ index.ts            #   入口: 窗口/托盘/流域名 Origin 头注入
 │  ├─ ipc.ts              #   IPC 注册
 │  └─ services/
-│     ├─ pandalive.ts     #   API 客户端: 限速队列 + 风控识别 + Chromium/Node 双请求栈 + 代理 + 源缓存
+│     ├─ pandalive.ts     #   API 客户端: 限速队列 + 风控识别 + 双请求栈 + 代理 + 源缓存
 │     ├─ watcher.ts       #   轮询引擎: 列表模式 + 逐个模式 + 兜底复查 + 熔断退避
-│     ├─ recorder.ts      #   录制引擎: ffmpeg 进程 + 停滞检测 + 分段 + remux
-│     ├─ authWin.ts       #   网页登录窗(事件驱动, 零轮询)
+│     ├─ recorder.ts      #   录制引擎: ffmpeg + 停滞检测 + 分段 + remux + 合并 + VOD
+│     ├─ authWin.ts       #   网页登录窗(事件驱动)
 │     ├─ vault.ts         #   DPAPI 加密 Cookie 保险箱
 │     ├─ store.ts         #   JSON 持久化(关注/设置/历史)
 │     ├─ notify.ts        #   应用内气泡 + 系统通知
-│     ├─ logger.ts        #   运行日志落盘(data/logs, 按日切分, 保留 14 天)
-│     └─ localMedia.ts    #   plocal:// 本地录制回看协议(mp4 白名单 + 手动 Range)
+│     ├─ logger.ts        #   运行日志落盘
+│     └─ localMedia.ts    #   plocal:// 本地录制回看协议
 ├─ preload/index.ts       # contextBridge(window.api)
 ├─ renderer/src/          # Vue3(大厅/已关注/播放/录制/账号/设置)
 └─ shared/types.ts        # 双端数据契约 + IPC 通道
 ```
+</details>
+
+<details>
+<summary><b>Windows 本地打包排坑(winCodeSign 权限)</b></summary>
+
+electron-builder 解压 `winCodeSign-2.6.0.7z` 需创建符号链接（仅 mac 签名用），非管理员账户会报"客户端没有所需的特权"。用 7zip 排除两个 mac dylib 手动解压到缓存，或开启 Windows 开发者模式后重跑：
+
+```
+7za x -y -bd "-x!darwin/10.12/lib/libcrypto.dylib" "-x!darwin/10.12/lib/libssl.dylib" ^
+  -o"%LOCALAPPDATA%/electron-builder/Cache/winCodeSign/winCodeSign-2.6.0" ^
+  "%LOCALAPPDATA%/electron-builder/Cache/winCodeSign/<已下载的任意 .7z>"
+```
+</details>
+
+---
 
 ## ⚠️ 免责声明
 
-- 本项目仅供个人学习研究使用，与 pandalive 官方无任何关联
-- 录制内容请遵守当地法律法规与原平台条款，**勿用于任何商业用途或二次分发**
-- 平台含成人内容分区，请确保你已年满当地法定年龄
+本项目仅供个人学习研究使用，与 pandalive 官方无任何关联。录制内容请遵守当地法律法规与原平台条款，**勿用于任何商业用途或二次分发**。平台含成人内容分区，请确保你已年满当地法定年龄。
 
 ## 📄 License
 
-[MIT](./LICENSE)
+[MIT](./LICENSE) · 制作 [Joftal](https://github.com/Joftal)

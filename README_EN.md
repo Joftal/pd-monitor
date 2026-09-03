@@ -1,158 +1,117 @@
-# PandaLive Monitor (pd-monitor)
+# PandaLive Monitor
 
-[中文](./README.md) | English
+> All-in-one Windows desktop client for pandalive.co.kr: **live monitoring · watching · recording · replay**
 
-> All-in-one Windows desktop app for monitoring / watching / recording pandalive.co.kr live streams
+[![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows-00a1d6)]()
+[![Electron](https://img.shields.io/badge/electron-33-47848f)]()
+[![Vue](https://img.shields.io/badge/vue-3-42b883)]()
+[![Release](https://img.shields.io/github/v/release/Joftal/pd-monitor)](https://github.com/Joftal/pd-monitor/releases)
 
-A Bilibili-inspired light-themed desktop client built with **Electron + Vue 3**. Aggregates every live channel on the platform — watch in one click, record in one click, monitor your favorite streamers around the clock.
-
-![License](https://img.shields.io/badge/license-MIT-blue)
-![Platform](https://img.shields.io/badge/platform-Windows-00a1d6)
-![Electron](https://img.shields.io/badge/electron-v33-47848f)
-![Vue](https://img.shields.io/badge/vue-3.x-42b883)
+Built with **Electron + Vue 3**. Aggregates every live channel on the platform into a clean, Bilibili-style light UI — watch, record, and keep an eye on your favorite streamers; recordings can be replayed in-app and merged losslessly.
 
 ---
 
 ## ✨ Features
 
 ### 🏠 Live Hall
-- Aggregates **all currently-live channels** platform-wide (20 per page, paginated)
-- Sort by: top viewers / most likes / largest fan club / recently started / followed only / 19+ only
-- Card info: thumbnail, title, tags (password / replay / fan-only / 19+), avatar, streamer ID, **viewers · likes · fan club size · on-air duration**
-- One-click watch / follow / record / global search
-- Status bar shows last-refresh and next-scheduled-refresh times
+Site-wide live aggregation (paginated) · sort by viewers / likes / fan club / newest · search & 19+ filters · cards show viewers, likes, fans, air time
 
-### ❤️ Following
-- Two tabs — "Live" and "Offline" — each independently paginated (same pager style as the hall)
-- Go-live notifications (system toast + sound), per-streamer "auto-record on live" toggle
-- **Source pre-warm on go-live**: sources fetched in the background on live detection, so opening a room is instant (toggleable)
-- Follow by pasting a room URL or typing a streamer ID; followed streamers light up instantly in the hall
+### ❤️ Follow & Monitor
+Go-live notifications (system toast + sound) · per-streamer auto-record · **source pre-warm on go-live** (instant playback on entry) · follow by pasting a room URL or ID
 
 ### ▶️ Watching
-- Built-in HLS player (hls.js), quality switch maps directly to IVS variants
-- Password rooms supported; 19+ / fan-club rooms unlocked via your login session
-- **Streams use long-lived variant URLs** (bypasses the 10-minute-expiring master playlist); a dead source shows a manual retry entry — never silently refetched in the background
-- **Main + backup lines (hls2/hls3) one-click switching**: backups use master URLs with hls.js auto quality
-- Current-source card: one-line truncated display + one-click copy + keeps the previously-failed URL visible
+Built-in HLS player (hls.js) · quality switch maps to IVS variants · **main/backup lines (hls2/hls3) one-click switching** · password / 19+ / fan-club rooms supported
+Streams use **long-lived variant URLs** (bypasses the 10-minute master expiry); a dead source shows a manual retry entry — never silently refetched in the background
 
 ### ⏺ Recording
-- Bundled ffmpeg, zero external dependencies; time-sliced TS segments → auto lossless remux to MP4
-- **Optional segment merge**: losslessly merge all segments into a single MP4 on finish (delete-segments toggle; originals always kept on merge failure); history items can also be merged manually (idempotent)
-- **In-app playback**: play local MP4s straight from the history list (`plocal://` whitelisted protocol, multi-segment switching) — no external player needed
-- Recording uses long-lived variant URLs straight through; abnormal ffmpeg exits or 60s of zero byte-growth are flagged with a notification — never silently re-sourced
-- Task manager (live duration/size), history (capped at 500 entries), disk-space guard, graceful shutdown
+Bundled ffmpeg, zero external dependencies · TS segments → auto lossless remux to MP4 · optional **merge into a single file** (plus manual merge for history)
+60s stall detection + disk threshold guard + graceful shutdown · **in-app playback** via a whitelisted `plocal://` protocol with multi-segment switching
 
 ### 📼 Replay (VOD)
-- `[Replay]` rooms in the hall can be watched directly in the player (seekable); "Download Replay" saves a single file via the recording pipeline
-- Replay URL extraction uses **broad parsing + raw-response logging** for field calibration; if parsing fails, please attach that day's log from `data/logs/` when reporting
-
-### 🧾 Runtime Logs
-- Risk-control hits / circuit breaker / recording events / replay-parse failures are written to `data/logs/` (daily files, kept 14 days)
-- Log folder opens from the settings page; logs may contain short-lived signed URLs — kept locally only, review before sharing
+`[Replay]` rooms play directly (seekable progress bar) · one-click single-file download · live progress with estimated total duration
 
 ### 🔐 Account
-- Three login methods: ID+password / embedded official web login window (**event-driven, zero polling**) / **cookie import** (bulletproof fallback against anti-bot challenges)
-- Sessions verified via the official `login_info` endpoint; fake logins are detected and rolled back; adult-verification status shown directly
-- Cookies persisted with **Windows DPAPI encryption**, stored only in the app's local data directory
+Three login methods: password / embedded official web login (event-driven, zero polling) / **cookie import** · sessions verified via official `login_info` — fake logins are rolled back · cookies persisted with **Windows DPAPI encryption** · adult-verification status shown
 
-### 🛡️ Anti-rate-limit design
-- List mode issues only 1–5 requests per round: pulls the site-wide list and **matches locally**, so request count is independent of how many streamers you follow
-- Global rate-limit queue (interval + random jitter), risk signature detection, circuit breaker with exponential backoff and notification
-- Rooms invisible to the public list (19+/hidden) get **bounded fallback rechecks** (urgent tier + rotating tier)
-- **Stream fetching is 100% user-intent driven**: fetched only on entering a room or starting a recording, cached indefinitely, invalidated only by re-broadcast / recording error / account change / manual refresh
-- Request-header injection equivalent to the Header Editor extension (stream domains automatically get Origin/Referer)
+### 🛡️ Engineering
+Global rate-limit queue with jitter · risk-signature detection + circuit breaker with exponential backoff · list mode matches locally (request count independent of follow count)
+Stream fetching is 100% user-intent driven · runtime logs on disk (`data/logs/`, daily rotation) · in-app **update check**
 
 ---
 
 ## 📦 Install
 
-Download from [Releases](../../releases):
+Download from [Releases](https://github.com/Joftal/pd-monitor/releases):
 
 | File | Description |
 |---|---|
 | `PandaLive Monitor-Setup-x.x.x.exe` | NSIS installer (desktop shortcut included) |
 | `PandaLive Monitor-Portable-x.x.x.exe` | Portable build — unzip and run; data stays with the app folder |
 
-**App data location** (everything sits next to the executable — nothing on the system drive, move the whole folder anywhere):
+**Data location** (everything sits next to the executable; move the whole folder anywhere):
+`data/` (follows · settings · history · logs · encrypted cookies) + `recording/` (recordings; overridable in settings)
 
-| Directory | Contents |
-|---|---|
-| `data/` | `db.json` follows/settings/history + `vault.dat` encrypted cookies |
-| `data/logs/` | Runtime logs (daily files, kept 14 days) |
-| `recording/` | Recordings (default location; overridable in settings) |
+**Quick start**: Account → Log in (cookie import recommended) → browse/search in the hall → click a cover to watch, heart to follow, ⏺ to record.
 
-## 🚀 Quick start
-
-1. **Account → Log in** (cookie import recommended — 3 steps, 30 seconds)
-2. **Live Hall**: browse / search / sort, click any cover to watch
-3. Tap the heart icon on any streamer → monitor them under **Following**
-4. Hit ⏺ anytime to start recording (or enable "auto-record on live" in the follow card menu)
+---
 
 ## 🛠️ Build from source
 
 ```bash
-npm install            # install deps (if npm blocks postinstall scripts, run: node node_modules/{electron,esbuild,ffmpeg-static}/install.js one by one)
+npm install            # if npm blocks postinstall scripts: node node_modules/{electron,esbuild,ffmpeg-static}/install.js one by one
 npm run dev            # dev mode (HMR)
 npm run build          # bundle output (out/)
-npm run pack           # package Windows installer + portable (release/)
-npm run typecheck      # type-check both processes
-npm run gen:icon       # regenerate the app icon (pure Node, no deps)
+npm run pack           # Windows installer + portable (release/)
+npm run typecheck      # type-check (main + renderer)
 ```
 
-E2E regression scripts (drive the real app over CDP; credentials injected via env vars):
+**Release**: run `Actions → Build & Release (Windows)` with a version number — it writes the version back into `package.json` (single source of truth), packages, and publishes to Releases (tag: `v<version>`); the in-app update check reads that tag.
 
-```bash
-set PD_USER=your_account && set PD_PASS=your_password
-node scripts/e2e-cdp.mjs        # full chain: login → follow → detect → watch → record → history
-node scripts/e2e-rec-curve.mjs  # recording byte-growth curve
-node scripts/e2e-rec.mjs        # direct recording endpoint verification
-```
+**E2E regression** (CDP driving the real app, credentials via env vars): see `scripts/e2e-cdp.mjs`.
 
-## 🔄 CI builds (GitHub Actions)
-
-A **Build & Release (Windows)** manually-triggered workflow is included: `Actions → Build & Release (Windows) → Run workflow`, enter a version number, and it installs dependencies, type-checks, packages the NSIS installer + portable build, and publishes artifacts to **Releases** (tag: `v<version>`).
-
-### Windows local packaging gotcha
-
-- **winCodeSign extraction fails with "client does not have the required privilege"**: electron-builder needs symlink creation when unpacking `winCodeSign-2.6.0.7z` (mac signing only). Workaround — extract manually with 7zip excluding the two mac dylibs:
-  ```
-  7za x -y -bd "-x!darwin/10.12/lib/libcrypto.dylib" "-x!darwin/10.12/lib/libssl.dylib" ^
-    -o"%LOCALAPPDATA%/electron-builder/Cache/winCodeSign/winCodeSign-2.6.0" ^
-    "%LOCALAPPDATA%/electron-builder/Cache/winCodeSign/<any downloaded .7z>"
-  ```
-  or enable Windows Developer Mode and rerun the packaging step.
-
-### Tech stack
-Electron 33 · electron-vite · Vue 3 · TypeScript · Naive UI · Tailwind CSS · Pinia · hls.js · ffmpeg-static · electron-builder
-
-### Code layout
+<details>
+<summary><b>Code structure</b></summary>
 
 ```
 src/
-├─ main/                  # Main process
+├─ main/                  # main process
 │  ├─ index.ts            #   entry: window/tray/stream-domain Origin header injection
-│  ├─ ipc.ts              #   IPC registrations
+│  ├─ ipc.ts              #   IPC registration
 │  └─ services/
-│     ├─ pandalive.ts     #   API client: rate-limited queue + risk detection + Chromium/Node dual stacks + proxy + source cache
-│     ├─ watcher.ts       #   polling engine: list mode + per-anchor mode + fallback recheck + circuit breaker
-│     ├─ recorder.ts      #   recorder: ffmpeg process + stall detection + segments + remux
-│     ├─ authWin.ts       #   web login window (event-driven, zero polling)
+│     ├─ pandalive.ts     #   API client: rate-limit queue + risk detection + dual stacks + proxy + source cache
+│     ├─ watcher.ts       #   polling engine: list mode + per-anchor + fallback recheck + circuit breaker
+│     ├─ recorder.ts      #   recorder: ffmpeg + stall detection + segments + remux + merge + VOD
+│     ├─ authWin.ts       #   web login window (event-driven)
 │     ├─ vault.ts         #   DPAPI-encrypted cookie vault
 │     ├─ store.ts         #   JSON persistence (follows/settings/history)
 │     ├─ notify.ts        #   in-app toasts + system notifications
-│     ├─ logger.ts        #   runtime log files (data/logs, daily rotation, 14-day retention)
-│     └─ localMedia.ts    #   plocal:// local recording playback protocol (mp4 whitelist + manual Range)
+│     ├─ logger.ts        #   runtime log files
+│     └─ localMedia.ts    #   plocal:// local recording playback protocol
 ├─ preload/index.ts       # contextBridge (window.api)
-├─ renderer/src/          # Vue3 (Hall / Following / Player / Recordings / Account / Settings)
-└─ shared/types.ts        # shared contracts + IPC channel names
+├─ renderer/src/          # Vue 3 (hall/following/player/recordings/account/settings)
+└─ shared/types.ts        # shared contracts + IPC channels
 ```
+</details>
+
+<details>
+<summary><b>Windows packaging gotcha (winCodeSign privileges)</b></summary>
+
+electron-builder needs to create symlinks when extracting `winCodeSign-2.6.0.7z` (mac-only signing tools); non-admin accounts fail with a privilege error. Extract manually with 7zip excluding the two mac dylibs into the cache, or enable Windows Developer Mode:
+
+```
+7za x -y -bd "-x!darwin/10.12/lib/libcrypto.dylib" "-x!darwin/10.12/lib/libssl.dylib" ^
+  -o"%LOCALAPPDATA%/electron-builder/Cache/winCodeSign/winCodeSign-2.6.0" ^
+  "%LOCALAPPDATA%/electron-builder/Cache/winCodeSign/<the downloaded .7z>"
+```
+</details>
+
+---
 
 ## ⚠️ Disclaimer
 
-- This project is for personal study and research only; it has no affiliation with pandalive
-- Recordings must comply with your local laws and the platform's terms — **do not use them commercially or redistribute them**
-- The platform contains an adult section; make sure you meet the legal age in your jurisdiction
+For personal study and research only; not affiliated with pandalive in any way. Recorded content is subject to local laws and the platform's terms — **do not use for commercial purposes or redistribution**. The platform contains adult content; ensure you are of legal age in your jurisdiction.
 
 ## 📄 License
 
-[MIT](./LICENSE)
+[MIT](./LICENSE) · Made by [Joftal](https://github.com/Joftal)
