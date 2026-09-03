@@ -201,8 +201,8 @@ const tileCls =
           <div class="bg-card rounded-[14px] shadow-card overflow-hidden">
             <div class="grid grid-cols-2 gap-2.5 px-4 py-3">
               <div
-                class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 cursor-pointer transition-all"
-                :class="form.theme === 'light' ? 'bg-live/[0.12] ring-1 ring-live/40' : 'bg-fill hover:bg-fillh'"
+                class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 cursor-pointer transition-colors"
+                :class="form.theme === 'light' ? 'bg-fill' : 'hover:bg-fill'"
                 @click="applyTheme('light')"
               >
                 <svg class="w-4 h-4 shrink-0" :class="form.theme === 'light' ? 'text-live' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path stroke-linecap="round" d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4l1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
@@ -210,10 +210,16 @@ const tileCls =
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">亮色主题</div>
                   <div class="text-[10.5px] text-ink3">默认 · B 站风浅色</div>
                 </div>
+                <span
+                  class="w-[18px] h-[18px] rounded-full grid place-items-center shrink-0"
+                  :class="form.theme === 'light' ? 'bg-live' : 'border border-line/60'"
+                >
+                  <svg v-if="form.theme === 'light'" class="w-2.5 h-2.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                </span>
               </div>
               <div
-                class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 cursor-pointer transition-all"
-                :class="form.theme === 'dark' ? 'bg-live/[0.12] ring-1 ring-live/40' : 'bg-fill hover:bg-fillh'"
+                class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 cursor-pointer transition-colors"
+                :class="form.theme === 'dark' ? 'bg-fill' : 'hover:bg-fill'"
                 @click="applyTheme('dark')"
               >
                 <svg class="w-4 h-4 shrink-0" :class="form.theme === 'dark' ? 'text-live' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z"/></svg>
@@ -221,6 +227,12 @@ const tileCls =
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">深色主题</div>
                   <div class="text-[10.5px] text-ink3">护眼暗色 · 全控件适配</div>
                 </div>
+                <span
+                  class="w-[18px] h-[18px] rounded-full grid place-items-center shrink-0"
+                  :class="form.theme === 'dark' ? 'bg-live' : 'border border-line/60'"
+                >
+                  <svg v-if="form.theme === 'dark'" class="w-2.5 h-2.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                </span>
               </div>
             </div>
           </div>
