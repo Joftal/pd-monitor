@@ -265,7 +265,6 @@ export default {
     failImport: 'Import failed: ',
     tagPw: 'Pwd room',
     tagRec: 'Replay',
-    tagAdult: '19+',
     tagFan: 'Fan club',
     doorNote: 'Cookies and account data are DPAPI-encrypted and stored only in the local data dir: {dir}'
   },

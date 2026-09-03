@@ -1,5 +1,4 @@
 import { app } from 'electron'
-import { mt } from './i18n'
 import * as fs from 'fs'
 import * as path from 'path'
 
@@ -48,17 +47,6 @@ function migrateLegacyData(target: string): void {
   }
 }
 
-export function sanitizeName(s: string): string {
-  return (
-    s
-      .replace(/[\\/:*?"<>|&#.。,，~!·\s]+/g, '_')
-      .replace(/（/g, '(')
-      .replace(/）/g, ')')
-      .replace(/^_|_$/g, '')
-      .slice(0, 60) || mt('app.unnamed')
-  )
-}
-
 export function tsName(d = new Date()): string {
   const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
@@ -79,10 +67,4 @@ export function diskFreeGb(dir: string): number {
     /* ignore */
   }
   return Number.MAX_SAFE_INTEGER
-}
-
-export function fmtBytes(n: number): string {
-  if (n >= 1024 ** 3) return (n / 1024 ** 3).toFixed(2) + ' GB'
-  if (n >= 1024 ** 2) return (n / 1024 ** 2).toFixed(1) + ' MB'
-  return Math.max(0, Math.round(n / 1024)) + ' KB'
 }

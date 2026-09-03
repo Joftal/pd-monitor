@@ -267,7 +267,6 @@ export default {
     failImport: '导入失败: ',
     tagPw: '密码房',
     tagRec: '回放',
-    tagAdult: '19+',
     tagFan: '粉丝团',
     doorNote: 'Cookie 与账号数据经 Windows DPAPI 加密, 仅保存于本机数据目录: {dir}'
   },

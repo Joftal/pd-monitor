@@ -455,12 +455,10 @@ class PandaApi {
       }
     }
     this.cookieValid = true
-    this.accountIsAdult = info.isAdult
     return { ok: true, message: mt('auth.loginOk') }
   }
 
   /** 官方登录态校验: 返回 isLogin / isAdult(成人认证) 等; 可提供 jar 进行"试验证"(不落地) */
-  accountIsAdult = false
   async checkLoginInfo(jarOverride?: CookieJar): Promise<{ isLogin: boolean; isAdult: boolean; idx: number | null }> {
     try {
       const { text } = await this.rawFetch('POST', '/v1/member/login_info', {}, {}, jarOverride)
@@ -481,7 +479,6 @@ class PandaApi {
     this.clearPlayCache() // 新会话生效: 旧会话签发的源清空重来
     const info = await this.checkLoginInfo()
     this.cookieValid = info.isLogin
-    this.accountIsAdult = info.isAdult
   }
 
   /** 拉一页全站直播列表; 响应带 loginInfo 可校验登录态; adultShowAdModeYN=Y 对认证账号开放 19+ 列表 */
