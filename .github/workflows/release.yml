@@ -37,6 +37,19 @@ jobs:
       - name: Bump version
         run: npm version ${{ inputs.version }} --no-git-tag-version
 
+      # 版本提升提交回仓库: 让 package.json 成为唯一版本源(本地构建与 CI 产物版本一致)
+      # 注意: 不能用 stefanzweifel/git-auto-commit-action —— 它是 Docker action, 仅支持 Linux runner
+      - name: Commit version bump
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: release v${{ inputs.version }}"
+            git push origin HEAD:main
+          fi
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -56,6 +69,7 @@ jobs:
         with:
           tag_name: v${{ inputs.version }}
           name: PandaLive Monitor v${{ inputs.version }}
+          target_commitish: main # 打在主分支最新提交上(含上面的版本提升提交)
           draft: false
           prerelease: false
           generate_release_notes: true

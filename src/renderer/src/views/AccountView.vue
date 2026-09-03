@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { NButton, NInput, NTag, useMessage, NPopconfirm } from 'naive-ui'
 import { api } from '@/api'
 import { useAppStore } from '@/stores/app'
+import SpinIcon from '@/components/SpinIcon.vue'
 
 const store = useAppStore()
 const message = useMessage()
@@ -189,7 +190,9 @@ async function logout() {
           </div>
           <div class="flex items-center justify-between">
             <p class="text-[11.5px] text-ink3">若提示被防自动登录拦截, 请用方式 2 或 3</p>
-            <n-button type="primary" round :loading="loading" @click="loginByPassword" class="!w-24">登录</n-button>
+            <n-button type="primary" round :disabled="loading" @click="loginByPassword" class="!w-24">
+              <span class="inline-flex items-center justify-center gap-1.5"><SpinIcon v-if="loading" />登录</span>
+            </n-button>
           </div>
         </section>
 
@@ -205,7 +208,9 @@ async function logout() {
             </div>
           </div>
           <div class="flex justify-end">
-            <n-button secondary type="info" round :loading="winLoading" @click="loginByWindow" class="!w-[132px]">打开登录窗口</n-button>
+            <n-button secondary type="info" round :disabled="winLoading" @click="loginByWindow" class="!w-[132px]">
+              <span class="inline-flex items-center justify-center gap-1.5"><SpinIcon v-if="winLoading" />打开登录窗口</span>
+            </n-button>
           </div>
         </section>
 
@@ -236,8 +241,8 @@ async function logout() {
             placeholder="sessKey=xxxx; 79b0c6d4…=xxxx; partner=pandatv; ..."
           />
           <div class="flex justify-end">
-            <n-button secondary type="success" round :loading="importLoading" :disabled="!cookieInput.trim()" @click="importCookies" class="!w-[112px]">
-              导入并验证
+            <n-button secondary type="success" round :disabled="!cookieInput.trim() || importLoading" @click="importCookies" class="!w-[112px]">
+              <span class="inline-flex items-center justify-center gap-1.5"><SpinIcon v-if="importLoading" />导入并验证</span>
             </n-button>
           </div>
         </section>

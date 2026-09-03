@@ -2,7 +2,7 @@
   "name": "pandalive-monitor",
   "version": "1.9.4",
   "description": "PandaLive 直播监控 / 观看 / 录制 一体化桌面应用",
-  "author": "kbj",
+  "author": "Joftal",
   "private": true,
   "main": "./out/main/index.js",
   "scripts": {

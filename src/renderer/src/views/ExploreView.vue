@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api'
 import ExploreCard from '@/components/ExploreCard.vue'
+import SpinIcon from '@/components/SpinIcon.vue'
 import { NButton, NEmpty, NPagination, useMessage } from 'naive-ui'
 
 const store = useAppStore()
@@ -106,8 +107,8 @@ async function refresh() {
         </span>
         <div class="flex-1"></div>
         <span class="text-[12px] text-ink3 shrink-0">{{ updateInfo }}</span>
-        <n-button size="small" secondary type="primary" round :loading="refreshing" @click="refresh" class="!w-[76px]">
-          刷新
+        <n-button size="small" secondary type="primary" round :disabled="refreshing" @click="refresh" class="!w-[76px]">
+          <span class="inline-flex items-center justify-center gap-1"><SpinIcon v-if="refreshing" :size="12" />刷新</span>
         </n-button>
       </div>
 

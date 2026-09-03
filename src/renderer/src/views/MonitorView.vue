@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api'
 import AnchorCard from '@/components/AnchorCard.vue'
+import SpinIcon from '@/components/SpinIcon.vue'
 import { NButton, NInput, NModal, NPagination, useMessage, NEmpty, NSwitch } from 'naive-ui'
 
 const store = useAppStore()
@@ -221,7 +222,9 @@ async function setAuto(userId: string, v: boolean) {
         />
         <div class="flex justify-end gap-2 pt-1">
           <n-button @click="showAdd = false">取消</n-button>
-          <n-button type="primary" :loading="addLoading" :disabled="!addInput.trim()" @click="addAnchor" class="!w-[88px]">关注</n-button>
+          <n-button type="primary" :disabled="!addInput.trim() || addLoading" @click="addAnchor" class="!w-[88px]">
+            <span class="inline-flex items-center justify-center gap-1.5"><SpinIcon v-if="addLoading" />关注</span>
+          </n-button>
         </div>
       </div>
     </n-modal>

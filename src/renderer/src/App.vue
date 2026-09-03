@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { NConfigProvider, NMessageProvider, NNotificationProvider, NDialogProvider } from 'naive-ui'
+import { NConfigProvider, NMessageProvider, NNotificationProvider, NDialogProvider, zhCN, dateZhCN } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
 import ToastBridge from '@/components/ToastBridge.vue'
 import TopNav from '@/components/TopNav.vue'
@@ -46,7 +46,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <n-config-provider :theme-overrides="themeOverrides" class="h-full">
+  <n-config-provider :theme-overrides="themeOverrides" :locale="zhCN" :date-locale="dateZhCN" class="h-full">
     <n-message-provider>
       <n-notification-provider placement="bottom-right">
         <n-dialog-provider>
