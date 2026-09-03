@@ -8,7 +8,7 @@
 [![Vue](https://img.shields.io/badge/vue-3-42b883)]()
 [![Release](https://img.shields.io/github/v/release/Joftal/pd-monitor)](https://github.com/Joftal/pd-monitor/releases)
 
-基于 **Electron + Vue 3**，卡片式浅色界面。聚合全站在播直播间，一键观看、一键录制、长期监控心仪主播；录制产物支持应用内回看与无损合并。
+基于 **Electron + Vue 3**，卡片式浅色界面。聚合全站在播直播间，一键观看、一键录制、长期监控心仪主播；录制产物由内置**视频库**统一管理：九宫格缩略图点播、分组索引浏览、无损合并与回收站级删除。
 
 ---
 
@@ -25,8 +25,14 @@
 播放源采用**长效变体地址**（绕开 10 分钟过期 master），失效给手动重试入口，绝不后台私自重拉
 
 ### ⏺ 录制
-内置 ffmpeg 零外部依赖 · TS 分段 → 自动无损 remux MP4 · 可选**合并为单文件**（历史任务亦可手动合并）
-60s 停滞检测 + 磁盘阈值保护 + 退出优雅停止 · **应用内回看**（plocal 协议，多分段切换）
+内置 ffmpeg 零外部依赖 · TS 分段 → 自动无损 remux MP4 · 可选**收尾合并为单文件**
+60s 停滞检测 + 磁盘阈值保护 + 退出优雅停止 · 进行中卡片实时码率（推送差分，零额外请求）
+
+### 🗂️ 视频库
+录制完成的本地视频库：海报卡墙 + **九宫格缩略图**（录完自动从视频均匀抽 9 帧合成，缓存至 `data/thumbs/`，文件变动自动重生成）
+按日期 / 按主播分组 + 左侧索引条（点击跳转 · 跟随高亮 · 固定回顶） + 类型/状态文字角标 + 筛选搜索
+**磨砂玻璃影院浮层**：大屏播放 + 信息面板 + 分段点切（失效段自动跳过）+ 合并单文件 + **删除（文件进系统回收站，可还原；支持单个分段删除）**
+外部删除文件自动对账：删段剔除 · 恢复找回 · 重命名不动条目
 
 ### 📼 回放（VOD）
 `[回放]` 房间可直接观看（进度条可拖） · 一键下载为单文件 · 下载进度与估算全长实时可见
@@ -50,7 +56,7 @@
 | `PandaLive Monitor-Portable-x.x.x.exe` | 便携版，解压即用，数据随程序目录走 |
 
 **数据位置**（全部在程序目录下，不写系统盘，文件夹整体迁移即可）：
-`data/`（关注 · 设置 · 历史 · 日志 · 加密 Cookie） + `recording/`（录制产物，可在设置中更改）
+`data/`（关注 · 设置 · 历史 · 日志 · 加密 Cookie · 九宫格缩略图缓存） + `recording/`（录制产物，可在设置中更改）
 
 **快速上手**：账号 → 登录（推荐 Cookie 导入） → 大厅浏览/搜索 → 点封面观看，心形关注，⏺ 录制。
 
@@ -68,7 +74,6 @@ npm run typecheck      # 双端类型检查
 
 **发版**：`Actions → Build & Release (Windows)` 填版本号即可——自动把版本号写回 `package.json` 并提交（唯一版本源）、打包并推送 Releases（tag: `v<版本号>`），应用内「检查更新」即读取该 tag。
 
-**E2E 回归**（CDP 驱动真实应用，账号经环境变量注入）：`scripts/e2e-cdp.mjs` 等。
 
 <details>
 <summary><b>代码结构</b></summary>
@@ -81,15 +86,18 @@ src/
 │  └─ services/
 │     ├─ pandalive.ts     #   API 客户端: 限速队列 + 风控识别 + 双请求栈 + 代理 + 源缓存
 │     ├─ watcher.ts       #   轮询引擎: 列表模式 + 逐个模式 + 兜底复查 + 熔断退避
-│     ├─ recorder.ts      #   录制引擎: ffmpeg + 停滞检测 + 分段 + remux + 合并 + VOD
+│     ├─ recorder.ts      #   录制引擎: ffmpeg + 停滞检测 + 分段 + remux + 合并 + VOD + 删除(回收站)
+│     ├─ thumbs.ts        #   九宫格缩略图: 采样拼图 + 签名缓存 + 文件集对账 + 孤儿清扫
 │     ├─ authWin.ts       #   网页登录窗(事件驱动)
 │     ├─ vault.ts         #   DPAPI 加密 Cookie 保险箱
 │     ├─ store.ts         #   JSON 持久化(关注/设置/历史)
 │     ├─ notify.ts        #   应用内气泡 + 系统通知
 │     ├─ logger.ts        #   运行日志落盘
-│     └─ localMedia.ts    #   plocal:// 本地录制回看协议
+│     └─ localMedia.ts    #   plocal:// 本地媒体协议(视频 + 缩略图)
 ├─ preload/index.ts       # contextBridge(window.api)
-├─ renderer/src/          # Vue3(大厅/已关注/播放/录制/账号/设置)
+├─ renderer/src/          # Vue3(大厅/已关注/播放/录制/视频库/账号/设置)
+│  ├─ views/LibraryView.vue       # 视频库: 卡墙 + 分组 + 索引条 + 筛选搜索
+│  └─ components/CinemaOverlay.vue # 磨砂影院浮层: 播放 + 合并 + 删除
 └─ shared/types.ts        # 双端数据契约 + IPC 通道
 ```
 </details>

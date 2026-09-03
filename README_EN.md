@@ -8,7 +8,7 @@
 [![Vue](https://img.shields.io/badge/vue-3-42b883)]()
 [![Release](https://img.shields.io/github/v/release/Joftal/pd-monitor)](https://github.com/Joftal/pd-monitor/releases)
 
-Built with **Electron + Vue 3**. Aggregates every live channel on the platform into a clean, card-based light UI — watch, record, and keep an eye on your favorite streamers; recordings can be replayed in-app and merged losslessly.
+Built with **Electron + Vue 3**. Aggregates every live channel on the platform into a clean, card-based light UI — watch, record, and keep an eye on your favorite streamers; recordings are managed in a built-in **video library** with 9-grid thumbnails, grouped browsing with an index bar, and frosted-glass playback with recycle-bin deletion.
 
 ---
 
@@ -25,8 +25,14 @@ Built-in HLS player (hls.js) · quality switch maps to IVS variants · **main/ba
 Streams use **long-lived variant URLs** (bypasses the 10-minute master expiry); a dead source shows a manual retry entry — never silently refetched in the background
 
 ### ⏺ Recording
-Bundled ffmpeg, zero external dependencies · TS segments → auto lossless remux to MP4 · optional **merge into a single file** (plus manual merge for history)
-60s stall detection + disk threshold guard + graceful shutdown · **in-app playback** via a whitelisted `plocal://` protocol with multi-segment switching
+Bundled ffmpeg, zero external dependencies · TS segments → auto lossless remux to MP4 · optional **merge into a single file** on finish
+60s stall detection + disk threshold guard + graceful shutdown · live bitrate on active cards (diffed from task pushes, zero extra requests)
+
+### 🗂️ Video Library
+Local library of finished recordings: poster wall with **9-grid thumbnails** (9 frames sampled per video, cached in `data/thumbs/`, auto-regenerated when files change)
+Group by date / by streamer + left index rail (jump · scroll-spy highlight · pinned back-to-top) + type/status text badges + filters & search
+**Frosted-glass cinema overlay**: big-screen playback + info panel + segment switching (dead segments auto-skipped) + merge to single file + **delete (files go to the system Recycle Bin, restorable; single-segment delete supported)**
+External file changes self-reconcile: deleted segments pruned · restored segments recovered · renamed files never wipe records
 
 ### 📼 Replay (VOD)
 `[Replay]` rooms play directly (seekable progress bar) · one-click single-file download · live progress with estimated total duration
@@ -50,7 +56,7 @@ Download from [Releases](https://github.com/Joftal/pd-monitor/releases):
 | `PandaLive Monitor-Portable-x.x.x.exe` | Portable build — unzip and run; data stays with the app folder |
 
 **Data location** (everything sits next to the executable; move the whole folder anywhere):
-`data/` (follows · settings · history · logs · encrypted cookies) + `recording/` (recordings; overridable in settings)
+`data/` (follows · settings · history · logs · encrypted cookies · thumbnail cache) + `recording/` (recordings; overridable in settings)
 
 **Quick start**: Account → Log in (cookie import recommended) → browse/search in the hall → click a cover to watch, heart to follow, ⏺ to record.
 
@@ -68,7 +74,6 @@ npm run typecheck      # type-check (main + renderer)
 
 **Release**: run `Actions → Build & Release (Windows)` with a version number — it writes the version back into `package.json` (single source of truth), packages, and publishes to Releases (tag: `v<version>`); the in-app update check reads that tag.
 
-**E2E regression** (CDP driving the real app, credentials via env vars): see `scripts/e2e-cdp.mjs`.
 
 <details>
 <summary><b>Code structure</b></summary>
@@ -81,15 +86,18 @@ src/
 │  └─ services/
 │     ├─ pandalive.ts     #   API client: rate-limit queue + risk detection + dual stacks + proxy + source cache
 │     ├─ watcher.ts       #   polling engine: list mode + per-anchor + fallback recheck + circuit breaker
-│     ├─ recorder.ts      #   recorder: ffmpeg + stall detection + segments + remux + merge + VOD
+│     ├─ recorder.ts      #   recorder: ffmpeg + stall detection + segments + remux + merge + VOD + delete (Recycle Bin)
+│     ├─ thumbs.ts        #   9-grid thumbnails: frame sampling + signature cache + file-set reconciliation + orphan sweep
 │     ├─ authWin.ts       #   web login window (event-driven)
 │     ├─ vault.ts         #   DPAPI-encrypted cookie vault
 │     ├─ store.ts         #   JSON persistence (follows/settings/history)
 │     ├─ notify.ts        #   in-app toasts + system notifications
 │     ├─ logger.ts        #   runtime log files
-│     └─ localMedia.ts    #   plocal:// local recording playback protocol
+│     └─ localMedia.ts    #   plocal:// local media protocol (video + thumbnails)
 ├─ preload/index.ts       # contextBridge (window.api)
-├─ renderer/src/          # Vue 3 (hall/following/player/recordings/account/settings)
+├─ renderer/src/          # Vue 3 (hall/following/player/recordings/library/account/settings)
+│  ├─ views/LibraryView.vue       # video library: poster wall + grouping + index rail + filters
+│  └─ components/CinemaOverlay.vue # frosted cinema overlay: playback + merge + delete
 └─ shared/types.ts        # shared contracts + IPC channels
 ```
 </details>
