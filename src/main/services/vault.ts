@@ -3,7 +3,9 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { dataDir } from '../util'
 
-// Cookie 保险箱: safeStorage(Windows DPAPI) 加密落盘; 不可用时降级明文(仅警告)
+// Cookie 保险箱: safeStorage 系统级加密落盘
+//   Windows=DPAPI · macOS=Keychain · Linux=libsecret(gnome-keyring/kwallet,  deb 已装依赖)
+//   无系统密钥环境自动降级明文(仅日志警告, 登录态不丢)
 const FILE = () => path.join(dataDir(), 'vault.dat')
 
 export interface CookieJar {

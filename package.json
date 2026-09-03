@@ -9,10 +9,12 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && vue-tsc --noEmit -p tsconfig.web.json",
-    "gen:icon": "node scripts/gen-icon.mjs",
     "pack": "npm run build && electron-builder --win --x64",
+    "pack:mac": "npm run build && electron-builder --mac --x64 --arm64",
+    "pack:linux": "npm run build && electron-builder --linux --x64",
     "pack:dir": "npm run build && electron-builder --win --x64 --dir",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "build:icon": "node scripts/icon-build.mjs"
   },
   "dependencies": {
     "ffmpeg-static": "^5.2.0",

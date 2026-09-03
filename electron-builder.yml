@@ -28,3 +28,22 @@ nsis:
   artifactName: '${productName}-Setup-${version}.${ext}'
 portable:
   artifactName: '${productName}-Portable-${version}.${ext}'
+# mac: 免签名分发(CI 已设 CSC_IDENTITY_AUTO_DISCOVERY=false; 首次打开需右键打开, 见 README)
+mac:
+  target:
+    - dmg
+    - zip
+  icon: resources/icon.icns
+  category: public.app-category.utilities
+  artifactName: '${productName}-${version}-${arch}.${ext}'
+# linux: AppImage(免安装) + deb(带 libsecret 依赖保证 Cookie 加密可用)
+linux:
+  target:
+    - AppImage
+    - deb
+  icon: resources/icon.png
+  category: Utility
+  artifactName: '${productName}-${version}-${arch}.${ext}'
+deb:
+  depends:
+    - libsecret-1-0

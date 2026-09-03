@@ -1,4 +1,4 @@
-name: Build & Release (Windows)
+name: Build & Release
 
 on:
   workflow_dispatch:
@@ -9,11 +9,51 @@ on:
         type: string
 
 jobs:
-  release:
+  # 版本提升收口在单一 job: 三平台同时 commit 会互踩, package.json 是唯一版本源
+  bump:
     runs-on: windows-latest
     permissions:
       contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Bump version
+        run: npm version ${{ inputs.version }} --no-git-tag-version
+      - name: Commit version bump
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: release v${{ inputs.version }}"
+            git push origin HEAD:main
+          fi
 
+  package:
+    needs: bump
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            builder: '--win --x64'
+            relfiles: |
+              release/PandaLive Monitor-Setup-*.exe
+              release/PandaLive Monitor-Portable-*.exe
+          - os: macos-latest
+            builder: '--mac --x64 --arm64'
+            relfiles: |
+              release/*.dmg
+              release/*.zip
+          - os: ubuntu-latest
+            builder: '--linux --x64'
+            relfiles: |
+              release/*.AppImage
+              release/*.deb
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,6 +67,11 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
+      # appimagetool 自身以 AppImage 形态分发, 运行需要 FUSE 1; ubuntu-24.04 不再预装
+      - name: Install FUSE (linux AppImage build)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y libfuse2
+
       # npm 会默认拦截部分 postinstall 脚本(electron/ffmpeg 二进制下载), 手动补跑
       - name: Run blocked postinstall scripts
         run: |
@@ -34,45 +79,29 @@ jobs:
           node node_modules/ffmpeg-static/install.js
           node node_modules/electron/install.js
 
-      - name: Bump version
-        run: npm version ${{ inputs.version }} --no-git-tag-version
-
-      # 版本提升提交回仓库: 让 package.json 成为唯一版本源(本地构建与 CI 产物版本一致)
-      # 注意: 不能用 stefanzweifel/git-auto-commit-action —— 它是 Docker action, 仅支持 Linux runner
-      - name: Commit version bump
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json package-lock.json
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: release v${{ inputs.version }}"
-            git push origin HEAD:main
-          fi
-
       - name: Typecheck
         run: npm run typecheck
 
       - name: Build app bundle
         run: npm run build
 
-      - name: Generate icon
-        run: node scripts/gen-icon.mjs
+      # 图标主资源是提交在库的 resources/icon.ico(用户设计); CI 仅派生 png/icns
+      - name: Derive icon assets (png/icns from committed ico)
+        run: node scripts/icon-build.mjs
 
-      - name: Package Windows (NSIS + Portable)
+      - name: Package (${{ matrix.os }})
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npx electron-builder --win --x64 --publish never
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false' # 免签名分发
+        run: npx electron-builder ${{ matrix.builder }} --publish never
 
-      - name: Create GitHub Release
+      # 同一 tag 追加各平台产物(action-gh-release 对已存在 Release 幂等追加)
+      - name: Upload to Release (${{ matrix.os }})
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ inputs.version }}
           name: PandaLive Monitor v${{ inputs.version }}
-          target_commitish: main # 打在主分支最新提交上(含上面的版本提升提交)
+          target_commitish: main
           draft: false
           prerelease: false
           generate_release_notes: true
-          files: |
-            release/PandaLive Monitor-Setup-${{ inputs.version }}.exe
-            release/PandaLive Monitor-Portable-${{ inputs.version }}.exe
+          files: ${{ matrix.relfiles }}

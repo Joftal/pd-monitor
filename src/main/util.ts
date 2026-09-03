@@ -2,14 +2,18 @@ import { app } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 
+// 全平台统一伪装 Windows Chrome UA: 服务端不校验 OS, 统一指纹反而是反风控资产(刻意不换行)
 export const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 
 export function dataRoot(): string {
-  // 数据放在程序所在目录(便携化): 打包版=exe 所在目录; 开发版=项目根目录
-  // 注意: 便携版运行时会解压到临时目录, app.getPath('exe') 指向临时目录!
-  // electron-builder 为便携版提供 PORTABLE_EXECUTABLE_DIR 指向原始 exe 所在文件夹
-  if (app.isPackaged) return process.env.PORTABLE_EXECUTABLE_DIR || path.dirname(app.getPath('exe'))
+  // Windows 便携哲学: 数据放程序所在目录(便携版经 PORTABLE_EXECUTABLE_DIR 指回原始目录)
+  // macOS 的 .app 是只读包(可能 translocation 到隔离区)、Linux AppImage 是只读 squashfs:
+  // 打包版在 mac/linux 必须落系统用户数据目录; 开发态三平台都用项目根
+  if (app.isPackaged) {
+    if (process.platform === 'win32') return process.env.PORTABLE_EXECUTABLE_DIR || path.dirname(app.getPath('exe'))
+    return app.getPath('userData')
+  }
   return app.getAppPath()
 }
 
@@ -28,6 +32,8 @@ export function defaultRecordRoot(): string {
 // 旧版本数据在 %APPDATA%/pandalive-monitor/plm-data, 首次运行自动迁移过来
 let migrated = false
 function migrateLegacyData(target: string): void {
+  // 旧版本仅存在于 Windows, 其他平台无需迁移
+  if (process.platform !== 'win32') return
   if (migrated) return
   migrated = true
   try {

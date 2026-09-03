@@ -228,7 +228,7 @@ export default {
   },
   account: {
     title: 'Account',
-    sub: 'Log in to unlock adult/fan-club rooms · Cookies are DPAPI-encrypted and stored locally only',
+    sub: 'Log in to unlock adult/fan-club rooms · Cookies are encrypted via the OS secure store and stored locally only',
     stOk: 'Logged in',
     stWarn: 'Session unverified',
     stNone: 'Not logged in',
@@ -276,7 +276,7 @@ export default {
     tagPw: 'Pwd room',
     tagRec: 'Replay',
     tagFan: 'Fan club',
-    doorNote: 'Cookies and account data are DPAPI-encrypted and stored only in the local data dir: {dir}'
+    doorNote: 'Cookies and account data are encrypted via the OS secure store (DPAPI / Keychain / libsecret) and stored only in the local data dir: {dir}'
   },
   settings: {
     title: 'Settings',

@@ -101,7 +101,9 @@ function createTray(): void {
       ? path.join(process.resourcesPath, 'icon.png')
       : path.join(__dirname, '../../resources/icon.png')
     const img = nativeImage.createFromPath(iconPath)
-    tray = new Tray(img.isEmpty() ? nativeImage.createEmpty() : img.resize({ width: 18, height: 18 }))
+    const icon = img.isEmpty() ? nativeImage.createEmpty() : img.resize({ width: 18, height: 18 })
+    if (process.platform === 'darwin') icon.setTemplateImage(true) // mac 托盘随深浅色自适配
+    tray = new Tray(icon)
     tray.setToolTip('PandaLive Monitor')
     tray.setContextMenu(
       Menu.buildFromTemplate([

@@ -230,7 +230,7 @@ export default {
   },
   account: {
     title: '账号',
-    sub: '登录后可解锁成人房 / 粉丝团权限内容 · Cookie 经 Windows DPAPI 加密, 仅存本机',
+    sub: '登录后可解锁成人房 / 粉丝团权限内容 · Cookie 经系统安全存储加密, 仅存本机',
     stOk: '已登录',
     stWarn: '会话未认证',
     stNone: '未登录',
@@ -278,7 +278,7 @@ export default {
     tagPw: '密码房',
     tagRec: '回放',
     tagFan: '粉丝团',
-    doorNote: 'Cookie 与账号数据经 Windows DPAPI 加密, 仅保存于本机数据目录: {dir}'
+    doorNote: 'Cookie 与账号数据经系统安全存储加密(DPAPI / Keychain / libsecret), 仅保存于本机数据目录: {dir}'
   },
   settings: {
     title: '设置',

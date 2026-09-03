@@ -1,9 +1,9 @@
 # PandaLive Monitor
 
-> pandalive.co.kr 直播 **监控 / 观看 / 录制 / 回放** 一体化 Windows 桌面客户端
+> pandalive.co.kr 直播 **监控 / 观看 / 录制 / 回放** 一体化桌面客户端（Windows · macOS · Linux)
 
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows-00a1d6)]()
+[![Platform](https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-00a1d6)]()
 [![Electron](https://img.shields.io/badge/electron-33-47848f)]()
 [![Vue](https://img.shields.io/badge/vue-3-42b883)]()
 [![Release](https://img.shields.io/github/v/release/Joftal/pd-monitor)](https://github.com/Joftal/pd-monitor/releases)
@@ -50,13 +50,16 @@
 
 到 [Releases](https://github.com/Joftal/pd-monitor/releases) 下载：
 
-| 文件 | 说明 |
-|---|---|
-| `PandaLive Monitor-Setup-x.x.x.exe` | NSIS 安装包（创建桌面快捷方式） |
-| `PandaLive Monitor-Portable-x.x.x.exe` | 便携版，解压即用，数据随程序目录走 |
+| 平台 | 文件 | 说明 |
+|---|---|---|
+| Windows | `PandaLive Monitor-Setup-x.x.x.exe` | NSIS 安装包（创建桌面快捷方式） |
+| Windows | `PandaLive Monitor-Portable-x.x.x.exe` | 便携版，解压即用，数据随程序目录走 |
+| macOS | `PandaLive Monitor-x.x.x-(x64\|arm64).dmg / -mac.zip` | 免签名分发：首次打开需**右键 → 打开**（或系统设置里放行），x64=Intel / arm64=Apple Silicon |
+| Linux | `PandaLive Monitor-x.x.x-x86_64.AppImage` | 免安装，`chmod +x` 即跑 |
+| Linux | `PandaLive Monitor-x.x.x-amd64.deb` | 依赖 `libsecret-1-0`（Cookie 加密存储，安装器自动处理） |
 
-**数据位置**（全部在程序目录下，不写系统盘，文件夹整体迁移即可）：
-`data/`（关注 · 设置 · 历史 · 日志 · 加密 Cookie · 九宫格缩略图缓存） + `recording/`（录制产物，可在设置中更改）
+**数据位置**:Windows 下全部在程序目录旁（便携迁移）；macOS 在 `~/Library/Application Support/pandalive-monitor/`;Linux 在 `~/.config/pandalive-monitor/`。
+内容：`data/`（关注 · 设置 · 历史 · 日志 · 加密 Cookie · 九宫格缩略图缓存） + `recording/`（录制产物，可在设置中更改）
 
 **快速上手**：账号 → 登录（推荐 Cookie 导入） → 大厅浏览/搜索 → 点封面观看，心形关注，⏺ 录制。
 
@@ -69,10 +72,12 @@ npm install            # 若 npm 拦截 postinstall: 逐个执行 node node_modu
 npm run dev            # 开发模式(HMR)
 npm run build          # 产物构建(out/)
 npm run pack           # 打包 Windows 安装包 + 便携版(release/)
+npm run pack:mac       # 打包 macOS dmg + zip(需在本机 macOS 上跑)
+npm run pack:linux     # 打包 AppImage + deb(需在本机 Linux 上跑)
 npm run typecheck      # 双端类型检查
 ```
 
-**发版**：`Actions → Build & Release (Windows)` 填版本号即可——自动把版本号写回 `package.json` 并提交（唯一版本源）、打包并推送 Releases（tag: `v<版本号>`），应用内「检查更新」即读取该 tag。
+**发版**：`Actions → Build & Release` 填版本号即可——自动把版本号写回 `package.json` 并提交（唯一版本源）、**三平台并行打包**(Windows NSIS/便携版 · macOS dmg/zip 双架构 · Linux AppImage/deb）并推送 Releases（tag: `v<版本号>`），应用内「检查更新」即读取该 tag。
 
 
 <details>

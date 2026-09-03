@@ -1,9 +1,9 @@
 # PandaLive Monitor
 
-> All-in-one Windows desktop client for pandalive.co.kr: **live monitoring · watching · recording · replay**
+> All-in-one desktop client for pandalive.co.kr (Windows · macOS · Linux): **live monitoring · watching · recording · replay**
 
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows-00a1d6)]()
+[![Platform](https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-00a1d6)]()
 [![Electron](https://img.shields.io/badge/electron-33-47848f)]()
 [![Vue](https://img.shields.io/badge/vue-3-42b883)]()
 [![Release](https://img.shields.io/github/v/release/Joftal/pd-monitor)](https://github.com/Joftal/pd-monitor/releases)
@@ -50,13 +50,16 @@ Stream fetching is 100% user-intent driven · runtime logs on disk (`data/logs/`
 
 Download from [Releases](https://github.com/Joftal/pd-monitor/releases):
 
-| File | Description |
-|---|---|
-| `PandaLive Monitor-Setup-x.x.x.exe` | NSIS installer (desktop shortcut included) |
-| `PandaLive Monitor-Portable-x.x.x.exe` | Portable build — unzip and run; data stays with the app folder |
+| Platform | File | Notes |
+|---|---|---|
+| Windows | `PandaLive Monitor-Setup-x.x.x.exe` | NSIS installer (desktop shortcut included) |
+| Windows | `PandaLive Monitor-Portable-x.x.x.exe` | Portable build — unzip and run; data stays with the app folder |
+| macOS | `PandaLive Monitor-x.x.x-(x64\|arm64).dmg / -mac.zip` | Unsigned: **right-click → Open** on first launch (or allow in System Settings); x64=Intel / arm64=Apple Silicon |
+| Linux | `PandaLive Monitor-x.x.x-x86_64.AppImage` | No install — `chmod +x` and run |
+| Linux | `PandaLive Monitor-x.x.x-amd64.deb` | Depends on `libsecret-1-0` (cookie vault encryption; handled by the installer) |
 
-**Data location** (everything sits next to the executable; move the whole folder anywhere):
-`data/` (follows · settings · history · logs · encrypted cookies · thumbnail cache) + `recording/` (recordings; overridable in settings)
+**Data location**: Windows keeps everything next to the app folder (portable). macOS: `~/Library/Application Support/pandalive-monitor/`. Linux: `~/.config/pandalive-monitor/`.
+Contents: `data/` (follows · settings · history · logs · encrypted cookies · thumbnail cache) + `recording/` (recordings; overridable in settings)
 
 **Quick start**: Account → Log in (cookie import recommended) → browse/search in the hall → click a cover to watch, heart to follow, ⏺ to record.
 
@@ -69,10 +72,12 @@ npm install            # if npm blocks postinstall scripts: node node_modules/{e
 npm run dev            # dev mode (HMR)
 npm run build          # bundle output (out/)
 npm run pack           # Windows installer + portable (release/)
+npm run pack:mac       # macOS dmg + zip (run on a mac)
+npm run pack:linux     # AppImage + deb (run on Linux)
 npm run typecheck      # type-check (main + renderer)
 ```
 
-**Release**: run `Actions → Build & Release (Windows)` with a version number — it writes the version back into `package.json` (single source of truth), packages, and publishes to Releases (tag: `v<version>`); the in-app update check reads that tag.
+**Release**: run `Actions → Build & Release` with a version number — it writes the version back into `package.json` (single source of truth), packages **all three platforms in parallel** (Windows NSIS/portable · macOS dmg/zip for both arches · Linux AppImage/deb), and publishes to Releases (tag: `v<version>`); the in-app update check reads that tag.
 
 
 <details>
