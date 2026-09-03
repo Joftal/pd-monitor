@@ -95,6 +95,7 @@ jobs:
         run: npx electron-builder ${{ matrix.builder }} --publish never
 
       # 同一 tag 追加各平台产物(action-gh-release 对已存在 Release 幂等追加)
+      # 注意: 这里绝不生成 notes —— 三个 job 各生成一次会造成 Full Changelog 重复 ×3
       - name: Upload to Release (${{ matrix.os }})
         uses: softprops/action-gh-release@v2
         with:
@@ -103,5 +104,37 @@ jobs:
           target_commitish: main
           draft: false
           prerelease: false
-          generate_release_notes: true
+          generate_release_notes: false
           files: ${{ matrix.relfiles }}
+
+  # 收口: 三平台产物齐了之后, 一次性写入 Asset Guide 表格 + 自动生成 Changelog(各一次, 绝不重复)
+  finalize:
+    needs: package
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Finalize release notes
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: PandaLive Monitor v${{ inputs.version }}
+          target_commitish: main
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            ### 📥 下载说明(Asset Guide)
+
+            | 文件 | 平台 | 说明 |
+            |---|---|---|
+            | `PandaLive Monitor-Setup-${{ inputs.version }}.exe` | Windows x64 | NSIS 安装包(推荐, 自动创建桌面快捷方式) |
+            | `PandaLive Monitor-Portable-${{ inputs.version }}.exe` | Windows x64 | 便携免安装版, 数据随程序目录迁移 |
+            | `PandaLive Monitor-${{ inputs.version }}-x64.dmg` | macOS Intel | DMG 安装包(免签名分发: 首次请右键 → 打开) |
+            | `PandaLive Monitor-${{ inputs.version }}-arm64.dmg` | macOS Apple Silicon(M 系列) | DMG 安装包(免签名分发: 首次请右键 → 打开) |
+            | `PandaLive Monitor-${{ inputs.version }}-x64-mac.zip` | macOS Intel | ZIP 免安装版(同上, 右键打开) |
+            | `PandaLive Monitor-${{ inputs.version }}-arm64-mac.zip` | macOS Apple Silicon(M 系列) | ZIP 免安装版(同上, 右键打开) |
+            | `PandaLive Monitor-${{ inputs.version }}-x86_64.AppImage` | Linux x64 | 免安装, `chmod +x` 直接运行 |
+            | `PandaLive Monitor-${{ inputs.version }}-amd64.deb` | Linux x64 | 安装包(依赖 `libsecret-1-0`, 安装器自动处理) |
+
+            **数据位置**: Windows = 程序目录旁(便携); macOS = `~/Library/Application Support/pandalive-monitor/`; Linux = `~/.config/pandalive-monitor/`
