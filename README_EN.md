@@ -8,7 +8,7 @@
 [![Vue](https://img.shields.io/badge/vue-3-42b883)]()
 [![Release](https://img.shields.io/github/v/release/Joftal/pd-monitor)](https://github.com/Joftal/pd-monitor/releases)
 
-Built with **Electron + Vue 3**. Aggregates every live channel on the platform into a clean, Bilibili-style light UI — watch, record, and keep an eye on your favorite streamers; recordings can be replayed in-app and merged losslessly.
+Built with **Electron + Vue 3**. Aggregates every live channel on the platform into a clean, card-based light UI — watch, record, and keep an eye on your favorite streamers; recordings can be replayed in-app and merged losslessly.
 
 ---
 

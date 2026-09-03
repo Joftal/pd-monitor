@@ -99,7 +99,7 @@ async function refresh() {
 
 <template>
   <div class="h-full flex flex-col">
-    <!-- 页头(B站频道条风) -->
+    <!-- 页头(频道条风) -->
     <div class="px-7 pt-5 pb-3 shrink-0">
       <div class="flex items-center gap-3">
         <h1 class="text-[20px] font-bold text-ink1 tracking-tight">{{ t('explore.title') }}</h1>

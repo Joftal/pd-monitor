@@ -160,7 +160,7 @@ body,
 /* 按钮加载态统一不用 naive :loading(绝对定位形态兼容差),
    全部改为内容区内 inline-flex + animate-spin 的自绘 spinner(见各视图实现) */
 
-/* 卡片标题两行截断(B站风) */
+/* 卡片标题两行截断 */
 .clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;

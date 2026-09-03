@@ -8,7 +8,7 @@
 [![Vue](https://img.shields.io/badge/vue-3-42b883)]()
 [![Release](https://img.shields.io/github/v/release/Joftal/pd-monitor)](https://github.com/Joftal/pd-monitor/releases)
 
-基于 **Electron + Vue 3**，B 站风亮色界面。聚合全站在播直播间，一键观看、一键录制、长期监控心仪主播；录制产物支持应用内回看与无损合并。
+基于 **Electron + Vue 3**，卡片式浅色界面。聚合全站在播直播间，一键观看、一键录制、长期监控心仪主播；录制产物支持应用内回看与无损合并。
 
 ---
 

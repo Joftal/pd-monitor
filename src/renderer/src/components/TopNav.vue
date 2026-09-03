@@ -81,7 +81,7 @@ const keyword = computed({
       </button>
     </nav>
 
-    <!-- 居中搜索(B站风) -->
+    <!-- 居中搜索 -->
     <div class="no-drag flex-1 flex justify-center px-6">
       <div class="relative w-full max-w-[420px] group">
         <input
