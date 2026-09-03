@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron'
 import { CH, EV } from '../shared/types'
 import type {
-  AccountState, Anchor, DiscoveryItem, PlayInfo, RecHistoryItem, RecTask, Settings, Toast, WatcherStatus
+  AccountState, Anchor, AppInfo, DiscoveryItem, PlayInfo, RecHistoryItem, RecTask, Settings, Toast, UpdateCheckResult, WatcherStatus
 } from '../shared/types'
 
 function on<T>(channel: string, cb: (payload: T) => void): () => void {
@@ -44,6 +44,8 @@ const apiBridge = {
   recOpenFolder: (dir: string): Promise<boolean> => ipcRenderer.invoke(CH.recOpenFolder, dir),
   recClearHistory: (): Promise<boolean> => ipcRenderer.invoke(CH.recClearHistory),
   recDiskFree: (): Promise<number> => ipcRenderer.invoke(CH.recDiskFree),
+  recMerge: (taskId: string): Promise<{ ok: boolean; files?: string[]; error?: string }> =>
+    ipcRenderer.invoke(CH.recMerge, taskId),
 
   // 设置
   settingsGet: (): Promise<Settings> => ipcRenderer.invoke(CH.settingsGet),
@@ -59,6 +61,12 @@ const apiBridge = {
   winControl: (action: 'min' | 'max' | 'close'): Promise<void> => ipcRenderer.invoke(CH.winControl, action),
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke(CH.openExternal, url),
   appDataDir: (): Promise<string> => ipcRenderer.invoke(CH.appDataDir),
+  openLogs: (): Promise<string> => ipcRenderer.invoke(CH.appOpenLogs),
+  appInfo: (): Promise<AppInfo> => ipcRenderer.invoke(CH.appInfo),
+  checkUpdate: (): Promise<UpdateCheckResult> => ipcRenderer.invoke(CH.appCheckUpdate),
+  /** 本地录制文件转 plocal:// 可播放 URL(纯拼接, 权限校验在主进程协议处理器) */
+  localFileUrl: (absPath: string): string =>
+    'plocal://file/' + Buffer.from(absPath, 'utf-8').toString('base64url'),
 
   // 事件订阅
   onAnchors: (cb: (list: Anchor[]) => void) => on<Anchor[]>(EV.anchors, cb),

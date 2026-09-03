@@ -5,6 +5,7 @@ import { EV, WatcherStatus, Anchor, DiscoveryItem } from '../../shared/types'
 import { recorder } from './recorder'
 import { sendToast } from './notify'
 import { sleep } from '../util'
+import { logger } from './logger'
 
 // ============ 轮询引擎 ============
 // list 模式: 每轮拉全站直播列表(分页, 每页一个请求), 本地匹配监控主播 —— 防封核心
@@ -115,9 +116,11 @@ class Watcher {
         this.cooldownUntil = Date.now() + minutes * 60_000
         this.status.circuitOpen = true
         this.status.message = `检测到风控/连续失败(${msg}), 已熔断 ${minutes} 分钟`
+        logger.warn('watcher', this.status.message)
         sendToast({ type: 'error', title: '监控熔断', body: this.status.message })
       } else {
         this.status.message = `本轮失败: ${msg}`
+        logger.warn('watcher', `本轮失败(#${this.errorStreak}): ${msg}`)
       }
     } finally {
       this.roundInFlight = false

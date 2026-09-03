@@ -92,6 +92,13 @@ export const store = {
   listHistory(): RecHistoryItem[] {
     return db.history
   },
+  updateHistory(id: string, patch: Partial<RecHistoryItem>): void {
+    const h = db.history.find((x) => x.id === id)
+    if (h) {
+      Object.assign(h, patch)
+      persist()
+    }
+  },
   clearHistory(): void {
     db.history = []
     persist(true)

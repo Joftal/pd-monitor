@@ -41,6 +41,14 @@ export interface RecTask {
   bytes: number
   error: string
   auto: boolean
+  /** 回放(VOD)下载任务(旧历史记录无此字段) */
+  vod?: boolean
+  /** VOD: 清单总时长(秒, 拉取失败为 0 → 前端表现为不定进度) */
+  vodTotalSec?: number
+  /** VOD: 已下载的媒体时长(秒, 来自 ffmpeg -progress out_time) */
+  vodDoneSec?: number
+  /** 直播间封面(取自拉源响应; 录制卡片展示用, 旧历史记录无此字段) */
+  thumbUrl?: string
 }
 
 export type RecHistoryItem = RecTask
@@ -61,6 +69,10 @@ export interface Settings {
   diskLimitGb: number
   /** 开播即预取直播源(后台节流泵), 点进房间零等待 */
   prefetchStream: boolean
+  /** 录制收尾时自动把分段 MP4 合并为单个文件 */
+  mergeMp4: boolean
+  /** 合并成功后删除原分段 MP4(仅 mergeMp4 开时生效; 合并失败永远保留原分段) */
+  mergeDeleteSegments: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -77,7 +89,9 @@ export const DEFAULT_SETTINGS: Settings = {
   autoRecordDefault: false,
   closeToTray: true,
   diskLimitGb: 1,
-  prefetchStream: true
+  prefetchStream: true,
+  mergeMp4: false,
+  mergeDeleteSegments: true
 }
 
 export interface AccountState {
@@ -110,6 +124,8 @@ export interface PlayInfo {
   needPassword?: boolean
   error?: string
   m3u8?: string
+  /** 回放(liveType=rec)播放结果: 前端可据此切换"观看/下载回放"语义 */
+  vod?: boolean
   /** 变体分档(带宽降序, 第一个是最高档; 用于替代短寿 master 地址) */
   variants?: { url: string; bandwidth: number; resolution: string }[]
   title?: string
@@ -147,6 +163,24 @@ export interface Toast {
   body: string
 }
 
+/** 关于页静态信息 */
+export interface AppInfo {
+  version: string
+  author: string
+  repo: string
+  releasesPage: string
+}
+
+/** 检查结果(ok=false 时 latest/url 可能为空) */
+export interface UpdateCheckResult {
+  ok: boolean
+  current: string
+  latest?: string
+  hasUpdate?: boolean
+  url?: string
+  error?: string
+}
+
 // ---------- IPC invoke 通道 ----------
 export const CH = {
   authState: 'auth:state',
@@ -168,6 +202,7 @@ export const CH = {
   recOpenFolder: 'rec:open-folder',
   recClearHistory: 'rec:clear-history',
   recDiskFree: 'rec:disk-free',
+  recMerge: 'rec:merge',
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
   settingsSelectDir: 'settings:select-dir',
@@ -176,7 +211,10 @@ export const CH = {
   watcherStop: 'watcher:stop',
   winControl: 'win:control',
   openExternal: 'shell:open-external',
-  appDataDir: 'app:data-dir'
+  appDataDir: 'app:data-dir',
+  appOpenLogs: 'app:open-logs',
+  appInfo: 'app:info',
+  appCheckUpdate: 'app:check-update'
 } as const
 
 // ---------- IPC event 通道（主进程 -> 渲染进程） ----------

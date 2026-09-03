@@ -1,8 +1,9 @@
-import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, net, session, shell } from 'electron'
 import * as path from 'path'
 import {
-  CH, EV, AccountState, Anchor, PlayInfo, Settings
+  CH, EV, AccountState, Anchor, AppInfo, PlayInfo, Settings, UpdateCheckResult
 } from '../shared/types'
+import { APP_META, cmpSemver } from '../shared/appmeta'
 import { api, SESSION_PARTITION, applyProxy } from './services/pandalive'
 import { store } from './services/store'
 import { vault } from './services/vault'
@@ -10,7 +11,8 @@ import { watcher } from './services/watcher'
 import { recorder } from './services/recorder'
 import { openLoginWindow } from './services/authWin'
 import { sendToast } from './services/notify'
-import { dataDir, defaultRecordRoot, diskFreeGb } from './util'
+import { dataDir, defaultRecordRoot, diskFreeGb, UA } from './util'
+import { logger } from './services/logger'
 
 async function pushAccount(): Promise<AccountState> {
   let realLogin = false
@@ -41,6 +43,7 @@ export function registerIpc(): void {
 
   ipcMain.handle(CH.authLoginPassword, async (_e, loginId: string, password: string) => {
     const r = await api.login(loginId, password)
+    if (!r.ok) logger.warn('auth', `账号密码登录失败: ${r.message}`)
     pushAccount()
     return r
   })
@@ -65,12 +68,14 @@ export function registerIpc(): void {
       }
     }
     if (!jar['sessKey']) {
+      logger.warn('auth', 'Cookie 导入被拒: 缺 sessKey')
       return { ok: false, message: '未找到 sessKey, 请确认粘贴的是 pandalive.co.kr 的完整 Cookie' }
     }
     await api.importCookies(jar)
     const info = await api.checkLoginInfo()
     if (!info.isLogin) {
       api.clearCookies()
+      logger.warn('auth', 'Cookie 导入被拒: login_info 校验未通过(过期/无效)')
       return { ok: false, message: 'Cookie 已过期或无效(官方会话校验未通过), 请在浏览器中重新登录后再复制' }
     }
     pushAccount()
@@ -178,6 +183,7 @@ export function registerIpc(): void {
     }
     return {
       ok: true,
+      vod: !!r.vod,
       m3u8: r.m3u8,
       variants: r.variants,
       hlsBackups: r.hlsBackups,
@@ -248,6 +254,8 @@ export function registerIpc(): void {
     return diskFreeGb(cfg.savePath || defaultRecordRoot())
   })
 
+  ipcMain.handle(CH.recMerge, (_e, taskId: string) => recorder.mergeTask(String(taskId)))
+
   // ---------- 设置 ----------
   ipcMain.handle(CH.settingsGet, () => store.getSettings())
 
@@ -291,6 +299,46 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle(CH.appDataDir, () => dataDir())
+
+  ipcMain.handle(CH.appOpenLogs, async () => {
+    const dir = logger.dir()
+    await shell.openPath(dir)
+    return dir
+  })
+
+  // ---------- 关于 / 检查更新 ----------
+  ipcMain.handle(CH.appInfo, (): AppInfo => ({
+    version: app.getVersion(),
+    author: APP_META.author,
+    repo: APP_META.repo,
+    releasesPage: APP_META.releasesPage
+  }))
+
+  ipcMain.handle(CH.appCheckUpdate, async (): Promise<UpdateCheckResult> => {
+    const current = app.getVersion()
+    try {
+      // 走 releases/latest 网页 302 跳转而非 REST API(匿名 API 有每 IP 60 次/时限流, 共享出口 IP 易爆)
+      const res = await net.fetch(APP_META.releasesPage + '/latest', { headers: { 'User-Agent': UA } })
+      if (res.status === 404) {
+        // 仓库尚无 Release: 视为已是最新
+        return { ok: true, current, latest: '', hasUpdate: false, url: APP_META.releasesPage }
+      }
+      if (res.status !== 200) throw new Error(`GitHub 响应 HTTP ${res.status}`)
+      // 有 Release 时最终 URL 形如 .../releases/tag/vX.Y.Z
+      const m = /\/releases\/tag\/(v?[\w.-]+)/.exec(res.url || '')
+      if (!m) return { ok: true, current, latest: '', hasUpdate: false, url: APP_META.releasesPage }
+      return {
+        ok: true,
+        current,
+        latest: m[1].replace(/^v/i, ''),
+        hasUpdate: cmpSemver(m[1], current) > 0,
+        url: res.url || APP_META.releasesPage
+      }
+    } catch (e) {
+      logger.warn('app', `检查更新失败: ${String((e as Error).message || e)}`)
+      return { ok: false, current, error: `检查更新失败: ${String((e as Error).message || e)}` }
+    }
+  })
 }
 
 export { pushAccount }

@@ -5,6 +5,7 @@ import { NButton, NInput, NSelect, NSkeleton, NTag, useMessage } from 'naive-ui'
 import { api } from '@/api'
 import { useAppStore } from '@/stores/app'
 import HlsPlayer from '@/components/HlsPlayer.vue'
+import SpinIcon from '@/components/SpinIcon.vue'
 import type { AnchorTag } from '@shared/types'
 
 const route = useRoute()
@@ -30,6 +31,8 @@ const playerRef = ref<InstanceType<typeof HlsPlayer> | null>(null)
 const quality = ref(0)
 const variants = ref<{ url: string; bandwidth: number; resolution: string }[]>([])
 const lastFailedUrl = ref('') // 上一次失效的源(仅展示)
+const backups = ref<string[]>([]) // 备用线路(hls2/hls3 master, hls.js 自动选档)
+const activeLine = ref(0) // 0=主线, 1..N=备用线路
 
 const recording = computed(() => store.isRecording(userId))
 const discoveryItem = computed(() => store.discovery.find((d) => d.userId === userId))
@@ -65,6 +68,8 @@ async function loadPlay(password = '', forceFresh = false): Promise<boolean> {
   needPw.value = false
   errorMsg.value = ''
   variants.value = r.variants || (r.m3u8 ? [{ url: r.m3u8, bandwidth: 0, resolution: 'master' }] : [])
+  backups.value = r.hlsBackups || []
+  activeLine.value = 0 // 新源到手一律回到主线
   // 默认最高档变体(长效地址)
   const qi = Math.min(quality.value, Math.max(0, variants.value.length - 1))
   const newUrl = variants.value[qi]?.url || r.m3u8 || ''
@@ -118,7 +123,7 @@ onMounted(async () => {
   await loadPlay()
 })
 
-/** 切换清晰度 = 直接换用对应变体的长效地址 */
+/** 切换清晰度 = 直接换用对应变体的长效地址(仅主线; 备用线路由 hls.js 自动选档) */
 function switchQuality(i: number) {
   quality.value = i
   const v = variants.value[i]
@@ -126,6 +131,15 @@ function switchQuality(i: number) {
     m3u8.value = v.url
     message.success(`已切换到 ${levelOptions.value[i]?.label || '新档位'}`)
   }
+}
+
+/** 切换线路: 0=主线(恢复变体分档), 1..N=备用线路(master 自动清晰度); 失效仍走手动重试, 不自动跳线 */
+function switchLine(i: number) {
+  const u = i === 0 ? variants.value[Math.min(quality.value, Math.max(0, variants.value.length - 1))]?.url : backups.value[i - 1]
+  if (!u || activeLine.value === i) return
+  activeLine.value = i
+  m3u8.value = u
+  message.success(i === 0 ? '已切回主线路' : `已切换到备用线路 ${i}(自动清晰度)`)
 }
 
 /** 紧凑展示源链接(host + 路径前缀, 不展开占版面) */
@@ -231,17 +245,19 @@ async function manualRefresh() {
           class="!w-36"
           :value="quality"
           :options="levelOptions"
+          :disabled="activeLine !== 0"
           @update:value="switchQuality"
         />
+        <span v-if="activeLine !== 0" class="text-[11.5px] text-ink3">备用线路自动选档</span>
         <div class="flex-1"></div>
-        <n-button size="small" secondary type="primary" round :loading="manualRefreshing" @click="manualRefresh" class="!w-[72px]">
-          刷新
+        <n-button size="small" secondary type="primary" round :disabled="manualRefreshing" @click="manualRefresh" class="!w-[72px]">
+          <span class="inline-flex items-center justify-center gap-1"><SpinIcon v-if="manualRefreshing" :size="12" />刷新</span>
         </n-button>
         <n-button size="small" round :secondary="following" :type="following ? 'default' : 'primary'" @click="toggleFollow">
           {{ following ? '已关注' : '+ 关注' }}
         </n-button>
         <n-button size="small" round type="error" :secondary="!recording" @click="toggleRecord">
-          {{ recording ? '■ 停止录制' : '⏺ 开始录制' }}
+          {{ recording ? '■ 停止录制' : tags?.liveType === 'rec' ? '⬇ 下载回放' : '⏺ 开始录制' }}
         </n-button>
       </div>
     </div>
@@ -282,8 +298,21 @@ async function manualRefresh() {
           <n-button size="tiny" tertiary round @click="copyUrl" :disabled="!m3u8">复制</n-button>
         </div>
         <p class="text-[11px] text-ink2 font-mono truncate" :title="m3u8">
-          {{ m3u8 ? shortUrl(m3u8) + ' · ' + (levelOptions[quality]?.label || '') : '未获取到(源失效或未开播)' }}
+          {{ m3u8 ? shortUrl(m3u8) + ' · ' + (activeLine === 0 ? levelOptions[quality]?.label || '' : '备用线路') : '未获取到(源失效或未开播)' }}
         </p>
+        <!-- 线路切换: 主线 + hls2/hls3 备用(master 地址, hls.js 自动选档) -->
+        <div v-if="backups.length" class="flex items-center gap-1.5 pt-1.5">
+          <span class="text-[11px] text-ink3 shrink-0">线路</span>
+          <button
+            v-for="i in backups.length + 1"
+            :key="i"
+            class="px-2 py-0.5 rounded text-[11px] transition-colors"
+            :class="activeLine === i - 1
+              ? 'bg-live/10 text-live font-semibold'
+              : 'text-ink3 hover:text-ink1 bg-gray-50 hover:bg-gray-100'"
+            @click="switchLine(i - 1)"
+          >{{ i === 1 ? '主线' : '备用 ' + (i - 1) }}</button>
+        </div>
         <p v-if="lastFailedUrl" class="text-[10.5px] text-ink3/80 font-mono truncate" :title="lastFailedUrl">
           上次失效： {{ shortUrl(lastFailedUrl) }}
         </p>

@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>录制页 v2 设计稿 · PandaLive Monitor</title>
+<style>
+  /* ===== 与应用一致的设计 token ===== */
+  :root {
+    --live: #fb7299; --live-dark: #f0567f;
+    --rec: #f25d8e; --amber: #f0a020; --ok: #2fad5f;
+    --page: #f1f2f3; --card: #ffffff; --line: #e3e5e7;
+    --ink1: #18191c; --ink2: #61666d; --ink3: #9499a0;
+    --shadow-card: 0 1px 2px rgba(0,0,0,.05);
+    --shadow-hover: 0 10px 28px rgba(0,0,0,.10);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--page); color: var(--ink1);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', sans-serif;
+    -webkit-font-smoothing: antialiased; padding-bottom: 60px;
+  }
+  .num { font-variant-numeric: tabular-nums; }
+  .tag { display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+  .btn { display: inline-flex; align-items: center; gap: 5px; border: none; cursor: pointer; border-radius: 999px;
+         font-size: 12.5px; padding: 6px 15px; transition: all .15s; font-family: inherit; }
+  .btn:active { transform: scale(.96); }
+  .btn-rec { background: rgba(242,93,142,.1); color: var(--rec); font-weight: 600; }
+  .btn-rec:hover { background: rgba(242,93,142,.18); }
+  .btn-rec-solid { background: var(--rec); color: #fff; font-weight: 600; }
+  .btn-rec-solid:hover { background: #e14a7d; }
+  .btn-ghost { background: transparent; color: var(--ink2); border: 1px solid var(--line); }
+  .btn-ghost:hover { color: var(--ink1); border-color: #c9cdd3; }
+  .btn-brand { background: rgba(251,114,153,.1); color: var(--live); font-weight: 600; }
+  .btn-brand:hover { background: rgba(251,114,153,.18); }
+  .icon-btn { width: 28px; height: 28px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center;
+              color: var(--ink3); cursor: pointer; transition: all .15s; border: none; background: transparent; }
+  .icon-btn:hover { background: #f1f2f3; color: var(--ink1); }
+
+  .wrap { max-width: 1160px; margin: 0 auto; padding: 22px 28px 0; }
+
+  /* ===== ① 页头 + 概览条 ===== */
+  .page-head { display: flex; align-items: flex-end; gap: 14px; }
+  .page-head h1 { font-size: 21px; font-weight: 800; letter-spacing: -.02em; }
+  .page-head .sub { font-size: 12px; color: var(--ink3); margin-top: 3px; }
+
+  .overview { margin-left: auto; display: flex; align-items: stretch; background: var(--card);
+              border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow-card); overflow: hidden; }
+  .ov-cell { padding: 9px 20px; display: flex; flex-direction: column; justify-content: center; min-width: 108px; }
+  .ov-cell + .ov-cell { border-left: 1px solid var(--line); }
+  .ov-label { font-size: 11px; color: var(--ink3); display: flex; align-items: center; gap: 5px; }
+  .ov-value { font-size: 19px; font-weight: 800; margin-top: 1px; line-height: 1.15; }
+  .ov-value small { font-size: 11px; font-weight: 500; color: var(--ink3); margin-left: 3px; }
+  .ov-value.rec-on { color: var(--rec); }
+  .ov-value.disk-low { color: var(--rec); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .dot-red { background: var(--rec); animation: breathe 1.6s ease-in-out infinite; }
+  @keyframes breathe { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+
+  /* ===== ② 进行中 · 大卡片 ===== */
+  .sec-head { display: flex; align-items: center; gap: 9px; margin: 26px 2px 12px; }
+  .sec-head h2 { font-size: 14.5px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+  .sec-head .count { font-size: 11.5px; color: var(--ink3); font-weight: 500; }
+  .sec-head .right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+  .rec-card { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+              box-shadow: var(--shadow-card); padding: 18px 20px 16px 22px; overflow: hidden;
+              transition: box-shadow .2s, transform .2s; }
+  .rec-card:hover { box-shadow: var(--shadow-hover); transform: translateY(-1px); }
+  .rec-card + .rec-card { margin-top: 14px; }
+
+  .rc-main { display: flex; align-items: center; gap: 16px; }
+  .rc-avatar { position: relative; width: 56px; height: 56px; border-radius: 14px; flex: none;
+               display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 700; }
+  .kind-live .rc-avatar { background: linear-gradient(135deg, #f8b4c8, #e9799b); }
+  .kind-vod .rc-avatar { background: linear-gradient(135deg, #f5c77a, #dc9a32); }
+  .rc-avatar .live-dot { position: absolute; right: -3px; bottom: -3px; width: 14px; height: 14px; border-radius: 50%;
+                         background: var(--rec); border: 2.5px solid #fff; animation: breathe 1.6s ease-in-out infinite; }
+  .rc-info { flex: 1; min-width: 0; }
+  .rc-line1 { display: Flex; align-items: center; gap: 8px; }
+  .rc-nick { font-size: 16px; font-weight: 800; }
+  .rc-title { font-size: 12.5px; color: var(--ink2); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rc-sub { font-size: 11px; color: var(--ink3); margin-top: 3px; font-family: ui-monospace, Consolas, monospace;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .rc-metric { text-align: right; flex: none; padding: 0 6px; }
+  .rc-metric .v { font-size: 22px; font-weight: 800; line-height: 1.1; }
+  .rc-metric .v small { font-size: 11px; font-weight: 500; color: var(--ink3); margin-left: 2px; }
+  .rc-metric .l { font-size: 10.5px; color: var(--ink3); margin-top: 2px; }
+  .rc-metric.m-dur .v { color: var(--rec); }
+  .rc-actions { display: flex; flex-direction: column; gap: 7px; flex: none; margin-left: 10px; }
+
+  .rc-foot { display: flex; align-items: center; gap: 14px; margin-top: 14px; }
+  .bar { flex: 1; height: 6px; border-radius: 4px; background: #eef0f2; overflow: hidden; position: relative; }
+  .bar .fill-live { position: absolute; inset: 0; width: 40%; border-radius: 4px;
+                    background: linear-gradient(90deg, transparent, var(--live), transparent);
+                    animation: pulse 1.8s ease-in-out infinite; }
+  @keyframes pulse { 0% { left: -40%; } 100% { left: 100%; } }
+  .bar .fill-vod { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; background: var(--amber); width: 42%; }
+  .rc-foot-cap { font-size: 11px; color: var(--ink3); flex: none; display: flex; align-items: center; gap: 12px; }
+  .rc-foot-cap b { color: var(--ink2); font-weight: 600; }
+
+  /* ===== ③ 历史记录 · 分组列表 ===== */
+  .chips { display: flex; gap: 6px; }
+  .chip { font-size: 12px; padding: 4px 12px; border-radius: 999px; cursor: pointer; color: var(--ink2);
+          border: 1px solid transparent; transition: all .15s; background: transparent; }
+  .chip:hover { color: var(--ink1); }
+  .chip.on { background: rgba(251,114,153,.1); color: var(--live); font-weight: 600; }
+  .search { font-size: 12.5px; padding: 5px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--page);
+            width: 150px; outline: none; color: var(--ink1); font-family: inherit; }
+  .search:focus { border-color: var(--live); background: #fff; }
+
+  .hist-card { background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+               box-shadow: var(--shadow-card); overflow: hidden; }
+  .hgroup { padding: 13px 20px 7px; font-size: 11.5px; font-weight: 700; color: var(--ink3);
+            background: linear-gradient(#fafbfc, #fff); border-top: 1px solid var(--line); }
+  .hgroup:first-child { border-top: none; background: none; }
+  .hrow { display: flex; align-items: center; gap: 14px; padding: 11px 20px; border-top: 1px solid rgba(227,229,231,.6);
+          transition: background .12s; }
+  .hrow:hover { background: #fafbfc; }
+  .h-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .h-main { flex: 1; min-width: 0; }
+  .h-title { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .h-title .dim { color: var(--ink3); font-weight: 400; font-size: 12px; }
+  .h-sub { font-size: 11.5px; color: var(--ink3); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .h-sub.err { color: var(--rec); }
+  .h-metric { width: 74px; text-align: right; flex: none; }
+  .h-metric .v { font-size: 13px; font-weight: 700; }
+  .h-metric .l { font-size: 10.5px; color: var(--ink3); }
+  .h-status { flex: none; width: 62px; text-align: center; }
+  .h-acts { display: flex; gap: 2px; flex: none; width: 92px; justify-content: flex-end; }
+  .st-ok { color: var(--ok); background: rgba(47,173,95,.1); }
+  .st-stop { color: var(--ink3); background: rgba(148,153,160,.12); }
+  .st-err { color: var(--rec); background: rgba(242,93,142,.1); }
+  .st-vod { color: #d98a08; background: rgba(240,160,32,.12); }
+  .st-one { color: var(--live); background: rgba(251,114,153,.1); }
+
+  /* ===== 设计说明 ===== */
+  .notes { max-width: 1160px; margin: 34px auto 0; padding: 0 28px; }
+  .notes-card { border: 1.5px dashed #d6c9ce; border-radius: 16px; padding: 20px 24px; background: rgba(255,255,255,.6); }
+  .notes-card h3 { font-size: 13.5px; color: var(--live-dark); margin-bottom: 10px; }
+  .notes-card li { font-size: 12.5px; color: var(--ink2); line-height: 1.9; margin-left: 20px; }
+  .notes-card b { color: var(--ink1); }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <!-- ① 页头 + 概览条 -->
+  <div class="page-head">
+    <div>
+      <h1>录制</h1>
+      <div class="sub">ffmpeg 内核 · TS 分段无损收集 · 收尾自动 remux / 合并 MP4</div>
+    </div>
+    <div class="overview num">
+      <div class="ov-cell">
+        <div class="ov-label"><span class="dot dot-red"></span>进行中</div>
+        <div class="ov-value rec-on">2<small>路</small></div>
+      </div>
+      <div class="ov-cell">
+        <div class="ov-label">本次已录</div>
+        <div class="ov-value">11.9<small>GB</small></div>
+      </div>
+      <div class="ov-cell">
+        <div class="ov-label">磁盘可用</div>
+        <div class="ov-value">87.4<small>GB</small></div>
+      </div>
+      <div class="ov-cell">
+        <div class="ov-label">历史任务</div>
+        <div class="ov-value">128<small>条</small></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ② 进行中 -->
+  <div class="sec-head">
+    <h2><span class="dot dot-red"></span>进行中 <span class="count">2 个任务</span></h2>
+    <div class="right"><span style="font-size:11.5px;color:var(--ink3)">指标每 2 秒刷新 · 码率为实时差分</span></div>
+  </div>
+
+  <!-- 大卡: 直播录制 -->
+  <div class="rec-card kind-live">
+    <div class="rc-main">
+      <div class="rc-avatar"><span class="live-dot"></span></div>
+      <div class="rc-info">
+        <div class="rc-line1">
+          <span class="rc-nick">樱花小樱</span>
+          <span class="tag" style="color:var(--live);background:rgba(251,114,153,.1)">直播</span>
+          <span class="tag" style="color:#3a8ee6;background:rgba(58,142,230,.1)">自动</span>
+        </div>
+        <div class="rc-title">晚上好呀~ 聊天 + 舞蹈 等一个大哥</div>
+        <div class="rc-sub">樱花小樱(yhxy)/樱花小樱(yhxy)_晚上好呀_20260903_214510_0008.ts</div>
+      </div>
+      <div class="rc-metric m-dur num"><div class="v">2:13:45</div><div class="l">已录时长</div></div>
+      <div class="rc-metric num"><div class="v">7.31<small>GB</small></div><div class="l">已写入 · 8 段</div></div>
+      <div class="rc-metric num"><div class="v">6.8<small>Mbps</small></div><div class="l">实时码率</div></div>
+      <div class="rc-actions">
+        <button class="btn btn-rec-solid">■ 停止</button>
+        <button class="btn btn-ghost">目录</button>
+      </div>
+    </div>
+    <div class="rc-foot">
+      <div class="bar"><div class="fill-live"></div></div>
+      <div class="rc-foot-cap num">分段 15 分钟/段 · <b>磁盘充足</b> · 收集中</div>
+    </div>
+  </div>
+
+  <!-- 大卡: 回放下载 -->
+  <div class="rec-card kind-vod">
+    <div class="rc-main">
+      <div class="rc-avatar"><span class="live-dot" style="background:var(--amber)"></span></div>
+      <div class="rc-info">
+        <div class="rc-line1">
+          <span class="rc-nick">梨泰院娜娜</span>
+          <span class="tag st-vod">回放</span>
+        </div>
+        <div class="rc-title">0901 生日特别直播 · 全程回放</div>
+        <div class="rc-sub">梨泰院娜娜(ltnn)/梨泰院娜娜(ltnn)_0901生日_20260903_092112_vod.ts</div>
+      </div>
+      <div class="rc-metric num"><div class="v" style="color:var(--amber)">18:24</div><div class="l">已下载时长</div></div>
+      <div class="rc-metric num"><div class="v">3.42<small>GB</small></div><div class="l">已写入 · 单文件</div></div>
+      <div class="rc-metric num"><div class="v">9.7<small>MB/s</small></div><div class="l">下载速度</div></div>
+      <div class="rc-actions">
+        <button class="btn btn-rec">■ 取消下载</button>
+        <button class="btn btn-ghost">目录</button>
+      </div>
+    </div>
+    <div class="rc-foot">
+      <div class="bar"><div class="fill-vod"></div></div>
+      <div class="rc-foot-cap num"><b>42%</b> · 已下载 18:24 / 估算全长 ~43 分钟</div>
+    </div>
+  </div>
+
+  <!-- ③ 历史记录 -->
+  <div class="sec-head">
+    <h2>历史记录 <span class="count">128 条 · 上限 500</span></h2>
+    <div class="right">
+      <div class="chips">
+        <button class="chip on">全部</button>
+        <button class="chip">直播录制</button>
+        <button class="chip">回放下载</button>
+        <button class="chip">出错</button>
+      </div>
+      <button class="btn btn-ghost" style="padding:5px 12px;font-size:12px">清空</button>
+    </div>
+  </div>
+
+  <div class="hist-card">
+    <div class="hgroup">今天 · 9月3日</div>
+
+    <div class="hrow">
+      <span class="h-dot" style="background:var(--ok)"></span>
+      <div class="h-main">
+        <div class="h-title">晚上好呀~ 聊天 + 舞蹈 <span class="tag st-one" style="margin-left:6px">单文件</span></div>
+        <div class="h-sub">樱花小樱 · @yhxy · 21:40 开始</div>
+      </div>
+      <div class="h-metric num"><div class="v">2:13:45</div><div class="l">时长</div></div>
+      <div class="h-metric num"><div class="v">7.31 GB</div><div class="l">大小 · 6.7 Mbps</div></div>
+      <div class="h-metric num"><div class="v">1 个</div><div class="l">文件</div></div>
+      <div class="h-status"><span class="tag st-ok">已完成</span></div>
+      <div class="h-acts">
+        <button class="icon-btn" title="应用内播放">▶</button>
+        <button class="icon-btn" title="打开目录">📁</button>
+      </div>
+    </div>
+
+    <div class="hrow">
+      <span class="h-dot" style="background:var(--ok)"></span>
+      <div class="h-main">
+        <div class="h-title">0901 生日特别直播 · 全程回放 <span class="tag st-vod" style="margin-left:6px">回放</span></div>
+        <div class="h-sub">梨泰院娜娜 · @ltnn · 09:21 开始 · 单文件</div>
+      </div>
+      <div class="h-metric num"><div class="v">43:02</div><div class="l">时长</div></div>
+      <div class="h-metric num"><div class="v">7.94 GB</div><div class="l">大小 · 24.8 Mbps</div></div>
+      <div class="h-metric num"><div class="v">1 个</div><div class="l">文件</div></div>
+      <div class="h-status"><span class="tag st-ok">已完成</span></div>
+      <div class="h-acts">
+        <button class="icon-btn" title="应用内播放">▶</button>
+        <button class="icon-btn" title="打开目录">📁</button>
+      </div>
+    </div>
+
+    <div class="hrow">
+      <span class="h-dot" style="background:var(--ink3)"></span>
+      <div class="h-main">
+        <div class="h-title">午夜聊天室 进来玩玩</div>
+        <div class="h-sub">min · @minjee · 00:12 开始 · 手动停止</div>
+      </div>
+      <div class="h-metric num"><div class="v">37:20</div><div class="l">时长</div></div>
+      <div class="h-metric num"><div class="v">1.05 GB</div><div class="l">大小 · 3.8 Mbps</div></div>
+      <div class="h-metric num"><div class="v">3 个</div><div class="l">分段</div></div>
+      <div class="h-status"><span class="tag st-stop">已停止</span></div>
+      <div class="h-acts">
+        <button class="icon-btn" title="应用内播放">▶</button>
+        <button class="icon-btn" title="合并分段为单文件">⛓</button>
+        <button class="icon-btn" title="打开目录">📁</button>
+      </div>
+    </div>
+
+    <div class="hgroup">昨天 · 9月2日</div>
+
+    <div class="hrow">
+      <span class="h-dot" style="background:var(--rec)"></span>
+      <div class="h-main">
+        <div class="h-title">深夜电台 ASMR</div>
+        <div class="h-sub err">出错: 源停滞无数据(可能已失效), 请手动重新开始录制 · 23:58 开始</div>
+      </div>
+      <div class="h-metric num"><div class="v">52:11</div><div class="l">时长</div></div>
+      <div class="h-metric num"><div class="v">2.18 GB</div><div class="l">大小</div></div>
+      <div class="h-metric num"><div class="v">4 个</div><div class="l">分段</div></div>
+      <div class="h-status"><span class="tag st-err">出错</span></div>
+      <div class="h-acts">
+        <button class="icon-btn" title="应用内播放(已录部分)">▶</button>
+        <button class="icon-btn" title="合并分段为单文件">⛓</button>
+        <button class="icon-btn" title="打开目录">📁</button>
+      </div>
+    </div>
+
+    <div class="hrow">
+      <span class="h-dot" style="background:var(--ok)"></span>
+      <div class="h-main">
+        <div class="h-title">하루 종일 노래방송</div>
+        <div class="h-sub">소라 · @sora9 · 20:05 开始 · 正常收播</div>
+      </div>
+      <div class="h-metric num"><div class="v">4:02:31</div><div class="l">时长</div></div>
+      <div class="h-metric num"><div class="v">13.6 GB</div><div class="l">大小 · 7.7 Mbps</div></div>
+      <div class="h-metric num"><div class="v">17 个</div><div class="l">分段</div></div>
+      <div class="h-status"><span class="tag st-ok">已完成</span></div>
+      <div class="h-acts">
+        <button class="icon-btn" title="应用内播放">▶</button>
+        <button class="icon-btn" title="合并分段为单文件">⛓</button>
+        <button class="icon-btn" title="打开目录">📁</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 设计说明 -->
+<div class="notes">
+  <div class="notes-card">
+    <h3>设计说明（审阅用，不上线）</h3>
+    <ol>
+      <li><b>概览条一体化</b>：原 4 张独立数字砖 → 一条吸顶胶囊（进行中 / 本次已录 / 磁盘可用 / 历史条数），与标题同行，视线不再跳跃；磁盘低于阈值 2 倍时数字转红。</li>
+      <li><b>进行中 = 大卡片</b>：<b>直播/回放</b>用语言义标签区分（初稿的左缘色条已按评审意见移除；卡位图改为<b>直播间封面缩略图</b>，取拉源响应 thumbUrl，无封面回退昵称首字）；时长/大小/码率三大指标放大右对齐；底部直播卡为流光脉冲条，回放卡为<b>真实进度条 + 百分比 + 估算全长</b>。</li>
+      <li><b>新增数据点「实时码率 / 下载速度」</b>：利用现有每 2 秒任务推送做字节差分，<b>纯前端计算零请求成本</b>，直接回应"数据不明确"。</li>
+      <li><b>历史 = 日期分组 + 筛选 + 搜索</b>：今天/昨天/日期分组头；筛选 chips（全部/直播/回放/出错）+ 关键字框；出错行<b>次行直显失败原因</b>（红字），不用再猜。</li>
+      <li><b>历史行度量统一</b>：时长 / 大小(附平均码率) / 分段数固定列宽右对齐；「单文件」标签标记已合并任务，「合并」按钮只在可合并时出现（⛓）。</li>
+      <li><b>操作收拢为图标按钮</b>：▶ 播放 / ⛓ 合并 / 📁 打开，悬停出 tooltip；进行中为文字按钮（停止/目录），层级主次分明。</li>
+    </ol>
+    <ol style="margin-top:10px;border-top:1px dashed var(--line);padding-top:10px">
+      <li><b>已定稿 ①</b>：保留筛选 chips（全部/直播录制/回放下载/出错），<b>不做搜索框</b>（按需求方决定）。</li>
+      <li><b>已定稿 ②</b>：回放「估算全长」采用「清单 EXTINF 总时长 + ffmpeg -progress out_time 实测已下载媒体时长」口径，标注"估算"。</li>
+      <li><b>已定稿 ③</b>：本期不加历史单条删除，仅保留"清空"。</li>
+    </ol>
+  </div>
+</div>
+
+</body>
+</html>

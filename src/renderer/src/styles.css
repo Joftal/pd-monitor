@@ -79,6 +79,19 @@ body,
   opacity: 0;
 }
 
+/* 录制中底部流光(不确定进度): 渐变块从左滑到右 */
+@keyframes bar-slide {
+  0% {
+    left: -40%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+.bar-slide {
+  animation: bar-slide 1.8s ease-in-out infinite;
+}
+
 /* 顶栏导航下划线动画 */
 .nav-tab {
   position: relative;
@@ -114,23 +127,8 @@ body,
   transform: scale(0.96);
 }
 
-/* 加载态: 文字原位隐藏(保持布局), 转圈绝对居中覆盖, 消除内容位移 */
-.n-button--loading {
-  pointer-events: none;
-}
-.n-button--loading .n-button__content {
-  opacity: 0;
-  transition: none;
-}
-.n-button--loading .n-button__icon {
-  position: absolute !important;
-  inset: 0 !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  margin: 0 !important;
-  width: 100% !important;
-}
+/* 按钮加载态统一不用 naive :loading(绝对定位形态兼容差),
+   全部改为内容区内 inline-flex + animate-spin 的自绘 spinner(见各视图实现) */
 
 /* 卡片标题两行截断(B站风) */
 .clamp-2 {

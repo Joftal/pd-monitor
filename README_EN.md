@@ -32,12 +32,23 @@ A Bilibili-inspired light-themed desktop client built with **Electron + Vue 3**.
 - Built-in HLS player (hls.js), quality switch maps directly to IVS variants
 - Password rooms supported; 19+ / fan-club rooms unlocked via your login session
 - **Streams use long-lived variant URLs** (bypasses the 10-minute-expiring master playlist); a dead source shows a manual retry entry — never silently refetched in the background
+- **Main + backup lines (hls2/hls3) one-click switching**: backups use master URLs with hls.js auto quality
 - Current-source card: one-line truncated display + one-click copy + keeps the previously-failed URL visible
 
 ### ⏺ Recording
 - Bundled ffmpeg, zero external dependencies; time-sliced TS segments → auto lossless remux to MP4
+- **Optional segment merge**: losslessly merge all segments into a single MP4 on finish (delete-segments toggle; originals always kept on merge failure); history items can also be merged manually (idempotent)
+- **In-app playback**: play local MP4s straight from the history list (`plocal://` whitelisted protocol, multi-segment switching) — no external player needed
 - Recording uses long-lived variant URLs straight through; abnormal ffmpeg exits or 60s of zero byte-growth are flagged with a notification — never silently re-sourced
 - Task manager (live duration/size), history (capped at 500 entries), disk-space guard, graceful shutdown
+
+### 📼 Replay (VOD)
+- `[Replay]` rooms in the hall can be watched directly in the player (seekable); "Download Replay" saves a single file via the recording pipeline
+- Replay URL extraction uses **broad parsing + raw-response logging** for field calibration; if parsing fails, please attach that day's log from `data/logs/` when reporting
+
+### 🧾 Runtime Logs
+- Risk-control hits / circuit breaker / recording events / replay-parse failures are written to `data/logs/` (daily files, kept 14 days)
+- Log folder opens from the settings page; logs may contain short-lived signed URLs — kept locally only, review before sharing
 
 ### 🔐 Account
 - Three login methods: ID+password / embedded official web login window (**event-driven, zero polling**) / **cookie import** (bulletproof fallback against anti-bot challenges)
@@ -67,6 +78,7 @@ Download from [Releases](../../releases):
 | Directory | Contents |
 |---|---|
 | `data/` | `db.json` follows/settings/history + `vault.dat` encrypted cookies |
+| `data/logs/` | Runtime logs (daily files, kept 14 days) |
 | `recording/` | Recordings (default location; overridable in settings) |
 
 ## 🚀 Quick start
@@ -127,7 +139,9 @@ src/
 │     ├─ authWin.ts       #   web login window (event-driven, zero polling)
 │     ├─ vault.ts         #   DPAPI-encrypted cookie vault
 │     ├─ store.ts         #   JSON persistence (follows/settings/history)
-│     └─ notify.ts        #   in-app toasts + system notifications
+│     ├─ notify.ts        #   in-app toasts + system notifications
+│     ├─ logger.ts        #   runtime log files (data/logs, daily rotation, 14-day retention)
+│     └─ localMedia.ts    #   plocal:// local recording playback protocol (mp4 whitelist + manual Range)
 ├─ preload/index.ts       # contextBridge (window.api)
 ├─ renderer/src/          # Vue3 (Hall / Following / Player / Recordings / Account / Settings)
 └─ shared/types.ts        # shared contracts + IPC channel names

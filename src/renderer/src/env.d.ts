@@ -7,7 +7,7 @@ declare module '*.vue' {
 }
 
 import type {
-  AccountState, Anchor, DiscoveryItem, PlayInfo, RecHistoryItem, RecTask, Settings, Toast, WatcherStatus
+  AccountState, Anchor, AppInfo, DiscoveryItem, PlayInfo, RecHistoryItem, RecTask, Settings, Toast, UpdateCheckResult, WatcherStatus
 } from '@shared/types'
 
 declare global {
@@ -32,6 +32,7 @@ declare global {
       recOpenFolder(dir: string): Promise<boolean>
       recClearHistory(): Promise<boolean>
       recDiskFree(): Promise<number>
+      recMerge(taskId: string): Promise<{ ok: boolean; files?: string[]; error?: string }>
       settingsGet(): Promise<Settings>
       settingsSet(patch: Partial<Settings>): Promise<Settings>
       settingsSelectDir(): Promise<string>
@@ -41,6 +42,10 @@ declare global {
       winControl(action: 'min' | 'max' | 'close'): Promise<void>
       openExternal(url: string): Promise<void>
       appDataDir(): Promise<string>
+      openLogs(): Promise<string>
+      appInfo(): Promise<AppInfo>
+      checkUpdate(): Promise<UpdateCheckResult>
+      localFileUrl(absPath: string): string
       onAnchors(cb: (list: Anchor[]) => void): () => void
       onRecordings(cb: (list: RecTask[]) => void): () => void
       onWatcher(cb: (s: WatcherStatus) => void): () => void

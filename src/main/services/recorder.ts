@@ -8,6 +8,7 @@ import { api } from './pandalive'
 import { store } from './store'
 import { tsName, diskFreeGb, UA, sleep, defaultRecordRoot } from '../util'
 import { sendToast } from './notify'
+import { logger } from './logger'
 
 // ============ 录制引擎 ============
 // - ffmpeg -c copy 分段录制; 直接使用长效 IVS 变体地址(master 一次性: 源缓存复用)
@@ -42,6 +43,35 @@ function buildBaseName(nick: string, userId: string, title: string): string {
   return t ? `${n}(${userId})_${t}_${tsName()}` : `${n}(${userId})_${tsName()}`
 }
 
+/** 无损合并多个分段为单个 MP4(concat demuxer, -c copy 不重编码); 临时 list 文件随用随删 */
+function concatSegments(files: string[], outPath: string): Promise<boolean> {
+  const listFile = outPath + '.concat.txt'
+  try {
+    // concat list 对 Windows 反斜杠/单引号敏感: 统一正斜杠 + 单引号转义
+    const esc = (s: string): string => s.replace(/\\/g, '/').replace(/'/g, "'\\''")
+    fs.writeFileSync(listFile, files.map((f) => `file '${esc(f)}'`).join('\n'), 'utf-8')
+  } catch {
+    return Promise.resolve(false)
+  }
+  return new Promise((resolve) => {
+    const done = (ok: boolean): void => {
+      try {
+        fs.unlinkSync(listFile)
+      } catch {
+        /* ignore */
+      }
+      resolve(ok)
+    }
+    const ff = spawn(
+      ffmpegPath(),
+      ['-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', '-movflags', '+faststart', outPath],
+      { stdio: ['ignore', 'ignore', 'ignore'] }
+    )
+    ff.on('exit', (code) => done(code === 0))
+    ff.on('error', () => done(false))
+  })
+}
+
 export interface StartRecOptions {
   userId: string
   nick: string
@@ -64,9 +94,13 @@ class Task implements RecTask {
   bytes = 0
   error = ''
   auto: boolean
+  vod = false
+  vodTotalSec = 0
+  vodDoneSec = 0
+  thumbUrl = ''
 
   password: string
-  private proc: ChildProcessByStdio<Writable, null, Readable> | null = null
+  private proc: ChildProcessByStdio<Writable, Readable | null, Readable> | null = null
   private segIndex = 0
   private baseName = ''
   private statTimer: NodeJS.Timeout | null = null
@@ -96,6 +130,11 @@ class Task implements RecTask {
     return path.join(this.dirPath, `${this.baseName}_%04d.ts`)
   }
 
+  /** 回放(VOD)下载的单文件产出(无直播分段概念, finalize 统一 remux) */
+  get vodOutFile(): string {
+    return path.join(this.dirPath, `${this.baseName}_vod.ts`)
+  }
+
   private push(): void {
     recorder.emitUpdate()
   }
@@ -109,10 +148,18 @@ class Task implements RecTask {
       throw err
     }
     if (play.title) this.title = play.title
+    if (play.thumbUrl) this.thumbUrl = play.thumbUrl
+    this.vod = !!play.vod
     this.refreshBaseName() // 拿到最终标题后再定文件名(首次可能任选项带标题)
     if (this.lastBytesAt === 0) this.lastBytesAt = Date.now() // 停滞计时起点: 从未写入也能被检出
+    logger.info('rec', `开始${this.vod ? '回放下载' : '录制'}: ${this.nick}(@${this.userId})${this.auto ? ' [自动]' : ''}`)
     // master URL 仅 10 分钟有效: 录制改用具象变体地址(最高档/原画)
-    this.spawnFfmpeg(play.variants?.[0]?.url || play.m3u8)
+    const src = play.variants?.[0]?.url || play.m3u8
+    if (this.vod) {
+      // 预取清单总时长供进度条(一次请求, 用户开录意图摊销; 失败=0 退化为不定进度)
+      this.vodTotalSec = await api.fetchPlaylistDurationSec(src)
+    }
+    this.spawnFfmpeg(src)
     this.statTimer = setInterval(() => this.statFiles(), 2000)
     this.stallTimer = setInterval(() => this.checkStall(), 10000)
     this.push()
@@ -133,33 +180,67 @@ class Task implements RecTask {
       '-rw_timeout', '50000000',
     ]
     if (cfg.proxyUrl) args.push('-http_proxy', cfg.proxyUrl)
-    args.push(
-      '-i', m3u8,
-      '-map', '0',
-      '-c', 'copy',
-      '-f', 'segment',
-      '-segment_time', String(Math.max(60, cfg.splitSeconds || 900)),
-      '-segment_format', 'mpegts',
-      '-segment_start_number', String(this.segIndex || 1),
-      '-reset_timestamps', '1',
-      this.outputPattern
-    )
-    const ff = spawn(ffmpegPath(), args, { stdio: ['pipe', 'ignore', 'pipe'] })
+    if (this.vod) {
+      // 回放(VOD)下载: 单 TS 文件直出, 不走直播分段; -progress 管道回报已下载媒体时长
+      args.push('-nostats', '-progress', 'pipe:1')
+      args.push('-i', m3u8, '-map', '0', '-c', 'copy', this.vodOutFile)
+    } else {
+      args.push(
+        '-i', m3u8,
+        '-map', '0',
+        '-c', 'copy',
+        '-f', 'segment',
+        '-segment_time', String(Math.max(60, cfg.splitSeconds || 900)),
+        '-segment_format', 'mpegts',
+        '-segment_start_number', String(this.segIndex || 1),
+        '-reset_timestamps', '1',
+        this.outputPattern
+      )
+    }
+    // 分开写两条 spawn: 保住 stdio 重载推导(vod 需要 stdout 管道回传 -progress)
+    const ff = this.vod
+      ? spawn(ffmpegPath(), args, { stdio: ['pipe', 'pipe', 'pipe'] })
+      : spawn(ffmpegPath(), args, { stdio: ['pipe', 'ignore', 'pipe'] })
     this.proc = ff
     let errBuf = ''
     ff.stderr.on('data', (d: Buffer) => {
       errBuf = (errBuf + d.toString()).slice(-4000)
     })
+    // VOD: 从 -progress 管道解析 out_time(已下载的媒体时长), 供进度条
+    if (this.vod && ff.stdout) {
+      let pbuf = ''
+      ff.stdout.on('data', (d: Buffer) => {
+        pbuf += d.toString()
+        let idx: number
+        while ((idx = pbuf.indexOf('\n')) >= 0) {
+          const line = pbuf.slice(0, idx).trim()
+          pbuf = pbuf.slice(idx + 1)
+          // out_time_ms 历史命名实为微秒, out_time_us 同理按微秒计
+          const m = /^out_time_(?:us|ms)=(\d+)/.exec(line)
+          if (m) this.vodDoneSec = Number(m[1]) / 1e6
+        }
+      })
+    }
     ff.on('exit', (code) => {
       const expected = this.stopping
       this.proc = null
       this.statFiles()
       if (expected) return
       if (this.status !== 'recording') return
-      const reason =
-        code === 0
-          ? '流连接结束'
-          : errBuf.split('\n').filter(Boolean).slice(-3).join(' | ') || `ffmpeg 退出码 ${code}`
+      const tail = errBuf.split('\n').filter(Boolean).slice(-3).join(' | ')
+      if (this.vod) {
+        // 回放下载: 流拉完自然退出(0)=完成; 回放无"是否还在播"语义, 不做探针
+        if (code === 0) {
+          logger.info('rec', `回放下载完成: ${this.nick}(@${this.userId})`)
+          void this.finalize('done')
+        } else {
+          this.error = `回放下载中断(${tail || `ffmpeg 退出码 ${code}`}), 请手动重新开始`
+          logger.warn('rec', `${this.nick}(@${this.userId}) ${this.error}`)
+          void this.finalize('error')
+        }
+        return
+      }
+      const reason = code === 0 ? '流连接结束' : tail || `ffmpeg 退出码 ${code}`
       void this.handleUnexpectedExit(reason)
     })
   }
@@ -189,7 +270,9 @@ class Task implements RecTask {
       this.lastBytes = this.bytes
       this.lastBytesAt = Date.now()
     } else if (this.lastBytesAt && Date.now() - this.lastBytesAt > STALL_MS) {
-      this.error = '源停滞无数据(可能已失效), 请手动重新开始录制'
+      this.error = this.vod
+        ? '下载停滞无数据(源可能已失效), 请手动重新开始'
+        : '源停滞无数据(可能已失效), 请手动重新开始录制'
       void this.finalize('error')
       return
     }
@@ -254,6 +337,7 @@ class Task implements RecTask {
   /** 用户主动停止 */
   async stop(): Promise<void> {
     if (this.status !== 'recording') return
+    logger.info('rec', `手动停止: ${this.nick}(@${this.userId})`)
     this.stopping = true
     await this.killProc()
     await this.finalize('stopped')
@@ -284,8 +368,39 @@ class Task implements RecTask {
       this.statFiles()
     }
 
+    // 分段合并(可选): 合并为单个 MP4; 失败仅记日志并全部保留原分段(不丢数据)
+    if (status !== 'error' && !this.vod && cfg.mergeMp4) {
+      const mp4s = this.files.filter((f) => f.toLowerCase().endsWith('.mp4'))
+      if (mp4s.length >= 2) {
+        const out = path.join(this.dirPath, `${this.baseName}.mp4`)
+        this.status = 'remuxing'
+        this.push()
+        const ok = await concatSegments(mp4s, out)
+        if (ok) {
+          logger.info('rec', `分段合并完成: ${this.nick} -> ${path.basename(out)}(${mp4s.length} 段)`)
+          if (cfg.mergeDeleteSegments) {
+            for (const f of mp4s) {
+              try {
+                fs.unlinkSync(f)
+              } catch {
+                /* ignore */
+              }
+            }
+          }
+          this.statFiles()
+        } else {
+          logger.warn('rec', `分段合并失败, 已保留原分段: ${this.nick}(@${this.userId})`)
+        }
+      }
+    }
+
     this.status = status
     this.endedAt = Date.now()
+    logger.info(
+      'rec',
+      `录制结束: ${this.nick}(@${this.userId}) status=${status} 时长=${Math.round((this.endedAt - this.startedAt) / 1000)}s ` +
+        `大小=${(this.bytes / 1024 ** 2).toFixed(1)}MB${this.error ? ` 原因: ${this.error}` : ''}`
+    )
     if (status === 'error') {
       // 录制出错(源死/中断): 立即作废该主播的源缓存, 避免下次重录复用尸源
       api.invalidatePlay(this.userId)
@@ -315,8 +430,8 @@ class Recorder {
 
   static publicTask(t: Task): RecTask {
     // 剥离私有实现字段(进程句柄/房间密码), 只暴露公开数据
-    const { id, userId, nick, title, startedAt, endedAt, status, dirPath, currentFile, files, bytes, error, auto } = t
-    return { id, userId, nick, title, startedAt, endedAt, status, dirPath, currentFile, files: [...files], bytes, error, auto }
+    const { id, userId, nick, title, startedAt, endedAt, status, dirPath, currentFile, files, bytes, error, auto, vod, vodTotalSec, vodDoneSec, thumbUrl } = t
+    return { id, userId, nick, title, startedAt, endedAt, status, dirPath, currentFile, files: [...files], bytes, error, auto, vod, vodTotalSec, vodDoneSec, thumbUrl }
   }
 
   emitUpdate(): void {
@@ -380,6 +495,68 @@ class Recorder {
 
   removeTask(userId: string): void {
     this.tasks.delete(userId)
+  }
+
+  /**
+   * 手动合并某个历史任务的分段(MP4 ≥2 优先, 否则 TS ≥2 直接 concat 出 MP4)
+   * 幂等: 已存在整文件时直接刷新历史并返回成功; 受「合并后删除分段」设置约束
+   */
+  async mergeTask(taskId: string): Promise<{ ok: boolean; files?: string[]; error?: string }> {
+    const item = store.listHistory().find((h) => h.id === taskId)
+    if (!item) return { ok: false, error: '任务不存在或已被清理' }
+    const dir = item.dirPath
+    if (!dir || !fs.existsSync(dir)) return { ok: false, error: '录制目录不存在(文件可能已被移动/删除)' }
+
+    const mp4s = (item.files || []).filter((f) => f.toLowerCase().endsWith('.mp4')).sort()
+    const tss = (item.files || []).filter((f) => f.toLowerCase().endsWith('.ts')).sort()
+    const first = mp4s[0] || tss[0]
+    if (!first) return { ok: false, error: '该任务没有可合并的文件' }
+    const base = path.basename(first).replace(/_(\d{4}|vod)\.(mp4|ts)$/i, '')
+    const out = path.join(dir, `${base}.mp4`)
+
+    const refresh = (): { files: string[]; bytes: number } => {
+      const list = fs
+        .readdirSync(dir)
+        .filter((f) => f.startsWith(base) && (f.toLowerCase().endsWith('.ts') || f.toLowerCase().endsWith('.mp4')))
+        .sort()
+        .map((f) => path.join(dir, f))
+      const bytes = list.reduce((s, f) => {
+        try {
+          return s + fs.statSync(f).size
+        } catch {
+          return s
+        }
+      }, 0)
+      return { files: list, bytes }
+    }
+
+    if (fs.existsSync(out)) {
+      const r = refresh()
+      store.updateHistory(taskId, { files: r.files, bytes: r.bytes })
+      return { ok: true, files: r.files }
+    }
+    const segs = mp4s.length >= 2 ? mp4s : tss
+    if (segs.length < 2) return { ok: false, error: '分段不足 2 个, 无需合并' }
+
+    logger.info('rec', `手动合并开始: ${item.nick}(@${item.userId}) ${segs.length} 段`)
+    const ok = await concatSegments(segs, out)
+    if (!ok) {
+      logger.warn('rec', `手动合并失败: ${item.nick}(@${item.userId})`)
+      return { ok: false, error: '合并失败(ffmpeg 未成功完成, 详见日志)' }
+    }
+    if (store.getSettings().mergeDeleteSegments) {
+      for (const f of segs) {
+        try {
+          fs.unlinkSync(f)
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    const r = refresh()
+    store.updateHistory(taskId, { files: r.files, bytes: r.bytes })
+    logger.info('rec', `手动合并完成: ${item.nick} -> ${path.basename(out)}`)
+    return { ok: true, files: r.files }
   }
 
   openFolder(userId: string): string | null {

@@ -5,6 +5,7 @@ import * as tls from 'tls'
 import * as net2 from 'net'
 import { UA, sleep } from '../util'
 import { vault, CookieJar } from './vault'
+import { logger } from './logger'
 
 // ============ pandalive API 客户端 ============
 // - 全局限速队列(串行 + 最小间隔 + 抖动), 防 IP 风控
@@ -51,6 +52,8 @@ export interface PlayResult {
   needPassword?: boolean
   error?: string
   m3u8?: string
+  /** 回放(liveType=rec)播放结果: 录制据此走单文件下载, 前端据此切换文案 */
+  vod?: boolean
   /** 解析 master 得到的变体分档(带宽降序, 第一个为最高档) */
   variants?: VariantInfo[]
   hlsBackups?: string[]
@@ -71,6 +74,28 @@ interface QueueJob<T> {
   run: () => Promise<T>
   resolve: (v: T) => void
   reject: (e: unknown) => void
+}
+
+/** 宽口径: 在响应 JSON 树中递归寻找 m3u8 地址(回放房 PlayList 字段结构未文档化, 先兜底后校准) */
+function scanM3u8(node: unknown, depth = 0): string {
+  if (depth > 6 || node == null) return ''
+  if (typeof node === 'string') {
+    return /^https?:\/\/\S+?\.m3u8(\?\S*)?$/.test(node) ? node : ''
+  }
+  if (Array.isArray(node)) {
+    for (const v of node) {
+      const r = scanM3u8(v, depth + 1)
+      if (r) return r
+    }
+    return ''
+  }
+  if (typeof node === 'object') {
+    for (const v of Object.values(node as Record<string, unknown>)) {
+      const r = scanM3u8(v, depth + 1)
+      if (r) return r
+    }
+  }
+  return ''
 }
 
 let nodeProxyUrl = ''
@@ -192,6 +217,24 @@ class PandaApi {
       const res = await nodeHttpRequest('GET', url, headers, undefined, nodeProxyUrl)
       if (res.status !== 200) throw new Error(`HTTP ${res.status}`)
       return res.text
+    }
+  }
+
+  /** 求 VOD 媒体清单总时长(秒): EXTINF 求和; 失败/非清单返回 0(前端退化为不定进度) */
+  async fetchPlaylistDurationSec(url: string): Promise<number> {
+    try {
+      const text = await this.fetchText(url)
+      let sum = 0
+      for (const l of text.split('\n')) {
+        const m = /^#EXTINF:([\d.]+)/.exec(l.trim())
+        if (m) {
+          const s = Number(m[1])
+          if (Number.isFinite(s)) sum += s // 脏行护栏: NaN 不进和(总时长 NaN 会击穿进度估算)
+        }
+      }
+      return sum
+    } catch {
+      return 0
     }
   }
 
@@ -351,9 +394,18 @@ class PandaApi {
         throw e
       }
     }
-    if (status === 403 || status === 429) throw new RiskError(`HTTP ${status} (可能被风控)`, status)
-    if (status >= 500) throw new RiskError(`HTTP ${status} 服务器错误`, status)
-    if (text.trimStart().startsWith('<')) throw new RiskError('返回HTML(疑似风控验证页)', status)
+    if (status === 403 || status === 429) {
+      logger.warn('api', `疑似风控: HTTP ${status} ${method} ${path}`)
+      throw new RiskError(`HTTP ${status} (可能被风控)`, status)
+    }
+    if (status >= 500) {
+      logger.warn('api', `服务器错误: HTTP ${status} ${method} ${path}`)
+      throw new RiskError(`HTTP ${status} 服务器错误`, status)
+    }
+    if (text.trimStart().startsWith('<')) {
+      logger.warn('api', `返回HTML疑似风控验证页: ${method} ${path} (HTTP ${status})`)
+      throw new RiskError('返回HTML(疑似风控验证页)', status)
+    }
     return { status, text }
   }
 
@@ -362,6 +414,7 @@ class PandaApi {
       return JSON.parse(text) as T
     } catch {
       if (text === '' || text === '""') return {} as T
+      logger.warn('api', '响应不是JSON(疑似风控)')
       throw new RiskError('响应不是JSON(疑似风控)')
     }
   }
@@ -524,15 +577,44 @@ class PandaApi {
       return { ok: false, error: msg || '播放失败' }
     }
     const pl = j?.PlayList
-    const hls = pl?.hls?.[0]?.url
-    if (!hls) return { ok: false, error: '未获取到直播流(可能已下播或为回放)' }
+    const vod = String((j.media as { liveType?: string } | undefined)?.liveType || '') === 'rec'
+    let hls = pl?.hls?.[0]?.url || ''
+    let scanned = false
+    if (!hls) {
+      // 回放房: PlayList 结构与直播可能不同, 宽口径整树扫描 m3u8 兜底
+      hls = scanM3u8(j)
+      scanned = Boolean(hls)
+      if (!hls) {
+        if (vod) {
+          // 校准通道: 原始响应落日志(截断), 真机一轮即可定位真实字段
+          logger.warn('api', `回放流地址未解析到(@${userId}), 原始响应: ${JSON.stringify(j).slice(0, 4000)}`)
+          return { ok: false, error: '回放流地址未解析到(已记录到 data/logs, 反馈请附当日日志)' }
+        }
+        return { ok: false, error: '未获取到直播流(可能已下播或为回放)' }
+      }
+    }
     const backups: string[] = []
-    if (pl?.hls2?.[0]?.url) backups.push(pl.hls2[0].url)
-    if (pl?.hls3?.[0]?.url) backups.push(pl.hls3[0].url)
+    if (!scanned) {
+      if (pl?.hls2?.[0]?.url) backups.push(pl.hls2[0].url)
+      if (pl?.hls3?.[0]?.url) backups.push(pl.hls3[0].url)
+    }
+    if (vod || scanned) {
+      // 校准辅助: 回放源域名若不在流域名注入白名单(live-video.net / cloudfront.net),
+      // 渲染层 hls.js 播放可能因缺 Origin 头被 403(ffmpeg 录制不受影响, 它自带头)
+      try {
+        const host = new URL(hls).hostname
+        if (!/(^|\.)live-video\.net$/.test(host) && !/(^|\.)cloudfront\.net$/.test(host)) {
+          logger.warn('api', `回放源域名 ${host} 不在头注入白名单(index.ts), 播放若 403 需要扩展注入域清单`)
+        }
+      } catch {
+        /* ignore */
+      }
+    }
     // master 只活 10 分钟: 解析出长效变体地址供播放/录制直接使用
     const variants = await this.fetchVariants(hls)
     return {
       ok: true,
+      vod: vod || scanned,
       m3u8: hls,
       variants,
       hlsBackups: backups,

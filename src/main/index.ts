@@ -6,8 +6,13 @@ import { store } from './services/store'
 import { watcher } from './services/watcher'
 import { recorder } from './services/recorder'
 import { UA } from './util'
+import { logger } from './services/logger'
+import { registerMediaScheme, installMediaHandler } from './services/localMedia'
 
 // ============ 应用入口 ============
+
+// 本地录制回看协议(plocal://): 特权声明必须在 app ready 前完成
+registerMediaScheme()
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
@@ -122,6 +127,9 @@ function createTray(): void {
 
 app.whenReady().then(() => {
   // 初始化服务
+  logger.cleanup()
+  logger.info('app', `PandaLive Monitor v${app.getVersion()} 启动 (packaged=${app.isPackaged})`)
+  installMediaHandler()
   const cfg = store.getSettings()
   api.restoreCookies()
   applyProxy(cfg.proxyUrl)
