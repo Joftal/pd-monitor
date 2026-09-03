@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, shell } from 'electron'
 import { spawn, ChildProcessByStdio } from 'child_process'
 import { Readable, Writable } from 'stream'
 import * as fs from 'fs'
@@ -6,6 +6,7 @@ import * as path from 'path'
 import { EV, RecTask } from '../../shared/types'
 import { api } from './pandalive'
 import { store } from './store'
+import { thumbs } from './thumbs'
 import { tsName, diskFreeGb, UA, sleep, defaultRecordRoot } from '../util'
 import { sendToast } from './notify'
 import { logger } from './logger'
@@ -407,6 +408,8 @@ class Task implements RecTask {
     store.addHistory(Recorder.publicTask(this))
     recorder.removeTask(this.userId)
     this.push()
+    // 后台生成视频库九宫格缩略图(串行队列, 不阻塞收尾)
+    thumbs.enqueue(this.id)
 
     if (status === 'done') sendToast({ type: 'rec', title: mt('rec.toastDone', { nick: this.nick }), body: mt('rec.segs', { n: this.files.length }) })
     if (status === 'error') sendToast({ type: 'error', title: mt('rec.toastErr', { nick: this.nick }), body: this.error.slice(0, 120) })
@@ -506,8 +509,10 @@ class Recorder {
     const dir = item.dirPath
     if (!dir || !fs.existsSync(dir)) return { ok: false, error: mt('rec.mergeNoDir') }
 
-    const mp4s = (item.files || []).filter((f) => f.toLowerCase().endsWith('.mp4')).sort()
-    const tss = (item.files || []).filter((f) => f.toLowerCase().endsWith('.ts')).sort()
+    // 只合并现存文件(外部删段不死在 concat 里)
+    const existing = (item.files || []).filter((f) => fs.existsSync(f))
+    const mp4s = existing.filter((f) => f.toLowerCase().endsWith('.mp4')).sort()
+    const tss = existing.filter((f) => f.toLowerCase().endsWith('.ts')).sort()
     const first = mp4s[0] || tss[0]
     if (!first) return { ok: false, error: mt('rec.mergeNoFiles') }
     const base = path.basename(first).replace(/_(\d{4}|vod)\.(mp4|ts)$/i, '')
@@ -532,6 +537,7 @@ class Recorder {
     if (fs.existsSync(out)) {
       const r = refresh()
       store.updateHistory(taskId, { files: r.files, bytes: r.bytes })
+      thumbs.enqueue(taskId)
       return { ok: true, files: r.files }
     }
     const segs = mp4s.length >= 2 ? mp4s : tss
@@ -554,8 +560,94 @@ class Recorder {
     }
     const r = refresh()
     store.updateHistory(taskId, { files: r.files, bytes: r.bytes })
+    thumbs.enqueue(taskId)
     logger.info('rec', `手动合并完成: ${item.nick} -> ${path.basename(out)}`)
     return { ok: true, files: r.files }
+  }
+
+  /** 删除录制任务: 文件移入回收站 → 清缩略图 → 移出历史。任一文件被占用则失败并保留条目 */
+  async deleteTask(taskId: string): Promise<{ ok: boolean; error?: string; deletedFiles: number; freedBytes: number; missingFiles: number }> {
+    const zero = { deletedFiles: 0, freedBytes: 0, missingFiles: 0 }
+    const item = store.listHistory().find((h) => h.id === taskId)
+    if (!item) return { ok: false, error: mt('rec.delNoTask'), ...zero }
+    const files = (item.files || []).filter((f) => /\.(mp4|ts)$/i.test(f))
+    let deleted = 0
+    let freed = 0
+    let missing = 0
+    const failed: string[] = []
+    for (const f of files) {
+      if (!fs.existsSync(f)) {
+        missing++
+        continue
+      }
+      let size = 0
+      try {
+        size = fs.statSync(f).size
+      } catch { /* ignore */ }
+      try {
+        await shell.trashItem(f)
+        deleted++
+        freed += size
+      } catch (e) {
+        failed.push(path.basename(f))
+        logger.warn('rec', `删除失败: ${f} — ${String((e as Error).message || e)}`)
+      }
+    }
+    if (failed.length) {
+      // 部分删除: 历史条目文件列表对账(移除已成功删除的), 条目保留
+      const remain = files.filter((f) => fs.existsSync(f))
+      store.updateHistory(taskId, { files: remain, bytes: remain.reduce((s, f) => {
+        try {
+          return s + fs.statSync(f).size
+        } catch {
+          return s
+        }
+      }, 0) })
+      return { ok: false, error: mt('rec.delLocked', { name: failed[0], n: failed.length }), deletedFiles: deleted, freedBytes: freed, missingFiles: missing }
+    }
+    // 全删完: 空目录尝试移除(同目录可能有别的任务文件, 不递归硬删)
+    try {
+      const d = item.dirPath
+      if (d && fs.existsSync(d) && fs.readdirSync(d).length === 0) fs.rmdirSync(d)
+    } catch { /* 目录非空/占用: 留着, 无害 */ }
+    thumbs.remove(taskId)
+    store.removeHistory(taskId)
+    logger.info('rec', `删除录制: ${item.nick}(@${item.userId}) ${deleted} 个文件 释放 ${(freed / 1024 ** 2).toFixed(1)}MB${missing ? ` (${missing} 个文件已不存在)` : ''}`)
+    return { ok: true, deletedFiles: deleted, freedBytes: freed, missingFiles: missing }
+  }
+
+  /** 删除单个分段: 校验属主 → 回收站 → 对账文件集 → 缩略图重生成; 删空则任务整体移除 */
+  async deleteFile(taskId: string, absPath: string): Promise<{ ok: boolean; error?: string; remaining: number; emptied?: boolean }> {
+    const item = store.listHistory().find((h) => h.id === taskId)
+    if (!item) return { ok: false, error: mt('rec.delNoTask'), remaining: 0 }
+    const files = item.files || []
+    if (!files.includes(absPath) || !/\.(mp4|ts)$/i.test(absPath)) return { ok: false, error: mt('rec.delFileNotIn'), remaining: files.length }
+    if (fs.existsSync(absPath)) {
+      try {
+        await shell.trashItem(absPath)
+      } catch (e) {
+        logger.warn('rec', `分段删除失败: ${absPath} — ${String((e as Error).message || e)}`)
+        return { ok: false, error: mt('rec.delFileLocked'), remaining: files.length }
+      }
+    }
+    const remain = files.filter((f) => f !== absPath && fs.existsSync(f))
+    if (!remain.length) {
+      thumbs.remove(taskId)
+      store.removeHistory(taskId)
+      logger.info('rec', `分段删除后任务已空, 整任务移除: ${item.nick}(@${item.userId})`)
+      return { ok: true, remaining: 0, emptied: true }
+    }
+    const bytes = remain.reduce((s, f) => {
+      try {
+        return s + fs.statSync(f).size
+      } catch {
+        return s
+      }
+    }, 0)
+    store.updateHistory(taskId, { files: remain, bytes })
+    thumbs.enqueue(taskId) // sig 变化 → 缩略图按剩余分段重生成
+    logger.info('rec', `删除分段: ${item.nick}(@${item.userId}) ${path.basename(absPath)} (剩 ${remain.length})`)
+    return { ok: true, remaining: remain.length }
   }
 
   openFolder(userId: string): string | null {

@@ -109,6 +109,15 @@ body,
   opacity: 0;
 }
 
+/* 隐藏滚动条(索引条等紧凑竖列) */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* 录制中底部流光(不确定进度): 渐变块从左滑到右 */
 @keyframes bar-slide {
   0% {

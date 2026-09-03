@@ -187,6 +187,30 @@ export interface UpdateCheckResult {
   error?: string
 }
 
+/** 九宫格缩略图就绪推送 */
+export interface RecThumbReady {
+  id: string
+  url: string
+}
+
+/** 删除录制任务结果 */
+export interface RecDeleteResult {
+  ok: boolean
+  error?: string
+  deletedFiles: number
+  freedBytes: number
+  missingFiles: number
+}
+
+/** 删除单个分段结果 */
+export interface RecDeleteFileResult {
+  ok: boolean
+  error?: string
+  remaining: number
+  /** 删除后文件全空: 任务条目与缩略图已一并移除 */
+  emptied?: boolean
+}
+
 // ---------- IPC invoke 通道 ----------
 export const CH = {
   authState: 'auth:state',
@@ -209,6 +233,9 @@ export const CH = {
   recClearHistory: 'rec:clear-history',
   recDiskFree: 'rec:disk-free',
   recMerge: 'rec:merge',
+  recThumb: 'rec:thumb',
+  recDelete: 'rec:delete',
+  recDeleteFile: 'rec:delete-file',
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
   settingsSelectDir: 'settings:select-dir',
@@ -227,6 +254,7 @@ export const CH = {
 export const EV = {
   anchors: 'ev:anchors',
   recordings: 'ev:recordings',
+  recThumb: 'ev:rec-thumb',
   watcher: 'ev:watcher',
   account: 'ev:account',
   toast: 'ev:toast',

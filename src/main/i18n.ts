@@ -84,7 +84,11 @@ const zh: Dict = {
   'rec.mergeNoDir': '录制目录不存在(文件可能已被移动/删除)',
   'rec.mergeNoFiles': '该任务没有可合并的文件',
   'rec.mergeFew': '分段不足 2 个, 无需合并',
-  'rec.mergeFail': '合并失败(ffmpeg 未成功完成, 详见日志)'
+  'rec.mergeFail': '合并失败(ffmpeg 未成功完成, 详见日志)',
+  'rec.delNoTask': '任务不存在或已被清理',
+  'rec.delLocked': '{name} 等 {n} 个文件删除失败(可能被占用)',
+  'rec.delFileNotIn': '该文件不属于此任务',
+  'rec.delFileLocked': '文件删除失败(可能正在被播放)'
 }
 
 const en: Dict = {
@@ -151,7 +155,11 @@ const en: Dict = {
   'rec.mergeNoDir': 'Recording directory missing (files may have been moved/deleted)',
   'rec.mergeNoFiles': 'No files to merge in this task',
   'rec.mergeFew': 'Fewer than 2 segments; nothing to merge',
-  'rec.mergeFail': 'Merge failed (ffmpeg did not finish; see logs)'
+  'rec.mergeFail': 'Merge failed (ffmpeg did not finish; see logs)',
+  'rec.delNoTask': 'Task does not exist or was cleaned up',
+  'rec.delLocked': '{name} and {n} other file(s) could not be deleted (possibly locked)',
+  'rec.delFileNotIn': 'File does not belong to this task',
+  'rec.delFileLocked': 'Delete failed (file may be playing)'
 }
 
 function dict(): Dict {

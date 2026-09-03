@@ -7,7 +7,7 @@ declare module '*.vue' {
 }
 
 import type {
-  AccountState, Anchor, AppInfo, DiscoveryItem, PlayInfo, RecHistoryItem, RecTask, Settings, Toast, UpdateCheckResult, WatcherStatus
+  AccountState, Anchor, AppInfo, DiscoveryItem, PlayInfo, RecDeleteFileResult, RecDeleteResult, RecHistoryItem, RecTask, RecThumbReady, Settings, Toast, UpdateCheckResult, WatcherStatus
 } from '@shared/types'
 
 declare global {
@@ -33,6 +33,9 @@ declare global {
       recClearHistory(): Promise<boolean>
       recDiskFree(): Promise<number>
       recMerge(taskId: string): Promise<{ ok: boolean; files?: string[]; error?: string }>
+      recThumb(taskId: string): Promise<{ ok: boolean; url: string }>
+      recDelete(taskId: string): Promise<RecDeleteResult>
+      recDeleteFile(taskId: string, absPath: string): Promise<RecDeleteFileResult>
       settingsGet(): Promise<Settings>
       settingsSet(patch: Partial<Settings>): Promise<Settings>
       settingsSelectDir(): Promise<string>
@@ -52,6 +55,7 @@ declare global {
       onAccount(cb: (s: AccountState) => void): () => void
       onToast(cb: (t: Toast) => void): () => void
       onDiscovery(cb: (list: DiscoveryItem[]) => void): () => void
+      onRecThumb(cb: (p: RecThumbReady) => void): () => void
     }
   }
 }

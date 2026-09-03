@@ -15,7 +15,8 @@ const store = useAppStore()
 const tabs = computed(() => [
   { name: 'explore', label: t('nav.explore') },
   { name: 'monitor', label: t('nav.monitor') },
-  { name: 'recordings', label: t('nav.recordings') }
+  { name: 'recordings', label: t('nav.recordings') },
+  { name: 'library', label: t('nav.library') }
 ])
 
 function tabActive(name: string): boolean {

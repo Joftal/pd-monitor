@@ -6,6 +6,7 @@ import { store } from './store'
 import { SESSION_PARTITION } from './pandalive'
 import { defaultRecordRoot } from '../util'
 import { logger } from './logger'
+import { thumbsRoot } from './thumbs'
 
 // ============ 本地媒体协议(plocal://) ============
 // 供渲染层 <video> 应用内回看本地录制产物:
@@ -52,14 +53,26 @@ function allowedRoots(): string[] {
   return rootsCache.roots
 }
 
+/** 白名单内判定: mp4 走录制根; jpg 仅限九宫格缩略图目录 */
 function isAllowed(abs: string): boolean {
-  if (!abs.toLowerCase().endsWith('.mp4')) return false
   if (!path.isAbsolute(abs)) return false
   const resolved = path.resolve(abs)
-  return allowedRoots().some((root) => {
+  const lower = resolved.toLowerCase()
+  const inside = (root: string): boolean => {
     const rel = path.relative(root, resolved)
     return Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel)
-  })
+  }
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
+    if (inside(thumbsRoot())) return true
+  }
+  if (!lower.endsWith('.mp4')) return false
+  return allowedRoots().some(inside)
+}
+
+function mimeOf(abs: string): string {
+  const lower = abs.toLowerCase()
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg'
+  return 'video/mp4'
 }
 
 function streamResponse(stream: Readable, init: { status: number; headers: Record<string, string> }): Response {
@@ -73,7 +86,7 @@ function streamResponse(stream: Readable, init: { status: number; headers: Recor
 function fileResponse(abs: string, rangeHeader: string | null): Response {
   const size = fs.statSync(abs).size
   const baseHeaders = {
-    'Content-Type': 'video/mp4',
+    'Content-Type': mimeOf(abs),
     'Accept-Ranges': 'bytes'
   }
   if (rangeHeader) {

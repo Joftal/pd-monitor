@@ -130,6 +130,11 @@ export const store = {
     db.history = []
     persist(true)
   },
+  removeHistory(id: string): void {
+    const n = db.history.length
+    db.history = db.history.filter((x) => x.id !== id)
+    if (db.history.length < n) persist(true)
+  },
   flush(): void {
     persist(true)
   }

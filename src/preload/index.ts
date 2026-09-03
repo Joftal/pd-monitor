@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron'
 import { CH, EV } from '../shared/types'
 import type {
-  AccountState, Anchor, AppInfo, DiscoveryItem, PlayInfo, RecHistoryItem, RecTask, Settings, Toast, UpdateCheckResult, WatcherStatus
+  AccountState, Anchor, AppInfo, DiscoveryItem, PlayInfo, RecDeleteFileResult, RecDeleteResult, RecHistoryItem, RecTask, RecThumbReady, Settings, Toast, UpdateCheckResult, WatcherStatus
 } from '../shared/types'
 
 function on<T>(channel: string, cb: (payload: T) => void): () => void {
@@ -46,6 +46,13 @@ const apiBridge = {
   recDiskFree: (): Promise<number> => ipcRenderer.invoke(CH.recDiskFree),
   recMerge: (taskId: string): Promise<{ ok: boolean; files?: string[]; error?: string }> =>
     ipcRenderer.invoke(CH.recMerge, taskId),
+  /** 九宫格缩略图: 命中直接给 URL; 未命中后台生成, 完成后 onRecThumb 推送 */
+  recThumb: (taskId: string): Promise<{ ok: boolean; url: string }> => ipcRenderer.invoke(CH.recThumb, taskId),
+  /** 删除录制: 文件移入回收站 + 清缩略图 + 移出历史 */
+  recDelete: (taskId: string): Promise<RecDeleteResult> => ipcRenderer.invoke(CH.recDelete, taskId),
+  /** 删除单个分段: 回收站 + 文件集对账 + 缩略图重生成; 删空则任务移除 */
+  recDeleteFile: (taskId: string, absPath: string): Promise<RecDeleteFileResult> =>
+    ipcRenderer.invoke(CH.recDeleteFile, taskId, absPath),
 
   // 设置
   settingsGet: (): Promise<Settings> => ipcRenderer.invoke(CH.settingsGet),
@@ -74,7 +81,8 @@ const apiBridge = {
   onWatcher: (cb: (s: WatcherStatus) => void) => on<WatcherStatus>(EV.watcher, cb),
   onAccount: (cb: (s: AccountState) => void) => on<AccountState>(EV.account, cb),
   onToast: (cb: (t: Toast) => void) => on<Toast>(EV.toast, cb),
-  onDiscovery: (cb: (list: DiscoveryItem[]) => void) => on<DiscoveryItem[]>(EV.discovery, cb)
+  onDiscovery: (cb: (list: DiscoveryItem[]) => void) => on<DiscoveryItem[]>(EV.discovery, cb),
+  onRecThumb: (cb: (p: RecThumbReady) => void) => on<RecThumbReady>(EV.recThumb, cb)
 }
 
 export type ApiBridge = typeof apiBridge

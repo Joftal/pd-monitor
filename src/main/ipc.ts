@@ -13,6 +13,7 @@ import { openLoginWindow } from './services/authWin'
 import { sendToast } from './services/notify'
 import { dataDir, defaultRecordRoot, diskFreeGb, UA } from './util'
 import { logger } from './services/logger'
+import { thumbs } from './services/thumbs'
 import { mt, setMainLocale } from './i18n'
 
 async function pushAccount(): Promise<AccountState> {
@@ -249,8 +250,15 @@ export function registerIpc(): void {
 
   ipcMain.handle(CH.recClearHistory, () => {
     store.clearHistory()
+    thumbs.sweep(store.listHistory().map((h) => h.id))
     return true
   })
+
+  ipcMain.handle(CH.recThumb, (_e, taskId: string) => ({ ok: true, url: thumbs.ensure(String(taskId)).url }))
+
+  ipcMain.handle(CH.recDelete, (_e, taskId: string) => recorder.deleteTask(String(taskId)))
+
+  ipcMain.handle(CH.recDeleteFile, (_e, taskId: string, absPath: string) => recorder.deleteFile(String(taskId), String(absPath)))
 
   ipcMain.handle(CH.recDiskFree, () => {
     const cfg = store.getSettings()
@@ -343,6 +351,11 @@ export function registerIpc(): void {
       return { ok: false, current, error: mt('app.updFail', { msg: String((e as Error).message || e) }) }
     }
   })
+
+  // 启动即清扫孤儿缩略图(历史已删/外部移除), 与历史表对账
+  try {
+    thumbs.sweep(store.listHistory().map((h) => h.id))
+  } catch { /* 清扫失败不影响启动 */ }
 }
 
 export { pushAccount }
