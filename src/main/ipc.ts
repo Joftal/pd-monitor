@@ -13,6 +13,7 @@ import { openLoginWindow } from './services/authWin'
 import { sendToast } from './services/notify'
 import { dataDir, defaultRecordRoot, diskFreeGb, UA } from './util'
 import { logger } from './services/logger'
+import { mt, setMainLocale } from './i18n'
 
 async function pushAccount(): Promise<AccountState> {
   let realLogin = false
@@ -52,7 +53,7 @@ export function registerIpc(): void {
 
   ipcMain.handle(CH.authOpenWindow, async (e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
-    if (!win) return { ok: false, message: '窗口不存在' }
+    if (!win) return { ok: false, message: mt('auth.winMissing') }
     const r = await openLoginWindow(win)
     pushAccount()
     return r
@@ -71,17 +72,17 @@ export function registerIpc(): void {
     }
     if (!jar['sessKey']) {
       logger.warn('auth', 'Cookie 导入被拒: 缺 sessKey')
-      return { ok: false, message: '未找到 sessKey, 请确认粘贴的是 pandalive.co.kr 的完整 Cookie' }
+      return { ok: false, message: mt('auth.importNoSess') }
     }
     await api.importCookies(jar)
     const info = await api.checkLoginInfo()
     if (!info.isLogin) {
       api.clearCookies()
       logger.warn('auth', 'Cookie 导入被拒: login_info 校验未通过(过期/无效)')
-      return { ok: false, message: 'Cookie 已过期或无效(官方会话校验未通过), 请在浏览器中重新登录后再复制' }
+      return { ok: false, message: mt('auth.importInvalid') }
     }
     pushAccount()
-    return { ok: true, message: info.isAdult ? '导入成功, 账号含成人认证' : '导入成功(账号暂未通过成人认证)' }
+    return { ok: true, message: info.isAdult ? mt('auth.importOkAdult') : mt('auth.importOkNoAdult') }
   })
 
   ipcMain.handle(CH.authLogout, async () => {
@@ -102,8 +103,8 @@ export function registerIpc(): void {
     const m = userId.match(/pandalive\.co\.kr\/(?:play\/)?([\w-]+)/)
     if (m) userId = m[1]
     userId = userId.replace(/[^\w-]/g, '')
-    if (!userId) throw new Error('无效的主播 ID 或链接')
-    if (store.listAnchors().find((a) => a.userId === userId)) throw new Error('该主播已在监控列表中')
+    if (!userId) throw new Error(mt('anchors.invalid'))
+    if (store.listAnchors().find((a) => a.userId === userId)) throw new Error(mt('anchors.exists'))
 
     let nick = userId
     let userIdx: number | null = null
@@ -178,7 +179,7 @@ export function registerIpc(): void {
       r = await api.getPlayCached(userId, password || '', !!fresh)
     } catch (e) {
       // 网络异常/风控(403/429 等)——必须回落为 ok:false, 否则前端永远停在"获取直播流…"
-      return { ok: false, error: `获取直播流失败: ${(e as Error).message || String(e)}(可能是临时风控或网络问题, 稍后重试)` }
+      return { ok: false, error: mt('ipc.playFail', { msg: (e as Error).message || String(e) }) }
     }
     if (!r.ok) {
       return { ok: false, needPassword: r.needPassword, error: r.error }
@@ -265,6 +266,7 @@ export function registerIpc(): void {
     const before = store.getSettings()
     const cfg = store.setSettings(patch)
     applyProxy(cfg.proxyUrl)
+    setMainLocale(cfg.locale) // 语言变更即时注入主进程 i18n(单向数据流)
     // 只有轮询相关设置的【值真的变了】才即时拉一轮(前端提交的是全量对象, 不能按 key 存在判断)
     const WATCH_KEYS: (keyof Settings)[] = ['watchMode', 'pollIntervalSec', 'requestGapMs', 'proxyUrl']
     if (WATCH_KEYS.some((k) => before[k] !== cfg[k])) {
@@ -338,7 +340,7 @@ export function registerIpc(): void {
       }
     } catch (e) {
       logger.warn('app', `检查更新失败: ${String((e as Error).message || e)}`)
-      return { ok: false, current, error: `检查更新失败: ${String((e as Error).message || e)}` }
+      return { ok: false, current, error: mt('app.updFail', { msg: String((e as Error).message || e) }) }
     }
   })
 }

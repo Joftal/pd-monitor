@@ -6,6 +6,7 @@ import { store } from './services/store'
 import { watcher } from './services/watcher'
 import { recorder } from './services/recorder'
 import { UA } from './util'
+import { mt, setMainLocale } from './i18n'
 import { logger } from './services/logger'
 import { registerMediaScheme, installMediaHandler } from './services/localMedia'
 
@@ -104,9 +105,9 @@ function createTray(): void {
     tray.setToolTip('PandaLive Monitor')
     tray.setContextMenu(
       Menu.buildFromTemplate([
-        { label: '显示主窗口', click: () => (mainWin ? mainWin.show() : createWindow()) },
+        { label: mt('tray.show'), click: () => (mainWin ? mainWin.show() : createWindow()) },
         {
-          label: '退出',
+          label: mt('tray.quit'),
           click: () => {
             quitting = true
             app.quit()
@@ -132,6 +133,7 @@ app.whenReady().then(() => {
   logger.info('app', `PandaLive Monitor v${app.getVersion()} 启动 (packaged=${app.isPackaged})`)
   installMediaHandler()
   const cfg = store.getSettings()
+  setMainLocale(cfg.locale)
   api.restoreCookies()
   applyProxy(cfg.proxyUrl)
   sessionMain().setUserAgent(UA)
