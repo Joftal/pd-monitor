@@ -81,25 +81,6 @@ body,
   -webkit-app-region: no-drag;
 }
 
-/* 开播卡片扫光 */
-@keyframes sweep {
-  0% {
-    transform: translateX(-120%) skewX(-15deg);
-  }
-  100% {
-    transform: translateX(240%) skewX(-15deg);
-  }
-}
-.live-sweep::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  width: 45%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
-  animation: sweep 2.8s ease-in-out infinite;
-  pointer-events: none;
-}
-
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 0.15s ease;

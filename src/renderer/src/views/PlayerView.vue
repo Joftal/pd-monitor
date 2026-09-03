@@ -7,6 +7,7 @@ import { useAppStore } from '@/stores/app'
 import HlsPlayer from '@/components/HlsPlayer.vue'
 import SpinIcon from '@/components/SpinIcon.vue'
 import { useI18n } from 'vue-i18n'
+import { fmtLiveDuration } from '@/utils/media'
 import type { AnchorTag } from '@shared/types'
 
 const { t } = useI18n()
@@ -29,7 +30,6 @@ const thumb = ref(anchor.value?.thumbUrl || '')
 const tags = ref<AnchorTag | null>(anchor.value?.tags || null)
 const needPw = ref(false)
 const pwdInput = ref('')
-const playerRef = ref<InstanceType<typeof HlsPlayer> | null>(null)
 const quality = ref(0)
 const variants = ref<{ url: string; bandwidth: number; resolution: string }[]>([])
 const lastFailedUrl = ref('') // 上一次失效的源(仅展示)
@@ -50,17 +50,8 @@ const levelOptions = computed(() =>
   }))
 )
 
-/** 开播时长(来自关注卡/大厅的 startTime) */
-const liveDuration = computed(() => {
-  const st = anchor.value?.startTime || discoveryItem.value?.startTime
-  if (!st) return ''
-  const ts = new Date(st.replace(' ', 'T')).getTime()
-  if (Number.isNaN(ts)) return ''
-  const sec = Math.max(0, Math.floor((Date.now() - ts) / 1000))
-  const h = Math.floor(sec / 3600)
-  const m = Math.floor((sec % 3600) / 60)
-  return t(h > 0 ? 'card.h' : 'card.m', { h, m })
-})
+/** 开播时长(来自关注卡/大厅的 startTime; utils.fmtLiveDuration 收敛) */
+const liveDuration = computed(() => fmtLiveDuration(anchor.value?.startTime || discoveryItem.value?.startTime, t))
 
 const sinceText = computed(() => {
   const st = anchor.value?.startTime || discoveryItem.value?.startTime
@@ -72,7 +63,7 @@ async function loadPlay(password = '', forceFresh = false): Promise<boolean> {
   try {
     r = await api.livePlay(userId, password, forceFresh)
   } catch (e) {
-    errorMsg.value = t('player.playFail') + String((e as Error).message || e).replace(/^.*Error: /, '')
+    errorMsg.value = t('player.playFail') + String((e as Error).message || e)
     loading.value = false
     return false
   }
@@ -120,7 +111,7 @@ async function toggleFollow() {
       message.success(t('player.followedMsg'))
     }
   } catch (e) {
-    message.error(String((e as Error).message || e).replace(/^.*Error: /, ''))
+    message.error(String((e as Error).message || e))
   }
 }
 
@@ -240,7 +231,7 @@ async function manualRefresh() {
       <div class="flex-1 min-w-0 flex flex-col gap-3">
         <!-- 播放器黑卡(限高 + 角标) -->
         <div class="relative flex-1 min-h-[260px] rounded-2xl overflow-hidden bg-black shadow-card">
-          <HlsPlayer v-if="m3u8" ref="playerRef" :src="m3u8" autoplay class="absolute inset-0" @fatal="(m) => (errorMsg = m)" @url-dead="onUrlDead" />
+          <HlsPlayer v-if="m3u8" :src="m3u8" autoplay class="absolute inset-0" @fatal="errorMsg = t('player.noPlay')" @url-dead="onUrlDead" />
           <!-- 角标: 状态 + 观看数 -->
           <div v-if="m3u8" class="absolute top-3 left-3 flex gap-1.5 pointer-events-none">
             <span class="inline-flex items-center gap-1 px-2 py-[3px] rounded bg-live text-[11px] font-bold text-white shadow-sm">
@@ -387,7 +378,7 @@ async function manualRefresh() {
               <span class="text-ink1 font-medium tabular-nums">{{ activeLine === 0 ? (levelOptions[quality]?.label || '—') : t('player.lineAuto') }}</span>
             </div>
             <div v-if="lastFailedUrl" class="flex items-center justify-between text-[11.5px] py-1.5 border-t border-line/50">
-              <span class="text-ink3">{{ t('player.lastFailed').trim() }}</span>
+              <span class="text-ink3">{{ t('player.lastFailed') }}</span>
               <span class="text-ink3/80 font-mono truncate max-w-[170px]" :title="lastFailedUrl">{{ shortUrl(lastFailedUrl) }}</span>
             </div>
           </div>

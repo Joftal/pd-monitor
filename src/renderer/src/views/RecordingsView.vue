@@ -4,7 +4,7 @@ import { NButton, useMessage } from 'naive-ui'
 import { api } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useI18n } from 'vue-i18n'
-import { fmtBytes, fmtDur } from '@/utils/media'
+import { baseName, fmtBytes, fmtDur, fmtDurHMS } from '@/utils/media'
 import type { RecTask } from '@shared/types'
 
 const { t } = useI18n()
@@ -53,16 +53,7 @@ function fmtRate(task: RecTask): string {
   return task.vod ? `${(v / 1048576).toFixed(1)}` : `${((v * 8) / 1e6).toFixed(1)}`
 }
 
-function fmtDurSec(sec: number): string {
-  sec = Math.max(0, Math.floor(sec))
-  const h = Math.floor(sec / 3600)
-  const m = Math.floor((sec % 3600) / 60)
-  const s = sec % 60
-  return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-}
-function fname(p: string): string {
-  return p.split(/[\\/]/).pop() || p
-}
+const fmtDurSec = fmtDurHMS
 
 // ---- 概览 ----
 const active = computed(() => store.activeRecs)
@@ -113,7 +104,7 @@ async function openFolder(dir: string) {
           </div>
           <div class="px-5 py-2 min-w-[100px]">
             <div class="text-[11px] text-ink3">{{ t('rec.ovBytes') }}</div>
-            <div class="text-[19px] font-extrabold leading-tight tabular-nums text-ink1">{{ tick && fmtBytes(activeBytes) }}</div>
+            <div class="text-[19px] font-extrabold leading-tight tabular-nums text-ink1">{{ fmtBytes(activeBytes) }}</div>
           </div>
           <div class="px-5 py-2 min-w-[100px]">
             <div class="text-[11px] text-ink3">{{ t('rec.ovDisk') }}</div>
@@ -169,22 +160,23 @@ async function openFolder(dir: string) {
                 <span v-if="task.auto" class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-sky-500/10 text-sky-600">{{ t('rec.tagAuto') }}</span>
               </div>
               <div class="text-[12.5px] text-ink2 truncate mt-1" :title="task.title">{{ task.title || '—' }}</div>
-              <div class="text-[11px] text-ink3 truncate mt-0.5 font-mono">{{ fname(task.dirPath) }}/{{ fname(task.currentFile) || '…' }}</div>
+              <div class="text-[11px] text-ink3 truncate mt-0.5 font-mono">{{ baseName(task.dirPath) }}/{{ baseName(task.currentFile) || '…' }}</div>
             </div>
             <!-- 指标簇 -->
             <div class="text-right shrink-0 tabular-nums">
               <div class="text-[22px] font-extrabold leading-none" :class="task.vod ? 'text-[#d98a08]' : 'text-red-500'">
-                {{ task.vod && task.vodDoneSec ? fmtDurSec(task.vodDoneSec) : tick && fmtDur(task.startedAt, null) }}
+                <!-- tick>=0 恒真仅作秒级刷新依赖(prevent 首秒渲染裸 0) -->
+                {{ task.vod && task.vodDoneSec ? fmtDurSec(task.vodDoneSec) : tick >= 0 && fmtDur(task.startedAt, null) }}
               </div>
               <div class="text-[10.5px] text-ink3 mt-1">{{ task.vod ? t('rec.durVod') : t('rec.durLive') }}</div>
             </div>
             <div class="text-right shrink-0 tabular-nums">
-              <div class="text-[22px] font-extrabold leading-none text-ink1">{{ tick && fmtBytes(task.bytes) }}</div>
+              <div class="text-[22px] font-extrabold leading-none text-ink1">{{ fmtBytes(task.bytes) }}</div>
               <div class="text-[10.5px] text-ink3 mt-1">{{ task.vod ? t('rec.writtenVod') : t('rec.writtenLive', { n: task.files.length }) }}</div>
             </div>
             <div class="text-right shrink-0 tabular-nums min-w-[76px]">
               <div class="text-[22px] font-extrabold leading-none text-ink1">
-                {{ tick && fmtRate(task) }}<span class="text-[11px] font-medium text-ink3 ml-0.5">{{ task.vod ? 'MB/s' : 'Mbps' }}</span>
+                {{ fmtRate(task) }}<span class="text-[11px] font-medium text-ink3 ml-0.5">{{ task.vod ? 'MB/s' : 'Mbps' }}</span>
               </div>
               <div class="text-[10.5px] text-ink3 mt-1">{{ task.vod ? t('rec.rateVod') : t('rec.rateLive') }}</div>
             </div>

@@ -44,10 +44,11 @@ let saveTimer: NodeJS.Timeout | null = null
 function persist(immediate = false): void {
   const write = () => {
     if (dbRecovering) {
-      // 恢复态禁止覆写; 先尝试重读成功再写
-      const re = load(150)
+      // 恢复态禁止覆写; 异步重试(不在定时器回调里自旋阻塞事件循环)
+      const re = load(0)
       if (dbRecovering) {
-        logger.warn('store', 'db.json 读取仍失败, 跳过本次落盘(避免覆写)')
+        logger.warn('store', 'db.json 读取仍失败, 稍后重试落盘(避免覆写)')
+        setTimeout(() => persist(true), 160)
         return
       }
       db = re

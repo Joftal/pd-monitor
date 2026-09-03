@@ -107,9 +107,7 @@ export interface AccountState {
   realLogin: boolean
   /** 账号是否已通过 pandalive 成人认证 */
   isAdult: boolean
-  nick: string
   userIdx: number | null
-  loginAt: number | null
   encrypted: boolean
 }
 
@@ -211,6 +209,50 @@ export interface RecDeleteFileResult {
   emptied?: boolean
 }
 
+// ---------- window.api 桥接口契约(单一事实源: preload 实现它, env.d.ts 引用它) ----------
+export interface ApiBridge {
+  authState(): Promise<AccountState>
+  authLoginPassword(id: string, pw: string): Promise<{ ok: boolean; message: string }>
+  authOpenWindow(): Promise<{ ok: boolean; message: string }>
+  authImportCookies(cookieStr: string): Promise<{ ok: boolean; message: string }>
+  authLogout(): Promise<boolean>
+  anchorsList(): Promise<Anchor[]>
+  anchorsAdd(input: string): Promise<Anchor>
+  anchorsRemove(userId: string): Promise<boolean>
+  anchorsSetAuto(userId: string, auto: boolean): Promise<boolean>
+  anchorsRefresh(): Promise<boolean>
+  livePlay(userId: string, password?: string, fresh?: boolean): Promise<PlayInfo>
+  discoveryList(): Promise<DiscoveryItem[]>
+  recList(): Promise<RecTask[]>
+  recHistory(): Promise<RecHistoryItem[]>
+  recStart(userId: string, password?: string): Promise<RecTask | { ok: false; needPassword?: boolean; error?: string }>
+  recStop(userId: string): Promise<void>
+  recOpenFolder(dir: string): Promise<boolean>
+  recDiskFree(): Promise<number>
+  recMerge(taskId: string): Promise<{ ok: boolean; files?: string[]; error?: string }>
+  recThumb(taskId: string): Promise<{ ok: boolean; url: string }>
+  recDelete(taskId: string): Promise<RecDeleteResult>
+  recDeleteFile(taskId: string, absPath: string): Promise<RecDeleteFileResult>
+  settingsGet(): Promise<Settings>
+  settingsSet(patch: Partial<Settings>): Promise<Settings>
+  settingsSelectDir(): Promise<string>
+  watcherStatus(): Promise<WatcherStatus>
+  winControl(action: 'min' | 'max' | 'close'): Promise<void>
+  openExternal(url: string): Promise<void>
+  appDataDir(): Promise<string>
+  openLogs(): Promise<string>
+  appInfo(): Promise<AppInfo>
+  checkUpdate(): Promise<UpdateCheckResult>
+  localFileUrl(absPath: string): string
+  onAnchors(cb: (list: Anchor[]) => void): () => void
+  onRecordings(cb: (list: RecTask[]) => void): () => void
+  onWatcher(cb: (s: WatcherStatus) => void): () => void
+  onAccount(cb: (s: AccountState) => void): () => void
+  onToast(cb: (t: Toast) => void): () => void
+  onDiscovery(cb: (list: DiscoveryItem[]) => void): () => void
+  onRecThumb(cb: (p: RecThumbReady) => void): () => void
+}
+
 // ---------- IPC invoke 通道 ----------
 export const CH = {
   authState: 'auth:state',
@@ -230,7 +272,6 @@ export const CH = {
   recStart: 'rec:start',
   recStop: 'rec:stop',
   recOpenFolder: 'rec:open-folder',
-  recClearHistory: 'rec:clear-history',
   recDiskFree: 'rec:disk-free',
   recMerge: 'rec:merge',
   recThumb: 'rec:thumb',
@@ -240,8 +281,6 @@ export const CH = {
   settingsSet: 'settings:set',
   settingsSelectDir: 'settings:select-dir',
   watcherStatus: 'watcher:status',
-  watcherStart: 'watcher:start',
-  watcherStop: 'watcher:stop',
   winControl: 'win:control',
   openExternal: 'shell:open-external',
   appDataDir: 'app:data-dir',

@@ -124,7 +124,7 @@ export default {
     copied: '源链接已复制',
     copyEmpty: '当前没有可复制的源链接',
     noSource: '未获取到(源失效或未开播)',
-    lastFailed: '上次失效： ',
+    lastFailed: '上次失效：',
     line: '线路',
     lineMain: '主线',
     lineBak: '备用 {n}',
@@ -226,6 +226,7 @@ export default {
     noMp4: '该任务没有可播放的 MP4 文件(仅 TS 或文件已移动)',
     err: '该文件无法播放(可能已被移动/删除, 或格式不受支持)',
     segs: '分段({n})',
+    segsLabel: '分段',
     nMp4: '{n} 个 MP4'
   },
   account: {

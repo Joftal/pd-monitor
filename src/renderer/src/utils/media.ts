@@ -8,13 +8,45 @@ export function fmtBytes(n: number): string {
   return Math.max(0, Math.round(n / 1024)) + ' KB'
 }
 
-/** 录制时长: start→end(空则到当前), h:mm:ss / mm:ss */
-export function fmtDur(start: number, end: number | null): string {
-  const sec = Math.max(0, Math.floor(((end ?? Date.now()) - start) / 1000))
+/** 秒 → h:mm:ss / mm:ss */
+export function fmtDurHMS(sec: number): string {
+  sec = Math.max(0, Math.floor(sec))
   const h = Math.floor(sec / 3600)
   const m = Math.floor((sec % 3600) / 60)
   const s = sec % 60
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+}
+
+/** 录制时长: start→end(空则到当前), h:mm:ss / mm:ss */
+export function fmtDur(start: number, end: number | null): string {
+  return fmtDurHMS(Math.floor(((end ?? Date.now()) - start) / 1000))
+}
+
+/** 文件基名(去目录) */
+export function baseName(p: string): string {
+  return p.split(/[\\/]/).pop() || p
+}
+
+/** 错误串清洗: 去掉前缀 "xxx Error: " */
+export function errText(e: unknown): string {
+  return String((e as Error)?.message || e).replace(/^.*Error: /, '')
+}
+
+/** 大数字缩写: 中文 ≥1万→万, 英文 ≥1000→k(isZh 由调用方 locale 决定; 千/万不得混用) */
+export function fmtNum(n: number, isZh: boolean): string {
+  if (isZh) return n >= 10000 ? (n / 10000).toFixed(1).replace(/\.0$/, '') + '万' : String(n)
+  return n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : String(n)
+}
+
+/** 开播时长: pandalive startTime("YYYY-MM-DD HH:mm:ss") → 时长文案(card.h/card.m) */
+export function fmtLiveDuration(startTime: string | undefined, t: (key: string, p?: Record<string, unknown>) => string): string {
+  if (!startTime) return ''
+  const ts = new Date(startTime.replace(' ', 'T')).getTime()
+  const dsec = Math.max(0, Math.floor((Date.now() - ts) / 1000))
+  if (!Number.isFinite(dsec)) return ''
+  const h = Math.floor(dsec / 3600)
+  const m = Math.floor((dsec % 3600) / 60)
+  return t(h > 0 ? 'card.h' : 'card.m', { h, m })
 }
 
 /** 已合并单文件: 仅一个 MP4 且非回放, 文件名无 _NNNN/_vod 分段后缀 */

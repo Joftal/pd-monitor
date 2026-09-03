@@ -4,13 +4,11 @@ import Hls from 'hls.js'
 
 const props = defineProps<{ src: string; autoplay?: boolean }>()
 const emit = defineEmits<{
-  (e: 'fatal', msg: string): void
+  (e: 'fatal'): void
   (e: 'url-dead'): void
 }>()
 
 const videoEl = ref<HTMLVideoElement | null>(null)
-const levels = ref<{ height: number; bitrate: number; index: number }[]>([])
-const currentLevel = ref(-1) // -1 = 自动
 let hls: Hls | null = null
 
 function destroy(): void {
@@ -34,7 +32,6 @@ function load(src: string): void {
     hls.loadSource(src)
     hls.attachMedia(video)
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      levels.value = (hls?.levels || []).map((l, i) => ({ height: l.height, bitrate: l.bitrate, index: i }))
       video.play().catch(() => undefined)
     })
     hls.on(Hls.Events.ERROR, (_e, data) => {
@@ -57,14 +54,8 @@ function load(src: string): void {
     video.src = src
     video.play().catch(() => undefined)
   } else {
-    emit('fatal', '当前环境不支持 HLS 播放')
+    emit('fatal')
   }
-}
-
-function setLevel(i: number): void {
-  if (!hls) return
-  currentLevel.value = i
-  hls.currentLevel = i
 }
 
 watch(
@@ -79,8 +70,6 @@ onMounted(() => {
 })
 
 onUnmounted(destroy)
-
-defineExpose({ setLevel, levels, currentLevel })
 </script>
 
 <template>

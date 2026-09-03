@@ -66,9 +66,14 @@ export function openLoginWindow(parent: BrowserWindow): Promise<{ ok: boolean; m
         for (const c of cookies) jar[c.name] = c.value
         if (!jar['sessKey']) return // 连匿名会话都没有就不用验了
         // 试验证: 不落盘、不污染主请求通道的 cookie
-        const info = await api.checkLoginInfo(jar)
+        // M4: 校验带 12s 看门狗 —— 服务端挂起不许让 verifying 锁存永久关闭探测;
+        //     infoPre 直传消重, importCookies 不再重复发 login_info
+        const info = await Promise.race([
+          api.checkLoginInfo(jar),
+          new Promise<never>((_, rej) => setTimeout(() => rej(new Error('verify timeout')), 12000))
+        ])
         if (info.isLogin) {
-          await api.importCookies(jar)
+          await api.importCookies(jar, info)
           finish(true, info.isAdult ? mt('auth.loginOkAdult') : mt('auth.loginOkNoAdult'))
         }
       } catch {

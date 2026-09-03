@@ -17,17 +17,23 @@ export const vault = {
 
   save(jar: CookieJar): void {
     const raw = JSON.stringify(jar)
+    // M5: 与 db.json 同款 tmp+rename 原子写, 崩溃/断电不得截断 cookie 文件
+    const atomic = (text: string): void => {
+      const tmp = FILE() + '.tmp'
+      fs.writeFileSync(tmp, text, 'utf-8')
+      fs.renameSync(tmp, FILE())
+    }
     try {
       if (safeStorage.isEncryptionAvailable()) {
         const enc = safeStorage.encryptString(raw)
-        fs.writeFileSync(FILE(), 'enc:' + enc.toString('base64'), 'utf-8')
+        atomic('enc:' + enc.toString('base64'))
         this.encrypted = true
         return
       }
     } catch (e) {
       console.warn('safeStorage encrypt failed, fallback to plain', e)
     }
-    fs.writeFileSync(FILE(), 'plain:' + Buffer.from(raw, 'utf-8').toString('base64'), 'utf-8')
+    atomic('plain:' + Buffer.from(raw, 'utf-8').toString('base64'))
     this.encrypted = false
   },
 

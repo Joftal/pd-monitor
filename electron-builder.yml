@@ -18,7 +18,6 @@ win:
     - nsis
     - portable
   icon: resources/icon.ico
-  artifactName: '${productName}-${version}-${arch}.${ext}'
 nsis:
   oneClick: false
   perMachine: false

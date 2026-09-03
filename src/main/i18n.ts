@@ -6,7 +6,7 @@
 
 let mainLocale = 'zh-CN'
 
-/** 启动/设置变更时注入语言(单项数据流: store -> i18n) */
+/** 启动/设置变更时注入语言(单向数据流: store -> i18n) */
 export function setMainLocale(l: string): void {
   mainLocale = l === 'en-US' ? 'en-US' : 'zh-CN'
 }

@@ -86,8 +86,7 @@ class Watcher {
       if (Date.now() < this.cooldownUntil) {
         const remain = Math.ceil((this.cooldownUntil - Date.now()) / 1000)
         this.status.message = mt('watcher.cooling', { remain })
-        this.schedule(Math.min(this.cooldownUntil - Date.now() + 500, 30000))
-        this.push()
+        // 注意: 此分支的 schedule/push 由 finally 统一兜底, 不写重复调用
         return
       }
 
@@ -307,7 +306,8 @@ class Watcher {
     const cfg = store.getSettings()
     if (cfg.prefetchStream) this.enqueuePrewarm(a.userId) // 后台预取新源写缓存
     sendToast({ type: 'live', title: mt('watcher.liveStart', { nick: a.nick }), body: a.title || mt('watcher.clickWatch') })
-    if (a.autoRecord && cfg) {
+    if (a.autoRecord) {
+      // getSettings 恒返回对象(恒真判定已移除)
       void recorder.start({ userId: a.userId, nick: a.nick, title: a.title, password: '', auto: true }).catch(() => undefined)
     }
   }

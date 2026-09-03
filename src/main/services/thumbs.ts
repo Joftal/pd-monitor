@@ -5,7 +5,7 @@ import { spawn } from 'child_process'
 import { app, BrowserWindow } from 'electron'
 import { store } from './store'
 import { logger } from './logger'
-import { dataRoot } from '../util'
+import { dataRoot, scanTaskMedia } from '../util'
 import { EV } from '../../shared/types'
 import type { RecHistoryItem } from '../../shared/types'
 
@@ -183,12 +183,20 @@ async function workJob(job: Job): Promise<string> {
         }
         acc += durs[k]
       }
-      const out = path.join(tmpDir, `f${i + 1}.jpg`)
-      const r = await runFf(
-        ['-y', '-ss', off.toFixed(2), '-i', seg, '-frames:v', '1', '-vf', `scale=${CW}:${CH}:force_original_aspect_ratio=increase,crop=${CW}:${CH}`, '-q:v', '3', out],
-        20000
-      )
-      if (r.ok && fs.existsSync(out) && fs.statSync(out).size > 0) frames.push(out)
+          const out = path.join(tmpDir, `f${i + 1}.jpg`)
+          const vf = `scale=${CW}:${CH}:force_original_aspect_ratio=increase,crop=${CW}:${CH}`
+          // mpegts 关键帧稀疏时, -ss 输入级 seek 可能落在唯一关键帧之后 → "Output file is empty"(退出码仍为 0!)
+          // 因此失败/空文件必须退化到无 seek 直接抽首帧, 保证 TS 产物也能出图
+          let r = await runFf(['-y', '-ss', off.toFixed(2), '-i', seg, '-frames:v', '1', '-vf', vf, '-q:v', '3', out], 20000)
+          if (!(r.ok && fs.existsSync(out) && fs.statSync(out).size > 0)) {
+            r = await runFf(['-y', '-i', seg, '-frames:v', '1', '-vf', vf, '-q:v', '3', out], 20000)
+          }
+          if (r.ok && fs.existsSync(out) && fs.statSync(out).size > 0) {
+        frames.push(out)
+      } else if (!frames.length && i === GRID - 1) {
+        // 全程失败才记详细 stderr 摘要(防刷屏, 只记最后一次)
+        logger.warn('thumb', `抽帧失败样例(${path.basename(seg)} @${off.toFixed(2)}s): ${r.stderr.slice(-300) || '无输出'}`)
+      }
     }
     if (!frames.length) throw new Error('全部采样点抽帧失败')
     // 不足 9 帧时复制尾帧补齐, 保证九宫格完整
@@ -271,17 +279,11 @@ export const thumbs = {
     // 只纳入同基名的录制产物(mergeTask.refresh 同规约), 目录里无关流浪文件永不进来; 全灭不动条目(可能是盘掉了)
     const listed = (item.files || []).filter((f) => /\.(mp4|ts)$/i.test(f))
     const first = listed[0]
-    if (first && item.dirPath && fs.existsSync(item.dirPath)) {
+    if (first && item.dirPath) {
       const base = path.basename(first).replace(/_(\d{4}|vod)\.(mp4|ts)$/i, '')
-      try {
-        // 扫到 0 个 = 基名对不上(手工重命名/移动) → 不覆盖, 绝不让对账把条目掏空
-        const scanned = fs
-          .readdirSync(item.dirPath)
-          .filter((n) => n.startsWith(base) && /\.(mp4|ts)$/i.test(n))
-          .sort()
-          .map((n) => path.join(item.dirPath, n))
-        if (scanned.length) files = scanned
-      } catch { /* 目录异常则退回列表口径 */ }
+      // 扫到 0 个 = 基名对不上(手工重命名/移动) → 不覆盖, 绝不让对账把条目掏空
+      const { files: scanned } = scanTaskMedia(item.dirPath, base)
+      if (scanned.length) files = scanned
     }
     if (files.length !== listed.length) {
       const bytes = files.reduce((s, f) => {
@@ -315,6 +317,5 @@ export const thumbs = {
     removeTaskFiles(taskId)
     for (let i = queue.length - 1; i >= 0; i--) if (queue[i].id === taskId) queue.splice(i, 1)
   },
-  sweep,
-  root: thumbsRoot
+  sweep
 }

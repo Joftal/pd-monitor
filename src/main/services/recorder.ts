@@ -7,7 +7,7 @@ import { EV, RecTask } from '../../shared/types'
 import { api } from './pandalive'
 import { store } from './store'
 import { thumbs } from './thumbs'
-import { tsName, diskFreeGb, UA, sleep, defaultRecordRoot } from '../util'
+import { tsName, diskFreeGb, scanTaskMedia, UA, sleep, defaultRecordRoot } from '../util'
 import { sendToast } from './notify'
 import { logger } from './logger'
 import { mt } from '../i18n'
@@ -67,7 +67,7 @@ function concatSegments(files: string[], outPath: string): Promise<boolean> {
     const ff = spawn(
       ffmpegPath(),
       ['-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', '-movflags', '+faststart', outPath],
-      { stdio: ['ignore', 'ignore', 'ignore'] }
+      { stdio: ['ignore', 'ignore', 'ignore'], windowsHide: true }
     )
     ff.on('exit', (code) => done(code === 0))
     ff.on('error', () => done(false))
@@ -108,6 +108,8 @@ class Task implements RecTask {
   private statTimer: NodeJS.Timeout | null = null
   private stallTimer: NodeJS.Timeout | null = null
   private stopping = false
+  /** 收尾守卫: 任何 finalize 入口已进 → exit 回调/外部路径不得二次收尾(H1) */
+  private finalized = false
   private lastBytes = 0
   private lastBytesAt = 0
 
@@ -149,17 +151,20 @@ class Task implements RecTask {
       ;(err as Error & { needPassword?: boolean }).needPassword = play.needPassword
       throw err
     }
+    // 启动窗口竞态(H2): 网络往返期间用户可能已停止并收尾 → 不得再生 ffmpeg
+    if (this.finalized || this.stopping || this.status !== 'recording') return
     if (play.title) this.title = play.title
     if (play.thumbUrl) this.thumbUrl = play.thumbUrl
     this.vod = !!play.vod
     this.refreshBaseName() // 拿到最终标题后再定文件名(首次可能任选项带标题)
-    if (this.lastBytesAt === 0) this.lastBytesAt = Date.now() // 停滞计时起点: 从未写入也能被检出
+    this.lastBytesAt = Date.now() // 停滞计时起点: 从未写入也能被检出
     logger.info('rec', `开始${this.vod ? '回放下载' : '录制'}: ${this.nick}(@${this.userId})${this.auto ? ' [自动]' : ''}`)
     // master URL 仅 10 分钟有效: 录制改用具象变体地址(最高档/原画)
     const src = play.variants?.[0]?.url || play.m3u8
     if (this.vod) {
       // 预取清单总时长供进度条(一次请求, 用户开录意图摊销; 失败=0 退化为不定进度)
       this.vodTotalSec = await api.fetchPlaylistDurationSec(src)
+      if (this.finalized || this.stopping || this.status !== 'recording') return // H2 同上
     }
     this.spawnFfmpeg(src)
     this.statTimer = setInterval(() => this.statFiles(), 2000)
@@ -201,8 +206,8 @@ class Task implements RecTask {
     }
     // 分开写两条 spawn: 保住 stdio 重载推导(vod 需要 stdout 管道回传 -progress)
     const ff = this.vod
-      ? spawn(ffmpegPath(), args, { stdio: ['pipe', 'pipe', 'pipe'] })
-      : spawn(ffmpegPath(), args, { stdio: ['pipe', 'ignore', 'pipe'] })
+      ? spawn(ffmpegPath(), args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+      : spawn(ffmpegPath(), args, { stdio: ['pipe', 'ignore', 'pipe'], windowsHide: true })
     this.proc = ff
     let errBuf = ''
     ff.stderr.on('data', (d: Buffer) => {
@@ -227,7 +232,7 @@ class Task implements RecTask {
       const expected = this.stopping
       this.proc = null
       this.statFiles()
-      if (expected) return
+      if (expected || this.finalized) return // 已收尾/收尾中: 不得二次进入(H1)
       if (this.status !== 'recording') return
       const tail = errBuf.split('\n').filter(Boolean).slice(-3).join(' | ')
       if (this.vod) {
@@ -334,8 +339,12 @@ class Task implements RecTask {
     this.push()
   }
 
-  /** 用户主动停止 */
+  /** 用户主动停止; remuxing 转码/合并中: 等待自然收尾(大文件合并不可截断, M1) */
   async stop(): Promise<void> {
+    if (this.status === 'remuxing') {
+      for (let i = 0; i < 600 && recorder.hasTask(this.userId); i++) await sleep(500)
+      return
+    }
     if (this.status !== 'recording') return
     logger.info('rec', `手动停止: ${this.nick}(@${this.userId})`)
     this.stopping = true
@@ -345,6 +354,9 @@ class Task implements RecTask {
 
   /** 收尾: remux / 入库 / 通知 */
   private async finalize(status: RecTask['status']): Promise<void> {
+    // H1: 任何来源(停滞/磁盘/错误/exit 回调/手动)只允许第一个进入者执行收尾
+    if (this.finalized) return
+    this.finalized = true
     if (this.statTimer) clearInterval(this.statTimer)
     if (this.stallTimer) clearInterval(this.stallTimer)
     this.statTimer = null
@@ -419,7 +431,8 @@ class Task implements RecTask {
     const mp4 = tsFile.replace(/\.ts$/, '.mp4')
     return new Promise((resolve) => {
       const ff = spawn(ffmpegPath(), ['-y', '-i', tsFile, '-c', 'copy', '-movflags', '+faststart', mp4], {
-        stdio: ['ignore', 'ignore', 'ignore']
+        stdio: ['ignore', 'ignore', 'ignore'],
+        windowsHide: true
       })
       ff.on('exit', (code) => resolve(code === 0))
       ff.on('error', () => resolve(false))
@@ -518,21 +531,7 @@ class Recorder {
     const base = path.basename(first).replace(/_(\d{4}|vod)\.(mp4|ts)$/i, '')
     const out = path.join(dir, `${base}.mp4`)
 
-    const refresh = (): { files: string[]; bytes: number } => {
-      const list = fs
-        .readdirSync(dir)
-        .filter((f) => f.startsWith(base) && (f.toLowerCase().endsWith('.ts') || f.toLowerCase().endsWith('.mp4')))
-        .sort()
-        .map((f) => path.join(dir, f))
-      const bytes = list.reduce((s, f) => {
-        try {
-          return s + fs.statSync(f).size
-        } catch {
-          return s
-        }
-      }, 0)
-      return { files: list, bytes }
-    }
+    const refresh = (): { files: string[]; bytes: number } => scanTaskMedia(dir, base)
 
     if (fs.existsSync(out)) {
       const r = refresh()
@@ -650,9 +649,9 @@ class Recorder {
     return { ok: true, remaining: remain.length }
   }
 
-  openFolder(userId: string): string | null {
-    const t = this.tasks.get(userId)
-    return t ? t.dirPath : null
+  /** 任务是否在管(供 stop 等待 remuxing 收尾, M1) */
+  hasTask(userId: string): boolean {
+    return this.tasks.has(userId)
   }
 }
 

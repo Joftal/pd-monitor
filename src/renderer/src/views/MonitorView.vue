@@ -28,23 +28,14 @@ watch(keyword, () => {
   offPage.value = 1
 })
 
-const liveList = computed(() => {
-  let list = [...store.liveAnchors].sort((a, b) => (b.viewerCount || 0) - (a.viewerCount || 0))
-  if (keyword.value.trim()) {
-    const k = keyword.value.trim().toLowerCase()
-    list = list.filter((a) => a.nick.toLowerCase().includes(k) || a.userId.toLowerCase().includes(k))
-  }
-  return list
-})
+function matchKw(a: { nick: string; userId: string }): boolean {
+  const k = keyword.value.trim().toLowerCase()
+  return !k || a.nick.toLowerCase().includes(k) || a.userId.toLowerCase().includes(k)
+}
 
-const offlineList = computed(() => {
-  let list = [...store.offlineAnchors].sort((a, b) => (b.lastSeenAt || b.addedAt) - (a.lastSeenAt || a.addedAt))
-  if (keyword.value.trim()) {
-    const k = keyword.value.trim().toLowerCase()
-    list = list.filter((a) => a.nick.toLowerCase().includes(k) || a.userId.toLowerCase().includes(k))
-  }
-  return list
-})
+const liveList = computed(() => [...store.liveAnchors].sort((a, b) => (b.viewerCount || 0) - (a.viewerCount || 0)).filter(matchKw))
+
+const offlineList = computed(() => [...store.offlineAnchors].sort((a, b) => (b.lastSeenAt || b.addedAt) - (a.lastSeenAt || a.addedAt)).filter(matchKw))
 
 const livePageCount = computed(() => Math.max(1, Math.ceil(liveList.value.length / PAGE_SIZE)))
 const offPageCount = computed(() => Math.max(1, Math.ceil(offlineList.value.length / PAGE_SIZE)))
@@ -75,7 +66,7 @@ async function addAnchor() {
     showAdd.value = false
     store.anchors = await api.anchorsList()
   } catch (e) {
-    message.error((e as Error).message.replace(/^.*Error: /, '') || t('monitor.addFail'))
+    message.error((e as Error).message || t('monitor.addFail'))
   } finally {
     addLoading.value = false
   }

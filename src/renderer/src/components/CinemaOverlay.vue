@@ -5,7 +5,7 @@ import { api } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useI18n } from 'vue-i18n'
 import SpinIcon from '@/components/SpinIcon.vue'
-import { fmtBytes, fmtDur, mergeableTask } from '@/utils/media'
+import { baseName as fname, fmtBytes, fmtDur, mergeableTask } from '@/utils/media'
 import type { RecHistoryItem } from '@shared/types'
 
 // ============ 影院浮层(视频库点播) ============
@@ -113,13 +113,15 @@ function onVideoError(): void {
   }
   playError.value = t('playback.err')
 }
-
-function fname(p: string): string {
-  return p.split(/[\\/]/).pop() || p
+// 状态标签: 静态映射表(不再动态拼 key, 与 LibraryView 同一机制)
+const STATUS_KEYS: Record<string, string> = {
+  recording: 'rec.stRecording',
+  remuxing: 'rec.stRemuxing',
+  done: 'rec.stDone',
+  stopped: 'rec.stStopped',
+  error: 'rec.stError'
 }
-
-const statusKey = computed(() => (props.task ? `rec.st${props.task.status[0].toUpperCase()}${props.task.status.slice(1)}` : ''))
-const statusLabel = computed(() => (statusKey.value ? t(statusKey.value) : ''))
+const statusLabel = computed(() => (props.task ? t(STATUS_KEYS[props.task.status] || 'rec.stStopped') : ''))
 const statusCls = computed(() => {
   const s = props.task?.status
   return s === 'done' ? 'text-emerald-400' : s === 'error' ? 'text-red-400' : 'text-white/60'
@@ -141,7 +143,7 @@ const infoRows = computed(() => {
     { label: t('rec.durLabel'), value: fmtDur(h.startedAt, h.endedAt) },
     { label: t('rec.sizeLabel'), value: fmtBytes(h.bytes) },
     { label: 'Mbps', value: avgMbps.value },
-    { label: t('playback.segs', { n: files.value.length }).replace(/\s*\(\d+\)\s*$/, ''), value: t('playback.nMp4', { n: files.value.length }) },
+    { label: t('playback.segsLabel'), value: t('playback.nMp4', { n: files.value.length }) },
     { label: '', value: statusLabel.value, cls: statusCls.value }
   ]
   return rows
@@ -252,7 +254,7 @@ function openDir(): void {
             <div v-if="!confirmDel" class="flex flex-col gap-2 shrink-0 mt-auto">
               <button
                 v-if="canMerge"
-                class="w-full h-[34px] rounded-lg bg-live hover:bg-live-dark text-white text-[12px] font-semibold whitespace-nowrap transition-all active:scale-[0.97]"
+                class="w-full h-[34px] rounded-lg bg-live hover:bg-brand-dark text-white text-[12px] font-semibold whitespace-nowrap transition-all active:scale-[0.97]"
                 @click="emit('merge', task!)"
               >{{ t('rec.actMerge') }}</button>
               <div class="flex gap-2">

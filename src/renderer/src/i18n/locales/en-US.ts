@@ -122,7 +122,7 @@ export default {
     copied: 'Source URL copied',
     copyEmpty: 'No source URL to copy',
     noSource: 'Not available (source dead or offline)',
-    lastFailed: 'Last failed: ',
+    lastFailed: 'Last failed:',
     line: 'Line',
     lineMain: 'Main',
     lineBak: 'Backup {n}',
@@ -224,6 +224,7 @@ export default {
     noMp4: 'No playable MP4 in this task (TS only or files moved)',
     err: 'This file cannot be played (moved/deleted or unsupported format)',
     segs: 'Segments ({n})',
+    segsLabel: 'Segments',
     nMp4: '{n} MP4'
   },
   account: {

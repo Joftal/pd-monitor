@@ -53,6 +53,27 @@ function migrateLegacyData(target: string): void {
   }
 }
 
+/** 目录级录制产物对账: 按基名前缀收集现存 mp4/ts(排序) + 总字节; 目录不可读返回空 */
+export function scanTaskMedia(dirPath: string, base: string): { files: string[]; bytes: number } {
+  try {
+    const files = fs
+      .readdirSync(dirPath)
+      .filter((n) => n.startsWith(base) && /\.(mp4|ts)$/i.test(n))
+      .sort()
+      .map((n) => path.join(dirPath, n))
+    const bytes = files.reduce((s, f) => {
+      try {
+        return s + fs.statSync(f).size
+      } catch {
+        return s
+      }
+    }, 0)
+    return { files, bytes }
+  } catch {
+    return { files: [], bytes: 0 }
+  }
+}
+
 export function tsName(d = new Date()): string {
   const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
@@ -62,6 +83,7 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
 }
 
+let diskProbeWarned = false
 export function diskFreeGb(dir: string): number {
   try {
     const root = path.parse(path.resolve(dir)).root
@@ -69,8 +91,18 @@ export function diskFreeGb(dir: string): number {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const st = fs.statfsSync ? fs.statfsSync(root) : null
     if (st) return (st.bavail * st.bsize) / 1024 ** 3
-  } catch {
-    /* ignore */
+  } catch (e) {
+    if (!diskProbeWarned) {
+      diskProbeWarned = true
+      // 磁盘保护静默失效必须留痕(延迟 require 避免 util->logger->util 环)
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { logger } = require('./logger')
+        logger.warn('app', `磁盘探测失败, 磁盘阈值保护将不生效: ${String((e as Error).message || e)}`)
+      } catch {
+        /* ignore */
+      }
+    }
   }
   return Number.MAX_SAFE_INTEGER
 }

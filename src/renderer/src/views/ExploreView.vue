@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api'
 import ExploreCard from '@/components/ExploreCard.vue'
@@ -66,7 +66,13 @@ function toPage(p: number) {
 
 // ---- 刷新信息展示: 上次/预计下次更新时间 ----
 const nowTick = ref(Date.now())
-setInterval(() => (nowTick.value = Date.now()), 1000)
+let nowTimer: number | null = null
+onMounted(() => {
+  nowTimer = window.setInterval(() => (nowTick.value = Date.now()), 1000)
+})
+onUnmounted(() => {
+  if (nowTimer) clearInterval(nowTimer)
+})
 
 function fmtHms(t: number): string {
   const d = new Date(t)

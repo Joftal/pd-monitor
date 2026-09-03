@@ -70,7 +70,7 @@ async function loginByPassword() {
       message.error(r.message)
     }
   } catch (e) {
-    message.error(t('account.failLogin') + String((e as Error).message || e).replace(/^.*Error: /, ''))
+    message.error(t('account.failLogin') + String((e as Error).message || e))
   } finally {
     loading.value = false
   }
@@ -82,6 +82,8 @@ async function loginByWindow() {
     const r = await api.authOpenWindow()
     r.ok ? message.success(r.message) : message.info(r.message)
     store.account = await api.authState()
+  } catch (e) {
+    message.error(String((e as Error).message || e))
   } finally {
     winLoading.value = false
   }
@@ -99,16 +101,20 @@ async function importCookies() {
     if (r.ok) cookieInput.value = ''
     store.account = await api.authState()
   } catch (e) {
-    message.error(t('account.failImport') + String((e as Error).message || e).replace(/^.*Error: /, ''))
+    message.error(t('account.failImport') + String((e as Error).message || e))
   } finally {
     importLoading.value = false
   }
 }
 
 async function logout() {
-  await api.authLogout()
-  store.account = await api.authState()
-  message.success(t('account.loggedOut'))
+  try {
+    await api.authLogout()
+    store.account = await api.authState()
+    message.success(t('account.loggedOut'))
+  } catch (e) {
+    message.error(String((e as Error).message || e))
+  }
 }
 </script>
 

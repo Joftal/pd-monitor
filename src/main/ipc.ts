@@ -31,9 +31,7 @@ async function pushAccount(): Promise<AccountState> {
     cookieValid: api.hasSession() && (api.cookieValid || realLogin),
     realLogin,
     isAdult,
-    nick: '',
     userIdx,
-    loginAt: null,
     encrypted: vault.encrypted
   }
   const win = BrowserWindow.getAllWindows()[0]
@@ -75,13 +73,14 @@ export function registerIpc(): void {
       logger.warn('auth', 'Cookie 导入被拒: 缺 sessKey')
       return { ok: false, message: mt('auth.importNoSess') }
     }
-    await api.importCookies(jar)
-    const info = await api.checkLoginInfo()
+    // M2: 先试验证再落盘 —— 过期 Cookie 不得连带注销现有有效会话;
+    //     且 infoPre 直传消重, 不再让 importCookies 内部重复发 login_info
+    const info = await api.checkLoginInfo(jar)
     if (!info.isLogin) {
-      api.clearCookies()
       logger.warn('auth', 'Cookie 导入被拒: login_info 校验未通过(过期/无效)')
       return { ok: false, message: mt('auth.importInvalid') }
     }
+    await api.importCookies(jar, info)
     pushAccount()
     return { ok: true, message: info.isAdult ? mt('auth.importOkAdult') : mt('auth.importOkNoAdult') }
   })
@@ -244,14 +243,16 @@ export function registerIpc(): void {
   ipcMain.handle(CH.recStop, (_e, userId: string) => recorder.stop(userId))
 
   ipcMain.handle(CH.recOpenFolder, async (_e, dir: string) => {
-    if (dir) await shell.openPath(dir)
-    return true
-  })
-
-  ipcMain.handle(CH.recClearHistory, () => {
-    store.clearHistory()
-    thumbs.sweep(store.listHistory().map((h) => h.id))
-    return true
+    // M10: 只允许打开录制相关目录(任意路径探测封堵; 对照 openExternal 已有白名单)
+    const resolved = path.resolve(String(dir || ''))
+    const roots = new Set<string>([path.resolve(store.getSettings().savePath || defaultRecordRoot()), path.resolve(defaultRecordRoot())])
+    for (const h of store.listHistory()) if (h.dirPath) roots.add(path.resolve(h.dirPath))
+    const ok = [...roots].some((root) => {
+      const rel = path.relative(root, resolved)
+      return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+    })
+    if (ok) await shell.openPath(resolved)
+    return ok
   })
 
   ipcMain.handle(CH.recThumb, (_e, taskId: string) => ({ ok: true, url: thumbs.ensure(String(taskId)).url }))
@@ -294,8 +295,6 @@ export function registerIpc(): void {
 
   // ---------- 轮询 ----------
   ipcMain.handle(CH.watcherStatus, () => watcher.status)
-  ipcMain.handle(CH.watcherStart, () => watcher.start())
-  ipcMain.handle(CH.watcherStop, () => watcher.stop())
 
   // ---------- 窗口控制 / 外部链接 ----------
   ipcMain.handle(CH.winControl, (e, action: 'min' | 'max' | 'close') => {

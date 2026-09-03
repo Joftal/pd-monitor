@@ -20,8 +20,9 @@ onMounted(async () => {
 })
 
 // ---- 九宫格缩略图: 主进程生成并持久化(data/thumbs), 命中直返 + 就绪推送点亮 ----
-const thumbMap = reactive<Record<string, string>>({})
+// requested 置模块级: 重进视频库不再整轮重发 IPC(主进程缓存仍会命中, 但省往返)
 const requested = new Set<string>()
+const thumbMap = reactive<Record<string, string>>({})
 async function ensureThumb(id: string): Promise<void> {
   if (requested.has(id) || thumbMap[id]) return
   requested.add(id)
@@ -321,7 +322,7 @@ async function onMerge(task: RecHistoryItem) {
                 <!-- 海报 -->
                 <div class="relative aspect-video rounded-xl overflow-hidden shadow-card group-hover:shadow-card-hover transition-shadow bg-fill">
                   <img v-if="thumbMap[h.id]" :src="thumbMap[h.id]" class="w-full h-full object-cover" loading="lazy" referrerpolicy="no-referrer" />
-                  <div v-else class="w-full h-full grid place-items-center text-[30px] font-extrabold text-white/85" :class="h.vod ? 'bg-gradient-to-br from-[#f0c8a0] to-[#d98a08]' : 'bg-gradient-to-br from-live/70 to-live-dark/80'">
+                  <div v-else class="w-full h-full grid place-items-center text-[30px] font-extrabold text-white/85" :class="h.vod ? 'bg-gradient-to-br from-[#f0c8a0] to-[#d98a08]' : 'bg-gradient-to-br from-live/70 to-brand-dark/80'">
                     {{ Array.from(h.nick)[0] }}
                   </div>
                   <!-- 左上: 来源类型(直播/回放) -->

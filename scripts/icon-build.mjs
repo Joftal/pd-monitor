@@ -23,7 +23,7 @@ function parseIco(buf) {
 // ---------- DIB(BI_RGB, 24/32bpp, 自底向上) → RGBA ----------
 function decodeDib(data, w, h) {
   const biSize = data.readUInt32LE(0)
-  const bpp = data.readUInt16LE(12)
+  const bpp = data.readUInt16LE(14) // M12: BITMAPINFOHEADER 布局 biPlanes@12 / biBitCount@14
   const px = data.slice(biSize)
   const rgba = new Uint8Array(w * h * 4)
   const rowBytes = Math.ceil((w * bpp) / 32) * 4
@@ -198,7 +198,7 @@ function cornerFloodTransparent(rgba, size) {
     rgba[0], rgba[1], rgba[2],
     rgba[(w - 1) * 4], rgba[(w - 1) * 4 + 1], rgba[(w - 1) * 4 + 2],
     rgba[(h - 1) * w * 4], rgba[(h - 1) * w * 4 + 1], rgba[(h - 1) * w * 4 + 2],
-    rgba[(h * w - 1) * 4 - 2], rgba[(h * w - 1) * 4 - 1], rgba[(h * w - 1) * 4]
+    rgba[(h * w - 1) * 4], rgba[(h * w - 1) * 4 + 1], rgba[(h * w - 1) * 4 + 2]
   ]
   const base = Math.min(...cornerMin)
   const thr = Math.max(120, Math.min(240, base - 25))

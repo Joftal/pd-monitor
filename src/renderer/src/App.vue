@@ -70,6 +70,8 @@ const naiveDateLocale = computed(() => (isEn.value ? dateEnUS : dateZhCN))
 watch(
   isDark,
   (v) => {
+    // M7: settings 未载入(null)不得落笔 —— immediate 首跑若以 false 写入 light 会抵消启动防闪白
+    if (!store.settings) return
     document.documentElement.classList.toggle('dark', v)
     try {
       localStorage.setItem('pl-theme', v ? 'dark' : 'light')

@@ -212,9 +212,15 @@ class PandaApi {
     try {
       const sesFetch = (ses as unknown as { fetch?: typeof net.fetch }).fetch
       const res = sesFetch ? await sesFetch.call(ses, url, { headers }) : await net.fetch(url, { headers })
-      if (res.status !== 200) throw new Error(`HTTP ${res.status}`)
+      if (res.status !== 200) {
+        // M3: HTTP 错误(403/404 等风控/过期)绝不兜底重发 —— 同一请求打两遍放大风控面
+        const err = new Error(`HTTP ${res.status}`) as Error & { httpStatus?: number }
+        err.httpStatus = res.status
+        throw err
+      }
       return await res.text()
     } catch (e) {
+      if ((e as { httpStatus?: number }).httpStatus) throw e // 原则同上: 只兜网络层异常
       const res = await nodeHttpRequest('GET', url, headers, undefined, nodeProxyUrl)
       if (res.status !== 200) throw new Error(`HTTP ${res.status}`)
       return res.text
@@ -283,7 +289,7 @@ class PandaApi {
     if (jar) this.jar = jar
   }
 
-  saveCookies(): void {
+  private saveCookies(): void {
     vault.save(this.jar)
   }
 
@@ -473,11 +479,12 @@ class PandaApi {
     }
   }
 
-  async importCookies(jar: CookieJar): Promise<void> {
+  /** 导入 cookie; infoPre = 已做过的 login_info 校验结果(传入则消重, 不重复请求) */
+  async importCookies(jar: CookieJar, infoPre?: { isLogin: boolean; isAdult: boolean }): Promise<void> {
     this.jar = { ...this.jar, ...jar }
     this.saveCookies()
     this.clearPlayCache() // 新会话生效: 旧会话签发的源清空重来
-    const info = await this.checkLoginInfo()
+    const info = infoPre ?? (await this.checkLoginInfo())
     this.cookieValid = info.isLogin
   }
 
@@ -513,7 +520,7 @@ class PandaApi {
   }
 
   // ---- 拉源缓存: 不设时限, 源能用就一直用; 仅显式事件作废(重开播/录制出错/换号/手动强刷) ----
-  private playCache = new Map<string, { r: PlayResult; at: number }>()
+  private playCache = new Map<string, PlayResult>()
 
   invalidatePlay(userId: string): void {
     this.playCache.delete(userId)
@@ -530,7 +537,7 @@ class PandaApi {
     const key = password ? userId + '#pw' : userId
     if (!forceFresh) {
       const c = this.playCache.get(userId)
-      if (c && c.r.ok) return c.r
+      if (c && c.ok) return c
       // 在途复用: 预取泵/自动录制/手动进房并发时, 同一目标只有一发在途请求
       const flying = this.playInflight.get(key)
       if (flying) return flying
@@ -538,7 +545,7 @@ class PandaApi {
     const p = (async () => {
       try {
         const r = await this.fetchPlay(userId, password)
-        if (r.ok) this.playCache.set(userId, { r, at: Date.now() })
+        if (r.ok) this.playCache.set(userId, r)
         return r
       } finally {
         this.playInflight.delete(key)

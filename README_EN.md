@@ -54,7 +54,8 @@ Download from [Releases](https://github.com/Joftal/pd-monitor/releases):
 |---|---|---|
 | Windows | `PandaLive Monitor-Setup-x.x.x.exe` | NSIS installer (desktop shortcut included) |
 | Windows | `PandaLive Monitor-Portable-x.x.x.exe` | Portable build — unzip and run; data stays with the app folder |
-| macOS | `PandaLive Monitor-x.x.x-(x64\|arm64).dmg / -mac.zip` | Unsigned: **right-click → Open** on first launch (or allow in System Settings); x64=Intel / arm64=Apple Silicon |
+| macOS | `PandaLive Monitor-x.x.x-(x64\|arm64).dmg` | DMG installer (unsigned: **right-click → Open** on first launch, or allow in System Settings); x64=Intel / arm64=Apple Silicon |
+| macOS | `PandaLive Monitor-x.x.x-(x64\|arm64).zip` | ZIP no-install build (same right-click rule) |
 | Linux | `PandaLive Monitor-x.x.x-x86_64.AppImage` | No install — `chmod +x` and run |
 | Linux | `PandaLive Monitor-x.x.x-amd64.deb` | Depends on `libsecret-1-0` (cookie vault encryption; handled by the installer) |
 

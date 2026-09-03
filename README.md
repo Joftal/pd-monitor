@@ -54,7 +54,8 @@
 |---|---|---|
 | Windows | `PandaLive Monitor-Setup-x.x.x.exe` | NSIS 安装包（创建桌面快捷方式） |
 | Windows | `PandaLive Monitor-Portable-x.x.x.exe` | 便携版，解压即用，数据随程序目录走 |
-| macOS | `PandaLive Monitor-x.x.x-(x64\|arm64).dmg / -mac.zip` | 免签名分发：首次打开需**右键 → 打开**（或系统设置里放行），x64=Intel / arm64=Apple Silicon |
+| macOS | `PandaLive Monitor-x.x.x-(x64\|arm64).dmg` | DMG 安装包（免签名分发：首次打开需**右键 → 打开**，或系统设置里放行），x64=Intel / arm64=Apple Silicon |
+| macOS | `PandaLive Monitor-x.x.x-(x64\|arm64).zip` | ZIP 免安装版（同上，右键打开） |
 | Linux | `PandaLive Monitor-x.x.x-x86_64.AppImage` | 免安装，`chmod +x` 即跑 |
 | Linux | `PandaLive Monitor-x.x.x-amd64.deb` | 依赖 `libsecret-1-0`（Cookie 加密存储，安装器自动处理） |
 

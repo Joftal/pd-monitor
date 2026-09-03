@@ -24,7 +24,6 @@ export function playDing(): void {
 }
 
 interface State {
-  ready: boolean
   anchors: Anchor[]
   discovery: DiscoveryItem[]
   recordings: RecTask[]
@@ -37,7 +36,6 @@ interface State {
 
 export const useAppStore = defineStore('app', {
   state: (): State => ({
-    ready: false,
     anchors: [],
     discovery: [],
     recordings: [],
@@ -76,13 +74,18 @@ export const useAppStore = defineStore('app', {
 
       api.onAnchors((list) => (this.anchors = list))
       api.onDiscovery((list) => (this.discovery = list))
+      // M6: 任务集/状态变化才全量重拉历史 —— 录制推送每 2s/任务, 盲目 refresh 会拖累整库
+      let lastRecSig = ''
       api.onRecordings((list) => {
         this.recordings = list
-        void this.refreshHistory()
+        const sig = list.map((task) => task.id + ':' + task.status).join('|')
+        if (sig !== lastRecSig) {
+          lastRecSig = sig
+          void this.refreshHistory()
+        }
       })
       api.onWatcher((w) => (this.watcher = w))
       api.onAccount((a) => (this.account = a))
-      this.ready = true
     },
     async refreshHistory() {
       this.history = await api.recHistory()

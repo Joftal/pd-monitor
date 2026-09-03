@@ -1,8 +1,9 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
+    // 产物为 CJS(electron-vite 默认): module 语义与产物对齐, 防止误用顶层 await 等 ESM 专属语法
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "lib": ["ES2022"],
     "strict": true,
     "esModuleInterop": true,

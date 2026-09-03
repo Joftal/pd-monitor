@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron'
 import { CH, EV } from '../shared/types'
+import type { ApiBridge } from '../shared/types'
 import type {
   AccountState, Anchor, AppInfo, DiscoveryItem, PlayInfo, RecDeleteFileResult, RecDeleteResult, RecHistoryItem, RecTask, RecThumbReady, Settings, Toast, UpdateCheckResult, WatcherStatus
 } from '../shared/types'
@@ -10,7 +11,8 @@ function on<T>(channel: string, cb: (payload: T) => void): () => void {
   return () => ipcRenderer.removeListener(channel, listener)
 }
 
-const apiBridge = {
+// 单一事实源: ApiBridge(shared/types.ts); 环境无关的 env.d.ts 直接引用同一接口
+const apiBridge: ApiBridge = {
   // 账号
   authState: (): Promise<AccountState> => ipcRenderer.invoke(CH.authState),
   authLoginPassword: (id: string, pw: string): Promise<{ ok: boolean; message: string }> =>
@@ -42,7 +44,6 @@ const apiBridge = {
     ipcRenderer.invoke(CH.recStart, userId, password),
   recStop: (userId: string): Promise<void> => ipcRenderer.invoke(CH.recStop, userId),
   recOpenFolder: (dir: string): Promise<boolean> => ipcRenderer.invoke(CH.recOpenFolder, dir),
-  recClearHistory: (): Promise<boolean> => ipcRenderer.invoke(CH.recClearHistory),
   recDiskFree: (): Promise<number> => ipcRenderer.invoke(CH.recDiskFree),
   recMerge: (taskId: string): Promise<{ ok: boolean; files?: string[]; error?: string }> =>
     ipcRenderer.invoke(CH.recMerge, taskId),
@@ -61,8 +62,6 @@ const apiBridge = {
 
   // 轮询
   watcherStatus: (): Promise<WatcherStatus> => ipcRenderer.invoke(CH.watcherStatus),
-  watcherStart: (): Promise<void> => ipcRenderer.invoke(CH.watcherStart),
-  watcherStop: (): Promise<void> => ipcRenderer.invoke(CH.watcherStop),
 
   // 窗口
   winControl: (action: 'min' | 'max' | 'close'): Promise<void> => ipcRenderer.invoke(CH.winControl, action),
@@ -72,8 +71,13 @@ const apiBridge = {
   appInfo: (): Promise<AppInfo> => ipcRenderer.invoke(CH.appInfo),
   checkUpdate: (): Promise<UpdateCheckResult> => ipcRenderer.invoke(CH.appCheckUpdate),
   /** 本地录制文件转 plocal:// 可播放 URL(纯拼接, 权限校验在主进程协议处理器) */
-  localFileUrl: (absPath: string): string =>
-    'plocal://file/' + Buffer.from(absPath, 'utf-8').toString('base64url'),
+  localFileUrl: (absPath: string): string => {
+    // 沙箱 preload 的 Buffer polyfill 不支持 base64url 编码 —— 纯 JS 实现(TextEncoder→btoa→±/替换)
+    const bytes = new TextEncoder().encode(absPath)
+    let bin = ''
+    for (const b of bytes) bin += String.fromCharCode(b)
+    return 'plocal://file/' + btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  },
 
   // 事件订阅
   onAnchors: (cb: (list: Anchor[]) => void) => on<Anchor[]>(EV.anchors, cb),
@@ -84,7 +88,5 @@ const apiBridge = {
   onDiscovery: (cb: (list: DiscoveryItem[]) => void) => on<DiscoveryItem[]>(EV.discovery, cb),
   onRecThumb: (cb: (p: RecThumbReady) => void) => on<RecThumbReady>(EV.recThumb, cb)
 }
-
-export type ApiBridge = typeof apiBridge
 
 contextBridge.exposeInMainWorld('api', apiBridge)

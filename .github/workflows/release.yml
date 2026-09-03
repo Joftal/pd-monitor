@@ -8,6 +8,11 @@ on:
         required: true
         type: string
 
+# 禁止并发发版: 防止两个 bump job 同时 push 导致 fast-forward 失败与产物互踩
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   # 版本提升收口在单一 job: 三平台同时 commit 会互踩, package.json 是唯一版本源
   bump:
@@ -17,8 +22,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Validate version input
+        shell: bash
+        run: |
+          [[ "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::版本号格式必须是 x.y.z"; exit 1; }
       - name: Bump version
-        run: npm version ${{ inputs.version }} --no-git-tag-version
+        run: npm version "${{ inputs.version }}" --no-git-tag-version
       - name: Commit version bump
         shell: bash
         run: |
@@ -57,6 +66,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main # 必须取 bump 之后的最新的 main(bump 提交), 否则产物版本号落后 Release 一位
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -132,8 +143,8 @@ jobs:
             | `PandaLive Monitor-Portable-${{ inputs.version }}.exe` | Windows x64 | 便携免安装版, 数据随程序目录迁移 |
             | `PandaLive Monitor-${{ inputs.version }}-x64.dmg` | macOS Intel | DMG 安装包(免签名分发: 首次请右键 → 打开) |
             | `PandaLive Monitor-${{ inputs.version }}-arm64.dmg` | macOS Apple Silicon(M 系列) | DMG 安装包(免签名分发: 首次请右键 → 打开) |
-            | `PandaLive Monitor-${{ inputs.version }}-x64-mac.zip` | macOS Intel | ZIP 免安装版(同上, 右键打开) |
-            | `PandaLive Monitor-${{ inputs.version }}-arm64-mac.zip` | macOS Apple Silicon(M 系列) | ZIP 免安装版(同上, 右键打开) |
+            | `PandaLive Monitor-${{ inputs.version }}-x64.zip` | macOS Intel | ZIP 免安装版(同上, 右键打开) |
+            | `PandaLive Monitor-${{ inputs.version }}-arm64.zip` | macOS Apple Silicon(M 系列) | ZIP 免安装版(同上, 右键打开) |
             | `PandaLive Monitor-${{ inputs.version }}-x86_64.AppImage` | Linux x64 | 免安装, `chmod +x` 直接运行 |
             | `PandaLive Monitor-${{ inputs.version }}-amd64.deb` | Linux x64 | 安装包(依赖 `libsecret-1-0`, 安装器自动处理) |
 

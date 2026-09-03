@@ -70,7 +70,8 @@ function createWindow(): void {
       session: sessionMain(),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      // M9: contextIsolation 前提下 preload 仅用 ipcRenderer+Buffer(沙箱 preload 自带 polyfill), 可收紧沙箱
+      sandbox: true
     }
   })
 
@@ -87,7 +88,6 @@ function createWindow(): void {
     mainWin = null
   })
 
-  void cfg
   if (process.env.ELECTRON_RENDERER_URL) {
     void mainWin.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
@@ -163,7 +163,8 @@ app.whenReady().then(() => {
 let stoppingForQuit = false
 app.on('before-quit', (e) => {
   quitting = true
-  const hasActive = recorder.list().some((t) => t.status === 'recording')
+  // M1: remuxing(转码/合并中)同样不可直接退出, 否则截断 MP4 收尾产物
+  const hasActive = recorder.list().some((t) => t.status === 'recording' || t.status === 'remuxing')
   if (hasActive && !stoppingForQuit) {
     e.preventDefault()
     stoppingForQuit = true
