@@ -2,6 +2,8 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, NEmpty, NTag, useMessage, NPopconfirm, NTooltip } from 'naive-ui'
 import { api } from '@/api'
+import { useI18n } from 'vue-i18n'
+const { t } = useI18n()
 import { useAppStore } from '@/stores/app'
 import LocalPlayerModal from '@/components/LocalPlayerModal.vue'
 import type { RecHistoryItem, RecTask } from '@shared/types'
@@ -114,10 +116,10 @@ async function merge(h: RecHistoryItem) {
   try {
     const r = await api.recMerge(h.id)
     if (r.ok) {
-      message.success('合并完成')
+      message.success(t('rec.mergeDone'))
       await store.refreshHistory()
     } else {
-      message.warning(r.error || '合并失败')
+      message.warning(r.error || t('rec.mergeFail'))
     }
   } finally {
     mergingId.value = ''
@@ -130,8 +132,8 @@ const activeBytes = computed(() => active.value.reduce((s, t) => s + (t.bytes ||
 const diskLow = computed(() => diskFree.value < (store.settings?.diskLimitGb ?? 1) * 2)
 const diskCaption = computed(() => {
   const limit = store.settings?.diskLimitGb ?? 1
-  if (diskFree.value < limit) return '磁盘告急, 已开始拒绝新录制'
-  return diskLow.value ? '磁盘偏低, 接近阈值' : '磁盘充足'
+  if (diskFree.value < limit) return t('rec.diskDanger')
+  return diskLow.value ? t('rec.diskWarn') : t('rec.diskFull')
 })
 const splitMin = computed(() => Math.round((store.settings?.splitSeconds ?? 900) / 60))
 
@@ -140,32 +142,32 @@ function vodPct(t: RecTask): number | null {
   if (!t.vodTotalSec || !t.vodDoneSec) return null
   return Math.min(100, Math.floor((100 * t.vodDoneSec) / t.vodTotalSec))
 }
-function vodTotalLabel(t: RecTask): string {
-  if (!t.vodTotalSec) return ''
-  return t.vodTotalSec < 3600 ? `~${Math.round(t.vodTotalSec / 60)} 分钟` : `~${fmtDurSec(t.vodTotalSec)}`
+function vodTotalLabel(task: RecTask): string {
+  if (!task.vodTotalSec) return ''
+  return task.vodTotalSec < 3600 ? `~${Math.round(task.vodTotalSec / 60)} ${t('common.min')}` : `~${fmtDurSec(task.vodTotalSec)}`
 }
 
 // ---- 历史: 筛选 + 日期分组 ----
 type FilterKey = 'all' | 'live' | 'vod' | 'error'
 const filterChip = ref<FilterKey>('all')
-const chips: { key: FilterKey; label: string }[] = [
-  { key: 'all', label: '全部' },
-  { key: 'live', label: '直播录制' },
-  { key: 'vod', label: '回放下载' },
-  { key: 'error', label: '出错' }
-]
+const chips = computed<{ key: FilterKey; label: string }[]>(() => [
+  { key: 'all', label: t('rec.fAll') },
+  { key: 'live', label: t('rec.fLive') },
+  { key: 'vod', label: t('rec.fVod') },
+  { key: 'error', label: t('rec.fErr') }
+])
 
 function sameDay(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 }
 function dayLabel(ts: number): string {
   const d = new Date(ts)
-  const md = `${d.getMonth() + 1}月${d.getDate()}日`
+  const md = t('rec.dayMd', { m: d.getMonth() + 1, d: d.getDate() })
   const today = new Date()
-  if (sameDay(d, today)) return `今天 · ${md}`
+  if (sameDay(d, today)) return t('rec.dayToday', { md })
   const y = new Date(today)
   y.setDate(y.getDate() - 1)
-  if (sameDay(d, y)) return `昨天 · ${md}`
+  if (sameDay(d, y)) return t('rec.dayYest', { md })
   return md
 }
 const histGroups = computed(() => {
@@ -191,16 +193,16 @@ function avgMbps(h: RecHistoryItem): string {
 }
 
 const statusMeta: Record<string, { label: string; cls: string; dot: string }> = {
-  recording: { label: '录制中', cls: 'text-red-500 bg-red-500/10', dot: 'bg-red-500 animate-breathe' },
-  remuxing: { label: '转码中', cls: 'text-amber-500 bg-amber-500/10', dot: 'bg-amber-500' },
-  done: { label: '已完成', cls: 'text-emerald-600 bg-emerald-500/10', dot: 'bg-emerald-500' },
-  stopped: { label: '已停止', cls: 'text-ink3 bg-gray-400/10', dot: 'bg-ink3' },
-  error: { label: '出错', cls: 'text-red-500 bg-red-500/10', dot: 'bg-red-500' }
+  recording: { label: ''  + t('rec.stRecording')  + '', cls: 'text-red-500 bg-red-500/10', dot: 'bg-red-500 animate-breathe' },
+  remuxing: { label: ''  + t('rec.stRemuxing')  + '', cls: 'text-amber-500 bg-amber-500/10', dot: 'bg-amber-500' },
+  done: { label: ''  + t('rec.stDone')  + '', cls: 'text-emerald-600 bg-emerald-500/10', dot: 'bg-emerald-500' },
+  stopped: { label: ''  + t('rec.stStopped')  + '', cls: 'text-ink3 bg-gray-400/10', dot: 'bg-ink3' },
+  error: { label: ''  + t('rec.stError')  + '', cls: 'text-red-500 bg-red-500/10', dot: 'bg-red-500' }
 }
 
 async function stop(userId: string) {
   await api.recStop(userId)
-  message.success('已停止')
+  message.success(t('rec.stopped'))
 }
 async function openFolder(dir: string) {
   await api.recOpenFolder(dir)
@@ -208,7 +210,7 @@ async function openFolder(dir: string) {
 async function clearHistory() {
   await api.recClearHistory()
   await store.refreshHistory()
-  message.success('历史已清空')
+  message.success(t('rec.cleared'))
 }
 </script>
 
@@ -218,31 +220,31 @@ async function clearHistory() {
       <!-- ① 页头 + 概览条 -->
       <div class="flex items-end gap-4 pt-5">
         <div class="shrink-0">
-          <h1 class="text-[21px] font-extrabold text-ink1 tracking-tight">录制</h1>
-          <div class="text-[12px] text-ink3 mt-0.5">ffmpeg 内核 · TS 分段无损收集 · 收尾自动 remux / 合并 MP4</div>
+          <h1 class="text-[21px] font-extrabold text-ink1 tracking-tight">{{ t('rec.title') }}</h1>
+          <div class="text-[12px] text-ink3 mt-0.5">{{ t('rec.sub') }}</div>
         </div>
         <div class="ml-auto flex items-stretch bg-card border border-line rounded-2xl shadow-card overflow-hidden divide-x divide-line/70">
           <div class="px-5 py-2 min-w-[100px]">
             <div class="text-[11px] text-ink3 flex items-center gap-1.5">
-              <span class="w-[7px] h-[7px] rounded-full bg-red-500" :class="active.length ? 'animate-breathe' : ''"></span>进行中
+              <span class="w-[7px] h-[7px] rounded-full bg-red-500" :class="active.length ? 'animate-breathe' : ''"></span>{{ t('rec.ovActive') }}
             </div>
             <div class="text-[19px] font-extrabold leading-tight tabular-nums" :class="active.length ? 'text-red-500' : 'text-ink1'">
-              {{ active.length }}<span class="text-[11px] font-medium text-ink3 ml-1">路</span>
+              {{ t('rec.ovActiveN', { n: active.length }) }}
             </div>
           </div>
           <div class="px-5 py-2 min-w-[100px]">
-            <div class="text-[11px] text-ink3">本次已录</div>
+            <div class="text-[11px] text-ink3">{{ t('rec.ovBytes') }}</div>
             <div class="text-[19px] font-extrabold leading-tight tabular-nums text-ink1">{{ tick && fmtBytes(activeBytes) }}</div>
           </div>
           <div class="px-5 py-2 min-w-[100px]">
-            <div class="text-[11px] text-ink3">磁盘可用</div>
+            <div class="text-[11px] text-ink3">{{ t('rec.ovDisk') }}</div>
             <div class="text-[19px] font-extrabold leading-tight tabular-nums" :class="diskLow ? 'text-red-500' : 'text-ink1'">
               {{ diskFree.toFixed(1) }}<span class="text-[11px] font-medium text-ink3 ml-1">GB</span>
             </div>
           </div>
           <div class="px-5 py-2 min-w-[100px]">
-            <div class="text-[11px] text-ink3">历史任务</div>
-            <div class="text-[19px] font-extrabold leading-tight tabular-nums text-ink1">{{ store.history.length }}<span class="text-[11px] font-medium text-ink3 ml-1">条</span></div>
+            <div class="text-[11px] text-ink3">{{ t('rec.ovHistory') }}</div>
+            <div class="text-[19px] font-extrabold leading-tight tabular-nums text-ink1">{{ t('rec.unitN', { n: store.history.length }) }}</div>
           </div>
         </div>
       </div>
@@ -250,91 +252,91 @@ async function clearHistory() {
       <!-- ② 进行中 · 大卡片 -->
       <div class="flex items-center gap-2 mt-6 mb-3 px-0.5">
         <h2 class="text-[14.5px] font-extrabold text-ink1 flex items-center gap-2">
-          <span class="w-2 h-2 rounded-full bg-red-500" :class="active.length ? 'animate-breathe' : ''"></span>进行中
-          <span class="text-[11.5px] font-medium text-ink3">{{ active.length }} 个任务</span>
+          <span class="w-2 h-2 rounded-full bg-red-500" :class="active.length ? 'animate-breathe' : ''"></span>{{ t('rec.ovActive') }}
+          <span class="text-[11.5px] font-medium text-ink3">{{ t('rec.secActiveN', { n: active.length }) }}</span>
         </h2>
-        <span class="ml-auto text-[11.5px] text-ink3">指标每 2 秒刷新 · 码率为实时差分</span>
+        <span class="ml-auto text-[11.5px] text-ink3">{{ t('rec.rateNote') }}</span>
       </div>
 
       <div v-if="active.length" class="space-y-3.5">
         <div
-          v-for="t in active"
-          :key="t.id"
+          v-for="task in active"
+          :key="task.id"
           class="relative bg-card border border-line rounded-2xl shadow-card hover:shadow-card-hover transition-all duration-200 px-5 pt-[18px] pb-4 overflow-hidden animate-pop"
         >
           <div class="flex items-center gap-4">
             <!-- 直播间封面 + 呼吸点(无封面时回退昵称首字) -->
             <div class="relative shrink-0">
               <img
-                v-if="t.thumbUrl"
-                :src="t.thumbUrl"
+                v-if="task.thumbUrl"
+                :src="task.thumbUrl"
                 class="block w-14 h-14 rounded-2xl object-cover"
                 referrerpolicy="no-referrer"
               />
               <div
                 v-else
                 class="w-14 h-14 rounded-2xl grid place-items-center text-[21px] font-bold"
-                :class="t.vod ? 'bg-[#f0a020]/10 text-[#d98a08]' : 'bg-live/10 text-live'"
+                :class="task.vod ? 'bg-[#f0a020]/10 text-[#d98a08]' : 'bg-live/10 text-live'"
               >
-                {{ t.nick.slice(0, 1) }}
+                {{ task.nick.slice(0, 1) }}
               </div>
               <span
                 class="absolute -right-[3px] -bottom-[3px] w-3.5 h-3.5 rounded-full ring-[2.5px] ring-card animate-breathe"
-                :class="t.vod ? 'bg-[#f0a020]' : 'bg-red-500'"
+                :class="task.vod ? 'bg-[#f0a020]' : 'bg-red-500'"
               ></span>
             </div>
             <!-- 信息列 -->
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2">
-                <span class="text-[16px] font-extrabold text-ink1 truncate">{{ t.nick }}</span>
-                <n-tag v-if="t.vod" size="tiny" :bordered="false" type="warning">回放</n-tag>
-                <n-tag v-else size="tiny" :bordered="false" type="error">直播</n-tag>
-                <n-tag v-if="t.auto" size="tiny" :bordered="false" type="info">自动</n-tag>
+                <span class="text-[16px] font-extrabold text-ink1 truncate">{{ task.nick }}</span>
+                <n-tag v-if="task.vod" size="tiny" :bordered="false" type="warning">{{ t('rec.tagVod') }}</n-tag>
+                <n-tag v-else size="tiny" :bordered="false" type="error">{{ t('rec.tagLive') }}</n-tag>
+                <n-tag v-if="task.auto" size="tiny" :bordered="false" type="info">{{ t('rec.tagAuto') }}</n-tag>
               </div>
-              <div class="text-[12.5px] text-ink2 truncate mt-1" :title="t.title">{{ t.title || '—' }}</div>
-              <div class="text-[11px] text-ink3 truncate mt-0.5 font-mono">{{ fname(t.dirPath) }}/{{ fname(t.currentFile) || '…' }}</div>
+              <div class="text-[12.5px] text-ink2 truncate mt-1" :title="task.title">{{ task.title || '—' }}</div>
+              <div class="text-[11px] text-ink3 truncate mt-0.5 font-mono">{{ fname(task.dirPath) }}/{{ fname(task.currentFile) || '…' }}</div>
             </div>
             <!-- 指标簇 -->
             <div class="text-right shrink-0 tabular-nums">
-              <div class="text-[22px] font-extrabold leading-none" :class="t.vod ? 'text-[#d98a08]' : 'text-red-500'">
-                {{ t.vod && t.vodDoneSec ? fmtDurSec(t.vodDoneSec) : tick && fmtDur(t.startedAt, null) }}
+              <div class="text-[22px] font-extrabold leading-none" :class="task.vod ? 'text-[#d98a08]' : 'text-red-500'">
+                {{ task.vod && task.vodDoneSec ? fmtDurSec(task.vodDoneSec) : tick && fmtDur(task.startedAt, null) }}
               </div>
-              <div class="text-[10.5px] text-ink3 mt-1">{{ t.vod ? '已下载时长' : '已录时长' }}</div>
+              <div class="text-[10.5px] text-ink3 mt-1">{{ task.vod ? t('rec.durVod') : t('rec.durLive') }}</div>
             </div>
             <div class="text-right shrink-0 tabular-nums">
-              <div class="text-[22px] font-extrabold leading-none text-ink1">{{ tick && fmtBytes(t.bytes) }}</div>
-              <div class="text-[10.5px] text-ink3 mt-1">已写入 · {{ t.vod ? '单文件' : `${t.files.length} 段` }}</div>
+              <div class="text-[22px] font-extrabold leading-none text-ink1">{{ tick && fmtBytes(task.bytes) }}</div>
+              <div class="text-[10.5px] text-ink3 mt-1">{{ task.vod ? t('rec.writtenVod') : t('rec.writtenLive', { n: task.files.length }) }}</div>
             </div>
             <div class="text-right shrink-0 tabular-nums min-w-[76px]">
               <div class="text-[22px] font-extrabold leading-none text-ink1">
-                {{ tick && fmtRate(t) }}<span class="text-[11px] font-medium text-ink3 ml-0.5">{{ t.vod ? 'MB/s' : 'Mbps' }}</span>
+                {{ tick && fmtRate(task) }}<span class="text-[11px] font-medium text-ink3 ml-0.5">{{ task.vod ? 'MB/s' : 'Mbps' }}</span>
               </div>
-              <div class="text-[10.5px] text-ink3 mt-1">{{ t.vod ? '下载速度' : '实时码率' }}</div>
+              <div class="text-[10.5px] text-ink3 mt-1">{{ task.vod ? t('rec.rateVod') : t('rec.rateLive') }}</div>
             </div>
             <!-- 操作 -->
             <div class="flex flex-col gap-1.5 shrink-0 ml-2">
-              <n-button v-if="t.vod" size="small" type="error" secondary round class="!w-[88px]" @click="stop(t.userId)">■ 取消下载</n-button>
-              <n-button v-else size="small" type="error" round class="!w-[88px]" @click="stop(t.userId)">■ 停止</n-button>
-              <n-button size="small" tertiary round class="!w-[88px]" @click="openFolder(t.dirPath)">目录</n-button>
+              <n-button v-if="task.vod" size="small" type="error" secondary round class="!w-[88px]" @click="stop(task.userId)">{{ t('rec.stopVod') }}</n-button>
+              <n-button v-else size="small" type="error" round class="!w-[88px]" @click="stop(task.userId)">{{ t('rec.stop') }}</n-button>
+              <n-button size="small" tertiary round class="!w-[88px]" @click="openFolder(task.dirPath)">{{ t('rec.dir') }}</n-button>
             </div>
           </div>
           <!-- 底部进度带 -->
           <div class="flex items-center gap-3.5 mt-3.5 pl-[72px]">
             <div class="flex-1 h-1.5 rounded bg-fill overflow-hidden relative">
               <span
-                v-if="!t.vod || vodPct(t) === null"
+                v-if="!task.vod || vodPct(task) === null"
                 class="absolute top-0 bottom-0 w-[40%] rounded bg-gradient-to-r from-transparent to-transparent bar-slide"
-                :class="t.vod ? 'via-[#f0a020]' : 'via-live'"
+                :class="task.vod ? 'via-[#f0a020]' : 'via-live'"
               ></span>
-              <span v-else class="absolute left-0 top-0 bottom-0 rounded bg-[#f0a020]" :style="{ width: vodPct(t) + '%' }"></span>
+              <span v-else class="absolute left-0 top-0 bottom-0 rounded bg-[#f0a020]" :style="{ width: vodPct(task) + '%' }"></span>
             </div>
             <div class="text-[11px] text-ink3 shrink-0 tabular-nums">
-              <template v-if="t.vod">
-                <b v-if="vodPct(t) !== null" class="text-ink2 font-semibold">{{ vodPct(t) }}%</b>
-                <span v-if="vodPct(t) !== null"> · </span>已下载 {{ fmtDurSec(t.vodDoneSec || 0) }}<template v-if="vodTotalLabel(t)"> / 估算全长 {{ vodTotalLabel(t) }}</template>
+              <template v-if="task.vod">
+                <b v-if="vodPct(task) !== null" class="text-ink2 font-semibold">{{ vodPct(task) }}%</b>
+                <span v-if="vodPct(task) !== null"> · </span>已下载 {{ t('rec.vodCap', { done: fmtDurSec(task.vodDoneSec || 0), total: vodTotalLabel(task) }) }}
               </template>
               <template v-else>
-                分段 {{ splitMin }} 分钟/段 · <b class="font-semibold" :class="diskLow ? 'text-red-500' : 'text-ink2'">{{ diskCaption }}</b> · 收集中
+                {{ t('rec.segInfo', { min: splitMin }) }} · <b class="font-semibold" :class="diskLow ? 'text-red-500' : 'text-ink2'">{{ diskCaption }}</b> · 收集中
               </template>
             </div>
           </div>
@@ -343,16 +345,16 @@ async function clearHistory() {
       <div v-else class="rounded-2xl border border-dashed border-line py-10 grid place-items-center bg-card/40">
         <div class="text-center">
           <div class="text-3xl mb-2">🎬</div>
-          <p class="text-[13px] text-ink3">暂无进行中的录制</p>
-          <p class="text-[11.5px] text-ink3/70 mt-1">到直播大厅点 ⏺ 开始录制, 或在已关注里开启"开播自动录制"</p>
+          <p class="text-[13px] text-ink3">{{ t('rec.emptyActive') }}</p>
+          <p class="text-[11.5px] text-ink3/70 mt-1">{{ t('rec.emptyActiveHint') }}</p>
         </div>
       </div>
 
       <!-- ③ 历史记录 -->
       <div class="flex items-center gap-2 mt-7 mb-3 px-0.5">
         <h2 class="text-[14.5px] font-extrabold text-ink1">
-          历史记录
-          <span class="text-[11.5px] font-medium text-ink3 ml-1">{{ store.history.length }} 条 · 上限 500</span>
+          {{ t('rec.histTitle') }}
+          <span class="text-[11.5px] font-medium text-ink3 ml-1">{{ t('rec.histCount', { n: store.history.length }) }}</span>
         </h2>
         <div class="ml-auto flex items-center gap-2">
           <button
@@ -364,9 +366,9 @@ async function clearHistory() {
           >{{ c.label }}</button>
           <n-popconfirm @positive-click="clearHistory" v-if="store.history.length">
             <template #trigger>
-              <n-button size="tiny" tertiary round>清空</n-button>
+              <n-button size="tiny" tertiary round>{{ t('rec.clear') }}</n-button>
             </template>
-            确定清空全部历史记录? (不会删除文件)
+            {{ t('rec.clearConfirm') }}
           </n-popconfirm>
         </div>
       </div>
@@ -383,19 +385,19 @@ async function clearHistory() {
             <div class="flex-1 min-w-0">
               <div class="text-[13.5px] font-semibold text-ink1 truncate" :title="h.title">
                 {{ h.title || '—' }}
-                <n-tag v-if="h.vod" size="tiny" :bordered="false" type="warning" class="ml-1">回放</n-tag>
-                <n-tag v-if="isSingleFile(h)" size="tiny" :bordered="false" type="error" class="ml-1">单文件</n-tag>
+                <n-tag v-if="h.vod" size="tiny" :bordered="false" type="warning" class="ml-1">{{ t('rec.tagVod') }}</n-tag>
+                <n-tag v-if="isSingleFile(h)" size="tiny" :bordered="false" type="error" class="ml-1">{{ t('rec.mergedTag') }}</n-tag>
               </div>
               <div v-if="h.status === 'error' && h.error" class="text-[11.5px] text-red-500 truncate mt-0.5" :title="h.error">
-                出错: {{ h.error }} · {{ fmtClock(h.startedAt) }} 开始
+                {{ t('rec.errPrefix') }}{{ h.error }} · {{ fmtClock(h.startedAt) }} 开始
               </div>
               <div v-else class="text-[11.5px] text-ink3 truncate mt-0.5">
-                {{ h.nick }} · @{{ h.userId }} · {{ fmtClock(h.startedAt) }} 开始<span v-if="h.status === 'stopped'"> · 手动停止</span><span v-else-if="h.status === 'done'"> · 正常收播</span>
+                {{ h.nick }} · @{{ h.userId }} · {{ fmtClock(h.startedAt) }} 开始<span v-if="h.status === 'stopped'"> · {{ t('rec.subStopped') }}</span><span v-else-if="h.status === 'done'"> · {{ t('rec.subDone') }}</span>
               </div>
             </div>
             <div class="w-[72px] text-right shrink-0 tabular-nums">
               <div class="text-[13px] font-bold text-ink1">{{ fmtDur(h.startedAt, h.endedAt) }}</div>
-              <div class="text-[10.5px] text-ink3">时长</div>
+              <div class="text-[10.5px] text-ink3">{{ t('rec.durLabel') }}</div>
             </div>
             <div class="w-[92px] text-right shrink-0 tabular-nums">
               <div class="text-[13px] font-bold text-ink1">{{ fmtBytes(h.bytes) }}</div>
@@ -411,7 +413,7 @@ async function clearHistory() {
                 <button class="w-7 h-7 rounded-lg grid place-items-center text-ink3 hover:bg-fillh hover:text-live transition-colors" @click="play(h)">
                   <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>
                 </button>
-              </template>应用内播放</n-tooltip>
+              </template>{{ t('rec.actPlay') }}</n-tooltip>
               <n-tooltip v-if="mergeable(h)" trigger="hover" :delay="300"><template #trigger>
                 <button
                   class="w-7 h-7 rounded-lg grid place-items-center text-ink3 hover:bg-fillh hover:text-ink1 transition-colors"
@@ -420,18 +422,18 @@ async function clearHistory() {
                 >
                   <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M10 13a5 5 0 007.5.5l3-3a5 5 0 00-7-7l-1.7 1.7M14 11a5 5 0 00-7.5-.5l-3 3a5 5 0 007 7l1.7-1.7"/></svg>
                 </button>
-              </template>合并分段为单文件</n-tooltip>
+              </template>{{ t('rec.actMerge') }}</n-tooltip>
               <n-tooltip trigger="hover" :delay="300"><template #trigger>
                 <button class="w-7 h-7 rounded-lg grid place-items-center text-ink3 hover:bg-fillh hover:text-ink1 transition-colors" @click="openFolder(h.dirPath)" v-if="h.dirPath">
                   <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
                 </button>
-              </template>打开目录</n-tooltip>
+              </template>{{ t('rec.actDir') }}</n-tooltip>
             </div>
           </div>
         </template>
       </div>
       <div v-else class="rounded-2xl border border-dashed border-line py-8 grid place-items-center bg-card/40">
-        <n-empty :description="filterChip === 'all' ? '暂无历史记录' : '没有匹配的历史记录'" size="small" class="text-ink3" />
+        <n-empty :description="filterChip === 'all' ? t('rec.histEmpty') : t('rec.histEmptyFilter')" size="small" class="text-ink3" />
       </div>
     </div>
 

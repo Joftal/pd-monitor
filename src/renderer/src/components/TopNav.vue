@@ -4,16 +4,19 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api'
 import { NTooltip } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 const route = useRoute()
 const router = useRouter()
 const store = useAppStore()
 
-const tabs = [
-  { name: 'explore', label: '直播大厅' },
-  { name: 'monitor', label: '已关注' },
-  { name: 'recordings', label: '录制管理' }
-]
+const tabs = computed(() => [
+  { name: 'explore', label: t('nav.explore') },
+  { name: 'monitor', label: t('nav.monitor') },
+  { name: 'recordings', label: t('nav.recordings') }
+])
 
 function tabActive(name: string): boolean {
   if (route.name === name) return true
@@ -23,15 +26,15 @@ function tabActive(name: string): boolean {
 
 const watcherState = computed(() => {
   const w = store.watcher
-  if (!w) return { cls: 'bg-ink3', text: '—', tip: '轮询状态未知' }
-  if (w.circuitOpen) return { cls: 'bg-red-400', text: '风控冷却', tip: w.message }
-  if (!w.running) return { cls: 'bg-ink3', text: '已暂停', tip: '轮询已停止' }
+  if (!w) return { cls: 'bg-ink3', text: '—', tip: t('nav.wUnknown') }
+  if (w.circuitOpen) return { cls: 'bg-red-400', text: t('nav.wCooling'), tip: w.message }
+  if (!w.running) return { cls: 'bg-ink3', text: t('nav.wStopped'), tip: t('nav.wStoppedTip') }
   const interval = store.settings?.pollIntervalSec ?? '?'
-  const cost = w.roundMs < 1000 ? `${w.roundMs} 毫秒` : `${(w.roundMs / 1000).toFixed(1)} 秒`
+  const cost = w.roundMs < 1000 ? `${w.roundMs} ${t('common.ms')}` : `${(w.roundMs / 1000).toFixed(1)} ${t('common.sec')}`
   return {
     cls: 'bg-live',
-    text: `${w.liveCount} 直播中`,
-    tip: `每 ${interval} 秒向平台拉取一次数据 · 上次拉取耗时 ${cost}`
+    text: t('nav.liveN', { n: w.liveCount }),
+    tip: t('nav.wTip', { sec: interval, cost })
   }
 })
 
@@ -60,19 +63,19 @@ const keyword = computed({
     <!-- 导航 tabs -->
     <nav class="no-drag flex items-stretch self-stretch ml-8 gap-1">
       <button
-        v-for="t in tabs"
-        :key="t.name"
+        v-for="tab in tabs"
+        :key="tab.name"
         class="nav-tab px-4 text-[14px] font-medium transition-colors flex items-center"
-        :class="tabActive(t.name) ? 'active text-ink1 font-semibold' : 'text-ink2 hover:text-ink1'"
-        @click="router.push({ name: t.name })"
+        :class="tabActive(tab.name) ? 'active text-ink1 font-semibold' : 'text-ink2 hover:text-ink1'"
+        @click="router.push({ name: tab.name })"
       >
-        {{ t.label }}
+        {{ tab.label }}
         <span
-          v-if="t.name === 'monitor' && store.liveAnchors.length"
+          v-if="tab.name === 'monitor' && store.liveAnchors.length"
           class="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-live/15 text-live text-[11px] font-bold"
         >{{ store.liveAnchors.length }}</span>
         <span
-          v-if="t.name === 'recordings' && store.activeRecs.length"
+          v-if="tab.name === 'recordings' && store.activeRecs.length"
           class="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500/10 text-red-500 text-[11px] font-bold"
         >{{ store.activeRecs.length }}</span>
       </button>
@@ -84,7 +87,7 @@ const keyword = computed({
         <input
           v-model="keyword"
           type="text"
-          placeholder="搜索主播 / 标题"
+          :placeholder="t('nav.searchPh')"
           class="w-full h-10 pl-4 pr-11 rounded-full bg-page text-[13px] text-ink1 placeholder:text-ink3 outline-none border-2 border-transparent focus:border-live/60 focus:bg-card transition-all"
           @keyup.enter="router.push({ name: 'explore' })"
         />
@@ -115,7 +118,7 @@ const keyword = computed({
       <button
         class="h-9 pl-1 pr-3 rounded-full flex items-center gap-2 hover:bg-page transition-colors"
         @click="router.push({ name: 'account' })"
-        title="账号"
+        :title="t('account.title')"
       >
         <span class="relative w-8 h-8 shrink-0">
           <!-- 头像圆: SVG 人像, 登录态渐变粉底, 未登录灰色 -->
@@ -139,14 +142,14 @@ const keyword = computed({
           ></span>
         </span>
         <span class="text-[13px]" :class="store.account?.realLogin ? 'text-ink1 font-medium' : 'text-ink3'">
-          {{ store.account?.realLogin ? '已登录' : store.account?.loggedIn ? '未认证' : '登录' }}
+          {{ store.account?.realLogin ? t('nav.loggedIn') : store.account?.loggedIn ? t('nav.unverified') : t('nav.login') }}
         </span>
       </button>
 
       <button
         class="w-9 h-9 rounded-full grid place-items-center text-ink2 hover:bg-page hover:text-ink1 transition-colors"
         @click="router.push({ name: 'settings' })"
-        title="设置"
+        :title="t('nav.settings')"
       >
         <svg class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/>

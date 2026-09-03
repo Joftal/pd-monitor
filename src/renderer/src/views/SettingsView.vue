@@ -5,6 +5,9 @@ import { useAppStore } from '@/stores/app'
 import { api } from '@/api'
 import type { AppInfo, Settings, UpdateCheckResult } from '@shared/types'
 import SpinIcon from '@/components/SpinIcon.vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 const store = useAppStore()
 const message = useMessage()
@@ -91,7 +94,7 @@ async function save() {
     }
     form.value = clean
     await store.patchSettings(clean)
-    message.success('设置已保存')
+    message.success(t('settings.saved'))
   } finally {
     saving.value = false
   }
@@ -102,11 +105,20 @@ function resetForm() {
 }
 
 /** 主题特殊通道: 点按即切换并立即持久化(不走"保存设置"批处理), 与页内文案"立即生效"一致 */
-async function applyTheme(t: 'light' | 'dark') {
-  if (!form.value || form.value.theme === t) return
-  form.value.theme = t
-  await store.patchSettings({ theme: t })
-  message.success(t === 'dark' ? '已切换深色主题' : '已切换亮色主题')
+async function applyTheme(v: 'light' | 'dark') {
+  if (!form.value || form.value.theme === v) return
+  form.value.theme = v
+  await store.patchSettings({ theme: v })
+  message.success(v === 'dark' ? t('settings.switchedDark') : t('settings.switchedLight'))
+}
+
+/** 语言特殊通道: 同主题, 立即生效并持久化 */
+async function applyLocale(v: string | number | boolean) {
+  const l = String(v) as Settings['locale']
+  if (!form.value || form.value.locale === l) return
+  form.value.locale = l
+  await store.patchSettings({ locale: l })
+  message.success(t('settings.switchedLang'))
 }
 
 /** 头像加载失败(离线等)时静默隐藏, 保留纯渐变横幅 */
@@ -115,16 +127,16 @@ function hideBrokenImg(e: Event): void {
 }
 
 // ---- 左侧锚点导航(手动 scrollspy) ----
-const navs = [
-  { key: 'appearance', label: '外观' },
-  { key: 'monitor', label: '监控' },
-  { key: 'record', label: '录制' },
-  { key: 'network', label: '网络' },
-  { key: 'notify', label: '通知与行为' },
-  { key: 'storage', label: '数据与日志' },
-  { key: 'about', label: '关于' }
-] as const
-type NavKey = (typeof navs)[number]['key']
+type NavKey = 'appearance' | 'monitor' | 'record' | 'network' | 'notify' | 'storage' | 'about'
+const navs = computed<{ key: NavKey; label: string }[]>(() => [
+  { key: 'appearance', label: t('settings.navAppearance') },
+  { key: 'monitor', label: t('settings.navMonitor') },
+  { key: 'record', label: t('settings.navRecord') },
+  { key: 'network', label: t('settings.navNetwork') },
+  { key: 'notify', label: t('settings.navNotify') },
+  { key: 'storage', label: t('settings.navStorage') },
+  { key: 'about', label: t('settings.navAbout') }
+])
 
 const scrollRef = ref<HTMLElement | null>(null)
 const activeNav = ref<NavKey>('appearance')
@@ -141,7 +153,7 @@ function onScroll(): void {
   if (!box) return
   const boxTop = box.getBoundingClientRect().top
   let cur: NavKey = 'appearance'
-  for (const n of navs) {
+  for (const n of navs.value) {
     const el = box.querySelector(`[data-sec="${n.key}"]`)
     if (el && el.getBoundingClientRect().top - boxTop <= 96) cur = n.key
   }
@@ -158,13 +170,13 @@ const tileCls =
     <!-- 页头 -->
     <div class="px-7 pt-5 pb-4 shrink-0 flex items-center gap-3">
       <div>
-        <h1 class="text-[20px] font-extrabold text-ink1 tracking-tight">设置</h1>
-        <div class="text-[12px] text-ink3 mt-0.5">修改在「保存设置」后生效; 轮询相关变更保存后立即重拉一轮</div>
+        <h1 class="text-[20px] font-extrabold text-ink1 tracking-tight">{{ t('settings.title') }}</h1>
+        <div class="text-[12px] text-ink3 mt-0.5">{{ t('settings.sub') }}</div>
       </div>
       <span
         v-if="dirty"
         class="ml-auto shrink-0 h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#f0a020]/[0.14] text-[#d98a08] animate-pop"
-      >有未保存的更改</span>
+      >{{ t('settings.dirtyChip') }}</span>
     </div>
 
     <!-- 主体: 左导航 + 右滚动区 -->
@@ -195,8 +207,8 @@ const tileCls =
         <!-- 外观 -->
         <section data-sec="appearance" class="mb-5">
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
-            <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">外观</h2>
-            <span class="text-[11px] text-ink3 ml-auto">主题立即生效并随设置保存持久化</span>
+            <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">{{ t('settings.appearance') }}</h2>
+            <span class="text-[11px] text-ink3 ml-auto">{{ t('settings.appearanceDesc') }}</span>
           </div>
           <div class="bg-card rounded-[14px] shadow-card overflow-hidden">
             <div class="grid grid-cols-2 gap-2.5 px-4 py-3">
@@ -207,8 +219,8 @@ const tileCls =
               >
                 <svg class="w-4 h-4 shrink-0" :class="form.theme === 'light' ? 'text-live' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path stroke-linecap="round" d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4l1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
                 <div class="min-w-0 flex-1">
-                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">亮色主题</div>
-                  <div class="text-[10.5px] text-ink3">默认 · B 站风浅色</div>
+                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.lightTheme') }}</div>
+                  <div class="text-[10.5px] text-ink3">{{ t('settings.lightDesc') }}</div>
                 </div>
                 <span
                   class="w-[18px] h-[18px] rounded-full grid place-items-center shrink-0"
@@ -224,8 +236,8 @@ const tileCls =
               >
                 <svg class="w-4 h-4 shrink-0" :class="form.theme === 'dark' ? 'text-live' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z"/></svg>
                 <div class="min-w-0 flex-1">
-                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">深色主题</div>
-                  <div class="text-[10.5px] text-ink3">护眼暗色 · 全控件适配</div>
+                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.darkTheme') }}</div>
+                  <div class="text-[10.5px] text-ink3">{{ t('settings.darkDesc') }}</div>
                 </div>
                 <span
                   class="w-[18px] h-[18px] rounded-full grid place-items-center shrink-0"
@@ -235,37 +247,47 @@ const tileCls =
                 </span>
               </div>
             </div>
+            <div class="flex items-center justify-between gap-4 px-4 pb-3 border-t border-line/40 pt-3">
+              <div>
+                <div class="text-[13px] font-medium text-ink1">{{ t('settings.language') }}</div>
+                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.langDesc') }}</div>
+              </div>
+              <n-radio-group :value="form.locale" size="small" @update:value="applyLocale">
+                <n-radio-button value="zh-CN">{{ t('settings.langZh') }}</n-radio-button>
+                <n-radio-button value="en-US">{{ t('settings.langEn') }}</n-radio-button>
+              </n-radio-group>
+            </div>
           </div>
         </section>
 
         <!-- 监控 -->
         <section data-sec="monitor" class="mb-5">
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
-            <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">监控</h2>
-            <span class="text-[11px] text-ink3 ml-auto">开播检测方式与请求节流</span>
+            <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">{{ t('settings.monitor') }}</h2>
+            <span class="text-[11px] text-ink3 ml-auto">{{ t('settings.monitorDesc') }}</span>
           </div>
           <div class="bg-card rounded-[14px] shadow-card overflow-hidden">
             <div class="flex items-center justify-between gap-4 px-4 py-3">
               <div>
-                <div class="text-[13px] font-medium text-ink1">检测模式</div>
-                <div class="text-[11.5px] text-ink3 mt-0.5">列表模式同时驱动直播大厅; 逐个模式兼容特殊场景</div>
+                <div class="text-[13px] font-medium text-ink1">{{ t('settings.watchMode') }}</div>
+                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.watchModeDesc') }}</div>
               </div>
               <n-radio-group v-model:value="form.watchMode" size="small">
-                <n-radio-button value="list">列表模式</n-radio-button>
-                <n-radio-button value="per-anchor">逐个模式</n-radio-button>
+                <n-radio-button value="list">{{ t('settings.modeList') }}</n-radio-button>
+                <n-radio-button value="per-anchor">{{ t('settings.modePer') }}</n-radio-button>
               </n-radio-group>
             </div>
             <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-line/40">
               <div>
-                <div class="text-[13px] font-medium text-ink1">轮询间隔(秒)</div>
-                <div class="text-[11.5px] text-ink3 mt-0.5">列表模式建议 ≥ 10 秒; 逐个模式请 ≥ 60 秒防风控</div>
+                <div class="text-[13px] font-medium text-ink1">{{ t('settings.pollSec') }}</div>
+                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.pollSecDesc') }}</div>
               </div>
               <n-input-number v-model:value="form.pollIntervalSec" :min="5" :max="600" size="small" class="!w-28" />
             </div>
             <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-line/40">
               <div>
-                <div class="text-[13px] font-medium text-ink1">单请求节流(毫秒)</div>
-                <div class="text-[11.5px] text-ink3 mt-0.5">每个网络请求之间的最小间隔, 带随机抖动</div>
+                <div class="text-[13px] font-medium text-ink1">{{ t('settings.gapMs') }}</div>
+                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.gapMsDesc') }}</div>
               </div>
               <n-input-number v-model:value="form.requestGapMs" :min="300" :max="10000" :step="100" size="small" class="!w-28" />
             </div>
@@ -275,77 +297,77 @@ const tileCls =
         <!-- 录制 -->
         <section data-sec="record" class="mb-5">
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
-            <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">录制</h2>
-            <span class="text-[11px] text-ink3 ml-auto">保存位置 / 输出处理 / 自动化</span>
+            <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">{{ t('settings.record') }}</h2>
+            <span class="text-[11px] text-ink3 ml-auto">{{ t('settings.recordDesc') }}</span>
           </div>
           <div class="bg-card rounded-[14px] shadow-card overflow-hidden">
             <div class="flex items-center justify-between gap-4 px-4 py-3">
               <div class="min-w-0">
-                <div class="text-[13px] font-medium text-ink1">保存目录</div>
+                <div class="text-[13px] font-medium text-ink1">{{ t('settings.saveDir') }}</div>
                 <div class="text-[11px] text-ink3 mt-0.5 truncate font-mono">{{ form.savePath || defaultRecPath }}</div>
               </div>
-              <n-button size="small" secondary @click="pickDir">选择目录</n-button>
+              <n-button size="small" secondary @click="pickDir">{{ t('settings.pickDir') }}</n-button>
             </div>
             <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-line/40">
               <div>
-                <div class="text-[13px] font-medium text-ink1">分段时长(秒)</div>
-                <div class="text-[11.5px] text-ink3 mt-0.5">按时间切分 TS 分段, 防止单文件过大 / 意外丢失</div>
+                <div class="text-[13px] font-medium text-ink1">{{ t('settings.splitSec') }}</div>
+                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.splitSecDesc') }}</div>
               </div>
               <n-input-number v-model:value="form.splitSeconds" :min="60" :max="7200" :step="60" size="small" class="!w-28" />
             </div>
             <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-line/40">
               <div>
-                <div class="text-[13px] font-medium text-ink1">磁盘剩余阈值(GB)</div>
-                <div class="text-[11.5px] text-ink3 mt-0.5">低于阈值时拒绝开始新录制</div>
+                <div class="text-[13px] font-medium text-ink1">{{ t('settings.diskLimit') }}</div>
+                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.diskLimitDesc') }}</div>
               </div>
               <n-input-number v-model:value="form.diskLimitGb" :min="0.5" :max="100" :step="0.5" size="small" class="!w-28" />
             </div>
 
-            <div class="px-4 pt-3.5 pb-1 text-[11px] font-bold text-ink3 tracking-wide border-t border-line/40">输出处理</div>
+            <div class="px-4 pt-3.5 pb-1 text-[11px] font-bold text-ink3 tracking-wide border-t border-line/40">{{ t('settings.outProc') }}</div>
             <div class="grid grid-cols-2 gap-2.5 px-4 py-3">
               <div :class="tileCls">
                 <div class="min-w-0 flex-1">
-                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">录完自动转 MP4</div>
-                  <div class="text-[10.5px] text-ink3">无损 remux</div>
+                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.autoMp4') }}</div>
+                  <div class="text-[10.5px] text-ink3">{{ t('settings.autoMp4D') }}</div>
                 </div>
                 <n-switch size="small" v-model:value="form.autoMp4" />
               </div>
               <div :class="tileCls" v-if="form.autoMp4">
                 <div class="min-w-0 flex-1">
-                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">转后删除 TS 源</div>
-                  <div class="text-[10.5px] text-ink3">仅保留 MP4</div>
+                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.deleteTs') }}</div>
+                  <div class="text-[10.5px] text-ink3">{{ t('settings.deleteTsD') }}</div>
                 </div>
                 <n-switch size="small" v-model:value="form.deleteTs" />
               </div>
               <div :class="tileCls" v-if="form.autoMp4">
                 <div class="min-w-0 flex-1">
-                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">合并分段为单文件</div>
-                  <div class="text-[10.5px] text-ink3">收尾无损合并</div>
+                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.mergeMp4') }}</div>
+                  <div class="text-[10.5px] text-ink3">{{ t('settings.mergeMp4D') }}</div>
                 </div>
                 <n-switch size="small" v-model:value="form.mergeMp4" />
               </div>
               <div :class="tileCls" v-if="form.autoMp4 && form.mergeMp4">
                 <div class="min-w-0 flex-1">
-                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">合并后删除分段</div>
-                  <div class="text-[10.5px] text-ink3">失败永远保留</div>
+                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.mergeDel') }}</div>
+                  <div class="text-[10.5px] text-ink3">{{ t('settings.mergeDelD') }}</div>
                 </div>
                 <n-switch size="small" v-model:value="form.mergeDeleteSegments" />
               </div>
             </div>
 
-            <div class="px-4 pt-3.5 pb-1 text-[11px] font-bold text-ink3 tracking-wide border-t border-line/40">自动化</div>
+            <div class="px-4 pt-3.5 pb-1 text-[11px] font-bold text-ink3 tracking-wide border-t border-line/40">{{ t('settings.automation') }}</div>
             <div class="grid grid-cols-2 gap-2.5 px-4 py-3">
               <div :class="tileCls">
                 <div class="min-w-0 flex-1">
-                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">开播预取直播源</div>
-                  <div class="text-[10.5px] text-ink3">点进房间零等待</div>
+                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.prefetch') }}</div>
+                  <div class="text-[10.5px] text-ink3">{{ t('settings.prefetchD') }}</div>
                 </div>
                 <n-switch size="small" v-model:value="form.prefetchStream" />
               </div>
               <div :class="tileCls">
                 <div class="min-w-0 flex-1">
-                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">新增默认自动录制</div>
-                  <div class="text-[10.5px] text-ink3">对新关注主播生效</div>
+                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.autoRec') }}</div>
+                  <div class="text-[10.5px] text-ink3">{{ t('settings.autoRecD') }}</div>
                 </div>
                 <n-switch size="small" v-model:value="form.autoRecordDefault" />
               </div>
@@ -356,14 +378,14 @@ const tileCls =
         <!-- 网络 -->
         <section data-sec="network" class="mb-5">
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
-            <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">网络</h2>
-            <span class="text-[11px] text-ink3 ml-auto">代理同时作用于 API 与 ffmpeg 拉流</span>
+            <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">{{ t('settings.network') }}</h2>
+            <span class="text-[11px] text-ink3 ml-auto">{{ t('settings.networkDesc') }}</span>
           </div>
           <div class="bg-card rounded-[14px] shadow-card overflow-hidden">
             <div class="flex items-center justify-between gap-4 px-4 py-3">
               <div>
-                <div class="text-[13px] font-medium text-ink1">代理地址(可选)</div>
-                <div class="text-[11.5px] text-ink3 mt-0.5">如 http://127.0.0.1:7890 — 直连可用时留空</div>
+                <div class="text-[13px] font-medium text-ink1">{{ t('settings.proxy') }}</div>
+                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.proxyDesc') }}</div>
               </div>
               <n-input v-model:value="form.proxyUrl" size="small" placeholder="http://127.0.0.1:7890" class="!w-56" clearable />
             </div>
@@ -373,28 +395,28 @@ const tileCls =
         <!-- 通知与行为 -->
         <section data-sec="notify" class="mb-5">
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
-            <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">通知与行为</h2>
+            <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">{{ t('settings.notify') }}</h2>
           </div>
           <div class="bg-card rounded-[14px] shadow-card overflow-hidden">
             <div class="grid grid-cols-3 gap-2.5 px-4 py-3">
               <div :class="tileCls">
                 <div class="min-w-0 flex-1">
-                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">系统通知</div>
-                  <div class="text-[10.5px] text-ink3">开播 / 录制事件</div>
+                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.notifySys') }}</div>
+                  <div class="text-[10.5px] text-ink3">{{ t('settings.notifySysD') }}</div>
                 </div>
                 <n-switch size="small" v-model:value="form.notifySystem" />
               </div>
               <div :class="tileCls">
                 <div class="min-w-0 flex-1">
-                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">开播提示音</div>
-                  <div class="text-[10.5px] text-ink3">WebAudio 合成</div>
+                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.notifySound') }}</div>
+                  <div class="text-[10.5px] text-ink3">{{ t('settings.notifySoundD') }}</div>
                 </div>
                 <n-switch size="small" v-model:value="form.notifySound" />
               </div>
               <div :class="tileCls">
                 <div class="min-w-0 flex-1">
-                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">关窗最小化托盘</div>
-                  <div class="text-[10.5px] text-ink3">后台持续监控</div>
+                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.closeToTray') }}</div>
+                  <div class="text-[10.5px] text-ink3">{{ t('settings.closeToTrayD') }}</div>
                 </div>
                 <n-switch size="small" v-model:value="form.closeToTray" />
               </div>
@@ -405,22 +427,22 @@ const tileCls =
         <!-- 数据与日志 -->
         <section data-sec="storage" class="mb-5">
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
-            <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">数据与日志</h2>
-            <span class="text-[11px] text-ink3 ml-auto">随程序目录整体迁移, 不写系统盘</span>
+            <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">{{ t('settings.storage') }}</h2>
+            <span class="text-[11px] text-ink3 ml-auto">{{ t('settings.storageDesc') }}</span>
           </div>
           <div class="bg-card rounded-[14px] shadow-card overflow-hidden">
             <div class="grid grid-cols-2 gap-2.5 px-4 py-3.5">
               <div class="rounded-xl bg-fill px-3.5 py-3 min-w-0">
-                <div class="text-[12.5px] font-semibold text-ink1">应用数据目录</div>
+                <div class="text-[12.5px] font-semibold text-ink1">{{ t('settings.dataDir') }}</div>
                 <div class="text-[11px] text-ink3 mt-1 truncate font-mono" :title="dataDir">{{ dataDir || '…' }}</div>
-                <div class="text-[10.5px] text-ink3 mt-0.5">设置 / 关注 / 录制历史 / 加密 Cookie</div>
-                <n-button size="tiny" secondary class="mt-2.5" @click="openDataDir">打开目录</n-button>
+                <div class="text-[10.5px] text-ink3 mt-0.5">{{ t('settings.dataDirMeta') }}</div>
+                <n-button size="tiny" secondary class="mt-2.5" @click="openDataDir">{{ t('settings.openDir') }}</n-button>
               </div>
               <div class="rounded-xl bg-fill px-3.5 py-3 min-w-0">
-                <div class="text-[12.5px] font-semibold text-ink1">运行日志</div>
+                <div class="text-[12.5px] font-semibold text-ink1">{{ t('settings.logs') }}</div>
                 <div class="text-[11px] text-ink3 mt-1 truncate font-mono">…\data\logs\app-YYYYMMDD.log</div>
-                <div class="text-[10.5px] text-ink3 mt-0.5">按日切分 · 保留 14 天 · 反馈问题请附当日日志</div>
-                <n-button size="tiny" secondary class="mt-2.5" @click="openLogsDir">打开日志目录</n-button>
+                <div class="text-[10.5px] text-ink3 mt-0.5">{{ t('settings.logsMeta') }}</div>
+                <n-button size="tiny" secondary class="mt-2.5" @click="openLogsDir">{{ t('settings.openLogs') }}</n-button>
               </div>
             </div>
           </div>
@@ -429,7 +451,7 @@ const tileCls =
         <!-- 关于 -->
         <section data-sec="about" class="mb-5">
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
-            <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">关于</h2>
+            <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">{{ t('settings.about') }}</h2>
           </div>
           <div class="rounded-[14px] shadow-card overflow-hidden bg-card">
             <!-- 品牌横幅(头像灰度背景) -->
@@ -445,17 +467,17 @@ const tileCls =
                   <span class="text-[16px] font-extrabold tracking-wide">PandaLive Monitor</span>
                   <span class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-white/20 text-white tabular-nums">v{{ info?.version || '…' }}</span>
                 </div>
-                <div class="text-[11.5px] text-white/85 mt-1">直播监控 · 观看 · 录制 一体化桌面应用</div>
+                <div class="text-[11.5px] text-white/85 mt-1">{{ t('settings.aboutSub') }}</div>
               </div>
             </div>
             <!-- 元信息 -->
             <div class="grid grid-cols-2">
               <div class="px-4 py-3">
-                <div class="text-[10.5px] text-ink3">制作</div>
+                <div class="text-[10.5px] text-ink3">{{ t('settings.metaAuthor') }}</div>
                 <div class="text-[12.5px] font-semibold text-ink1 mt-0.5">{{ info?.author || 'Joftal' }}</div>
               </div>
               <div class="px-4 py-3">
-                <div class="text-[10.5px] text-ink3">仓库</div>
+                <div class="text-[10.5px] text-ink3">{{ t('settings.metaRepo') }}</div>
                 <div class="text-[12.5px] font-medium text-ink1 mt-0.5 font-mono truncate">Joftal/pd-monitor</div>
               </div>
             </div>
@@ -466,22 +488,22 @@ const tileCls =
                 @click="openRepo"
               >
                 <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.55v-2.14c-3.2.69-3.87-1.37-3.87-1.37-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.23-1.28-5.23-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11.1 11.1 0 015.78 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.25 5.67.41.36.78 1.05.78 2.13v3.16c0 .31.21.67.8.55A11.51 11.51 0 0023.5 12C23.5 5.65 18.35.5 12 .5z"/></svg>
-                GitHub 主页
+                {{ t('settings.ghHome') }}
               </button>
               <n-button size="small" type="primary" :disabled="checking" @click="doCheckUpdate">
-                <span class="inline-flex items-center justify-center gap-1.5"><SpinIcon v-if="checking" :size="12" />检查更新</span>
+                <span class="inline-flex items-center justify-center gap-1.5"><SpinIcon v-if="checking" :size="12" />{{ t('settings.checkUpdate') }}</span>
               </n-button>
               <template v-if="upd">
-                <span v-if="!upd.ok" class="text-[11.5px] text-red-500">{{ upd.error || '检查失败' }}</span>
+                <span v-if="!upd.ok" class="text-[11.5px] text-red-500">{{ upd.error || t('settings.checkFail') }}</span>
                 <template v-else-if="upd.hasUpdate">
-                  <span class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#f0a020]/[0.14] text-[#d98a08] tabular-nums">发现新版本 v{{ upd.latest }}</span>
-                  <n-button size="tiny" type="primary" @click="openRelease">前往下载</n-button>
+                  <span class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#f0a020]/[0.14] text-[#d98a08] tabular-nums">{{ t('settings.hasUpdate', { v: upd.latest }) }}</span>
+                  <n-button size="tiny" type="primary" @click="openRelease">{{ t('settings.goDownload') }}</n-button>
                 </template>
-                <span v-else class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#2fad5f]/[0.12] text-emerald-600">已是最新版本</span>
+                <span v-else class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#2fad5f]/[0.12] text-emerald-600">{{ t('settings.newest') }}</span>
               </template>
             </div>
             <p class="px-4 pb-3.5 text-[10.5px] text-ink3/80 leading-relaxed">
-              本项目仅供个人学习研究使用, 与 pandalive 官方无任何关联; 录制内容请遵守当地法律法规与原平台条款, 勿用于任何商业用途或二次分发。
+              {{ t('settings.disclaimer') }}
             </p>
           </div>
         </section>
@@ -489,11 +511,11 @@ const tileCls =
         <!-- 悬浮吸底操作条(sticky 于内容滚动区底部) -->
         <div class="sticky bottom-0 pt-2" style="background: linear-gradient(rgb(var(--c-page) / 0), rgb(var(--c-page) / 0.96) 35%)">
           <div class="flex items-center gap-2.5 bg-card/90 rounded-xl px-3.5 py-[9px] shadow-[0_4px_16px_rgba(0,0,0,.06)] backdrop-blur">
-            <span class="text-[11.5px]" :class="dirty ? 'text-[#d98a08]' : 'text-ink3'">{{ dirty ? '修改尚未保存' : '全部更改已保存' }}</span>
+            <span class="text-[11.5px]" :class="dirty ? 'text-[#d98a08]' : 'text-ink3'">{{ dirty ? t('settings.dirtyText') : t('settings.cleanText') }}</span>
             <div class="flex-1"></div>
-            <n-button secondary :disabled="!dirty" @click="resetForm">放弃更改</n-button>
+            <n-button secondary :disabled="!dirty" @click="resetForm">{{ t('settings.discard') }}</n-button>
             <n-button type="primary" :disabled="!dirty || saving" @click="save" class="!w-[128px]">
-              <span class="inline-flex items-center justify-center gap-1.5"><SpinIcon v-if="saving" />保存设置</span>
+              <span class="inline-flex items-center justify-center gap-1.5"><SpinIcon v-if="saving" />{{ t('settings.saveBtn') }}</span>
             </n-button>
           </div>
         </div>

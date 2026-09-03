@@ -6,6 +6,7 @@ import * as net2 from 'net'
 import { UA, sleep } from '../util'
 import { vault, CookieJar } from './vault'
 import { logger } from './logger'
+import { mt } from '../i18n'
 
 // ============ pandalive API 客户端 ============
 // - 全局限速队列(串行 + 最小间隔 + 抖动), 防 IP 风控
@@ -149,7 +150,7 @@ function doHttpsRequest(
       }
     )
     req.on('timeout', () => {
-      req.destroy(new Error('请求超时'))
+      req.destroy(new Error(mt('net.timeout')))
     })
     req.on('error', reject)
     if (body) req.write(body)
@@ -181,11 +182,11 @@ async function nodeHttpRequest(
       timeout: 15000,
       ...(proxyAuth ? { headers: { 'Proxy-Authorization': proxyAuth } } : {})
     })
-    conn.on('timeout', () => conn.destroy(new Error('代理连接超时')))
+    conn.on('timeout', () => conn.destroy(new Error(mt('net.proxyTimeout'))))
     conn.on('connect', (res, sock) => {
       if (res.statusCode !== 200) {
         sock.destroy()
-        reject(new Error(`代理 CONNECT 失败: HTTP ${res.statusCode}`))
+        reject(new Error(mt('net.proxyFail', { code: res.statusCode ?? 0 })))
         return
       }
       const s = tls.connect({ socket: sock, servername: u.hostname })
@@ -396,15 +397,15 @@ class PandaApi {
     }
     if (status === 403 || status === 429) {
       logger.warn('api', `疑似风控: HTTP ${status} ${method} ${path}`)
-      throw new RiskError(`HTTP ${status} (可能被风控)`, status)
+      throw new RiskError(mt('api.riskHttp', { status }), status)
     }
     if (status >= 500) {
       logger.warn('api', `服务器错误: HTTP ${status} ${method} ${path}`)
-      throw new RiskError(`HTTP ${status} 服务器错误`, status)
+      throw new RiskError(mt('api.riskServer', { status }), status)
     }
     if (text.trimStart().startsWith('<')) {
       logger.warn('api', `返回HTML疑似风控验证页: ${method} ${path} (HTTP ${status})`)
-      throw new RiskError('返回HTML(疑似风控验证页)', status)
+      throw new RiskError(mt('api.riskHtml'), status)
     }
     return { status, text }
   }
@@ -415,7 +416,7 @@ class PandaApi {
     } catch {
       if (text === '' || text === '""') return {} as T
       logger.warn('api', '响应不是JSON(疑似风控)')
-      throw new RiskError('响应不是JSON(疑似风控)')
+      throw new RiskError(mt('api.riskJson'))
     }
   }
 
@@ -440,7 +441,7 @@ class PandaApi {
       return null
     })
     if (!this.hasSession()) {
-      return { ok: false, message: '登录失败: 请检查账号密码(若需验证码, 请改用"网页登录")' }
+      return { ok: false, message: mt('auth.loginFail') }
     }
     this.saveCookies()
     // 官方校验: isLogin 为 false 说明被防自动登录验证码静默拦截 -> 回滚假会话
@@ -450,12 +451,12 @@ class PandaApi {
       this.cookieValid = false
       return {
         ok: false,
-        message: '直登被官方防自动登录拦截(需人机验证), 请改用「网页登录」方式完成验证'
+        message: mt('auth.loginBlocked')
       }
     }
     this.cookieValid = true
     this.accountIsAdult = info.isAdult
-    return { ok: true, message: '登录成功' }
+    return { ok: true, message: mt('auth.loginOk') }
   }
 
   /** 官方登录态校验: 返回 isLogin / isAdult(成人认证) 等; 可提供 jar 进行"试验证"(不落地) */
@@ -504,7 +505,7 @@ class PandaApi {
       media?: LiveItem & { userImg?: string }
       message?: string
     }>('POST', '/v1/member/bj', { userId, info: 'media' })
-    if (j.result === false) throw new RiskError(j.message || 'member/bj 失败')
+    if (j.result === false) throw new RiskError(j.message || mt('api.bjFail'))
     const media = j.media ?? null
     return {
       nick: j.bjInfo?.nick || media?.userNick || userId,
@@ -561,20 +562,18 @@ class PandaApi {
 
     const code = j?.errorData?.code
     if (code) {
-      if (code === 'needAdult') return { ok: false, error: '成人限制房: 需要已成人认证的登录Cookie' }
-      if (code === 'needLogin') return { ok: false, error: '需要登录后观看' }
-      if (code === 'needFan') return { ok: false, error: '粉丝团专属: 当前账号无权限' }
-      if (code === 'needUnlimitItem')
-        return { ok: false, error: '该房间已满员: 平台要求购买「满员入场券」道具才能进入(付费门槛)' }
-      if (code === 'needCoinPurchase')
-        return { ok: false, error: '付费直播间: 账号爱心余额不足, 需在平台充值爱心后观看(付费门槛)' }
-      if (/pw|password/i.test(code)) return { ok: false, needPassword: true, error: '密码房: 需要正确密码' }
-      return { ok: false, error: `${code}: ${j.message || '无法播放'}` }
+      if (code === 'needAdult') return { ok: false, error: mt('api.needAdult') }
+      if (code === 'needLogin') return { ok: false, error: mt('api.needLogin') }
+      if (code === 'needFan') return { ok: false, error: mt('api.needFan') }
+      if (code === 'needUnlimitItem') return { ok: false, error: mt('api.needUnlimitItem') }
+      if (code === 'needCoinPurchase') return { ok: false, error: mt('api.needCoinPurchase') }
+      if (/pw|password/i.test(code)) return { ok: false, needPassword: true, error: mt('api.needPw') }
+      return { ok: false, error: `${code}: ${j.message || mt('api.playFail')}` }
     }
     if (j?.result === false) {
       const msg = j.message || ''
-      if (/비밀번호|password/i.test(msg)) return { ok: false, needPassword: true, error: '密码房: 需要正确密码' }
-      return { ok: false, error: msg || '播放失败' }
+      if (/비밀번호|password/i.test(msg)) return { ok: false, needPassword: true, error: mt('api.needPw') }
+      return { ok: false, error: msg || mt('api.playFail') }
     }
     const pl = j?.PlayList
     const vod = String((j.media as { liveType?: string } | undefined)?.liveType || '') === 'rec'
@@ -588,9 +587,9 @@ class PandaApi {
         if (vod) {
           // 校准通道: 原始响应落日志(截断), 真机一轮即可定位真实字段
           logger.warn('api', `回放流地址未解析到(@${userId}), 原始响应: ${JSON.stringify(j).slice(0, 4000)}`)
-          return { ok: false, error: '回放流地址未解析到(已记录到 data/logs, 反馈请附当日日志)' }
+          return { ok: false, error: mt('api.vodParseFail') }
         }
-        return { ok: false, error: '未获取到直播流(可能已下播或为回放)' }
+        return { ok: false, error: mt('api.noStream') }
       }
     }
     const backups: string[] = []

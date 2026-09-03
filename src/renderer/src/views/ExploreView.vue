@@ -4,6 +4,8 @@ import { useAppStore } from '@/stores/app'
 import { api } from '@/api'
 import ExploreCard from '@/components/ExploreCard.vue'
 import SpinIcon from '@/components/SpinIcon.vue'
+import { useI18n } from 'vue-i18n'
+const { t } = useI18n()
 import { NButton, NEmpty, NPagination, useMessage } from 'naive-ui'
 
 const store = useAppStore()
@@ -17,12 +19,12 @@ const PAGE_SIZE = 20
 const page = ref(1)
 const scrollRef = ref<HTMLElement | null>(null)
 
-const sortChips = [
-  { key: 'viewers', label: '人气最高' },
-  { key: 'likes', label: '点赞最多' },
-  { key: 'fans', label: '粉丝团最多' },
-  { key: 'recent', label: '最新开播' }
-] as const
+const sortChips = computed(() => [
+  { key: 'viewers', label: t('explore.sortViewers') },
+  { key: 'likes', label: t('explore.sortLikes') },
+  { key: 'fans', label: t('explore.sortFans') },
+  { key: 'recent', label: t('explore.sortRecent') }
+] as const)
 
 const keyword = computed(() => store.searchKeyword)
 
@@ -77,10 +79,10 @@ const updateInfo = computed(() => {
   const w = store.watcher
   const sec = store.settings?.pollIntervalSec ?? 30
   if (w?.circuitOpen) return w.message
-  if (!w?.lastRoundAt) return `每 ${sec} 秒自动刷新`
+  if (!w?.lastRoundAt) return t('explore.autoRefresh', { sec })
   const next = w.lastRoundAt + sec * 1000
   const remain = Math.max(0, Math.ceil((next - Date.now()) / 1000))
-  return `上次更新 ${fmtHms(w.lastRoundAt)} · 下次预计 ${fmtHms(next)}(${remain}s 后)`
+  return t('explore.updateInfo', { last: fmtHms(w.lastRoundAt), next: fmtHms(next), remain })
 })
 
 async function refresh() {
@@ -100,15 +102,15 @@ async function refresh() {
     <!-- 页头(B站频道条风) -->
     <div class="px-7 pt-5 pb-3 shrink-0">
       <div class="flex items-center gap-3">
-        <h1 class="text-[20px] font-bold text-ink1 tracking-tight">直播大厅</h1>
+        <h1 class="text-[20px] font-bold text-ink1 tracking-tight">{{ t('explore.title') }}</h1>
         <span class="inline-flex items-center gap-1.5 h-6 px-2.5 rounded bg-live/10 text-live text-[12px] font-semibold">
           <span class="w-1.5 h-1.5 rounded-full bg-live animate-breathe"></span>
-          {{ store.watcher?.liveCount ?? store.discovery.length }} 直播中
+          {{ t('explore.liveBadge', { n: store.watcher?.liveCount ?? store.discovery.length }) }}
         </span>
         <div class="flex-1"></div>
         <span class="text-[12px] text-ink3 shrink-0">{{ updateInfo }}</span>
         <n-button size="small" secondary type="primary" round :disabled="refreshing" @click="refresh" class="!w-[76px]">
-          <span class="inline-flex items-center justify-center gap-1"><SpinIcon v-if="refreshing" :size="12" />刷新</span>
+          <span class="inline-flex items-center justify-center gap-1"><SpinIcon v-if="refreshing" :size="12" />{{ t('explore.refresh') }}</span>
         </n-button>
       </div>
 
@@ -130,17 +132,17 @@ async function refresh() {
           :class="onlyFollowed ? 'text-live font-semibold border-live' : 'text-ink2 border-transparent hover:text-ink1'"
           @click="onlyFollowed = !onlyFollowed"
         >
-          只看已关注
+          {{ t('explore.onlyFollowed') }}
         </button>
         <button
           class="text-[13px] pb-0.5 border-b-2 transition-all shrink-0"
           :class="onlyAdult ? 'text-live font-semibold border-live' : 'text-ink2 border-transparent hover:text-ink1'"
           @click="onlyAdult = !onlyAdult"
         >
-          仅看 19+
+          {{ t('explore.onlyAdult') }}
         </button>
         <div class="flex-1"></div>
-        <span v-if="keyword" class="text-[12px] text-ink3 shrink-0">「{{ keyword }}」的搜索结果</span>
+        <span v-if="keyword" class="text-[12px] text-ink3 shrink-0">{{ t('explore.searchResult', { kw: keyword }) }}</span>
       </div>
     </div>
 
@@ -151,7 +153,7 @@ async function refresh() {
       </div>
       <div v-else class="h-full flex items-center justify-center">
         <n-empty
-          :description="store.settings?.watchMode === 'per-anchor' ? '当前为逐个检测模式, 大厅不可用; 请到设置切换为列表模式' : '暂无匹配的直播间'"
+          :description="store.settings?.watchMode === 'per-anchor' ? t('explore.emptyPerAnchor') : t('explore.empty')"
           class="text-ink3"
         >
           <template #icon>
@@ -165,7 +167,7 @@ async function refresh() {
 
     <!-- 分页条(有数据即常驻, 与已关注页统一) -->
     <div v-if="list.length" class="shrink-0 px-7 py-3 flex items-center gap-3 bg-card border-t border-line">
-      <span class="text-[12px] text-ink3">共 {{ list.length }} 个直播间 · 每页 {{ PAGE_SIZE }} 个</span>
+      <span class="text-[12px] text-ink3">{{ t('explore.pageInfo', { n: list.length, size: PAGE_SIZE }) }}</span>
       <div class="flex-1"></div>
       <n-pagination :page="page" :page-count="pageCount" size="small" @update:page="toPage" />
     </div>

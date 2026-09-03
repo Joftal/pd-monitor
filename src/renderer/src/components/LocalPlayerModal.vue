@@ -2,6 +2,8 @@
 import { computed, ref, watch } from 'vue'
 import { NModal, NEmpty } from 'naive-ui'
 import { api } from '@/api'
+import { useI18n } from 'vue-i18n'
+const { t } = useI18n()
 import type { RecHistoryItem } from '@shared/types'
 
 // ============ 录制回看弹窗 ============
@@ -29,7 +31,7 @@ watch(
 )
 
 function onVideoError(): void {
-  playError.value = '该文件无法播放(可能已被移动/删除, 或格式不受支持)'
+  playError.value = t('playback.err')
 }
 
 // 切换分段时清除错误态, 允许尝试其他分段
@@ -56,7 +58,7 @@ function fmtClock(ts: number): string {
     preset="card"
     class="!w-[880px] !max-w-[94vw]"
     :bordered="false"
-    :title="`${task?.nick || ''} · 录制回看`"
+    :title="(task?.nick || '') + ' · ' + t('playback.suffix')"
     @update:show="(v: boolean) => emit('update:show', v)"
   >
     <div class="flex gap-4 min-h-0">
@@ -65,18 +67,18 @@ function fmtClock(ts: number): string {
         <div class="rounded-xl overflow-hidden bg-black aspect-video relative">
           <video v-if="src && !playError" :key="src" :src="src" controls autoplay class="w-full h-full" @error="onVideoError"></video>
           <div v-else class="w-full h-full grid place-items-center">
-            <n-empty :description="playError || '该任务没有可播放的 MP4 文件(仅 TS 或文件已移动)'" size="small" class="text-ink3" />
+            <n-empty :description="playError || t('playback.noMp4')" size="small" class="text-ink3" />
           </div>
         </div>
         <p class="mt-2.5 text-[13px] text-ink1 font-medium truncate" :title="task?.title">{{ task?.title || '—' }}</p>
         <p class="text-[11.5px] text-ink3 mt-0.5 truncate">
-          @{{ task?.userId }} · {{ task ? fmtClock(task.startedAt) : '' }} · {{ files.length }} 个 MP4
+          @{{ task?.userId }} · {{ task ? fmtClock(task.startedAt) : '' }} · {{ t('playback.nMp4', { n: files.length }) }}
         </p>
       </div>
 
       <!-- 分段列表(多段才显示) -->
       <div v-if="files.length > 1" class="w-60 shrink-0">
-        <div class="text-[12px] font-semibold text-ink2 mb-2">分段({{ files.length }})</div>
+        <div class="text-[12px] font-semibold text-ink2 mb-2">{{ t('playback.segs', { n: files.length }) }}</div>
         <div class="max-h-[420px] overflow-y-auto space-y-1.5 pr-1">
           <button
             v-for="(f, i) in files"

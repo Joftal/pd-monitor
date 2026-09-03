@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { NConfigProvider, NMessageProvider, NNotificationProvider, NDialogProvider, darkTheme, zhCN, dateZhCN } from 'naive-ui'
+import { NConfigProvider, NMessageProvider, NNotificationProvider, NDialogProvider, darkTheme, zhCN, dateZhCN, enUS, dateEnUS } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
 import ToastBridge from '@/components/ToastBridge.vue'
 import TopNav from '@/components/TopNav.vue'
+import { useI18n } from 'vue-i18n'
+const { t } = useI18n()
+import { setLocale, type AppLocale } from '@/i18n'
 
 const store = useAppStore()
 const ready = ref(false)
@@ -58,7 +61,10 @@ const DARK_OVERRIDES = {
 }
 
 const isDark = computed(() => store.settings?.theme === 'dark')
+const isEn = computed(() => store.settings?.locale === 'en-US')
 const themeOverrides = computed(() => (isDark.value ? DARK_OVERRIDES : LIGHT_OVERRIDES))
+const naiveLocale = computed(() => (isEn.value ? enUS : zhCN))
+const naiveDateLocale = computed(() => (isEn.value ? dateEnUS : dateZhCN))
 
 // 主题落地: <html> 加 .dark 类(tailwind class 策略) + localStorage 镜像(main.ts 启动防闪白读取)
 watch(
@@ -70,6 +76,15 @@ watch(
     } catch {
       /* ignore */
     }
+  },
+  { immediate: true }
+)
+
+// 语言落地: settings.locale -> vue-i18n(事实源唯一, 主进程 mt() 读同一字段)
+watch(
+  () => store.settings?.locale,
+  (v) => {
+    if (v) setLocale(v as AppLocale)
   },
   { immediate: true }
 )
@@ -86,7 +101,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <n-config-provider :theme="isDark ? darkTheme : null" :theme-overrides="themeOverrides" :locale="zhCN" :date-locale="dateZhCN" class="h-full">
+  <n-config-provider :theme="isDark ? darkTheme : null" :theme-overrides="themeOverrides" :locale="naiveLocale" :date-locale="naiveDateLocale" class="h-full">
     <n-message-provider>
       <n-notification-provider placement="bottom-right">
         <n-dialog-provider>
@@ -99,7 +114,7 @@ onMounted(async () => {
                   <component :is="Component" />
                 </transition>
               </router-view>
-              <div v-else class="h-full flex items-center justify-center text-ink3 text-sm">加载中…</div>
+              <div v-else class="h-full flex items-center justify-center text-ink3 text-sm">{{ t('common.loading') }}</div>
             </main>
           </div>
         </n-dialog-provider>

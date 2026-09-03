@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { mt } from './i18n'
 import * as fs from 'fs'
 import * as path from 'path'
 
@@ -54,7 +55,7 @@ export function sanitizeName(s: string): string {
       .replace(/（/g, '(')
       .replace(/）/g, ')')
       .replace(/^_|_$/g, '')
-      .slice(0, 60) || '未命名'
+      .slice(0, 60) || mt('app.unnamed')
   )
 }
 

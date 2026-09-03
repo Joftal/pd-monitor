@@ -6,6 +6,7 @@ import { recorder } from './recorder'
 import { sendToast } from './notify'
 import { sleep } from '../util'
 import { logger } from './logger'
+import { mt } from '../i18n'
 
 // ============ 轮询引擎 ============
 // list 模式: 每轮拉全站直播列表(分页, 每页一个请求), 本地匹配监控主播 —— 防封核心
@@ -84,7 +85,7 @@ class Watcher {
     try {
       if (Date.now() < this.cooldownUntil) {
         const remain = Math.ceil((this.cooldownUntil - Date.now()) / 1000)
-        this.status.message = `风控冷却中, ${remain}s 后恢复`
+        this.status.message = mt('watcher.cooling', { remain })
         this.schedule(Math.min(this.cooldownUntil - Date.now() + 500, 30000))
         this.push()
         return
@@ -115,11 +116,11 @@ class Watcher {
         const minutes = Math.min(15, 2 ** Math.min(4, this.errorStreak - 1))
         this.cooldownUntil = Date.now() + minutes * 60_000
         this.status.circuitOpen = true
-        this.status.message = `检测到风控/连续失败(${msg}), 已熔断 ${minutes} 分钟`
+        this.status.message = mt('watcher.circuit', { msg, minutes })
         logger.warn('watcher', this.status.message)
-        sendToast({ type: 'error', title: '监控熔断', body: this.status.message })
+        sendToast({ type: 'error', title: mt('watcher.circuitTitle'), body: this.status.message })
       } else {
-        this.status.message = `本轮失败: ${msg}`
+        this.status.message = mt('watcher.roundFail', { msg })
         logger.warn('watcher', `本轮失败(#${this.errorStreak}): ${msg}`)
       }
     } finally {
@@ -305,14 +306,14 @@ class Watcher {
     api.invalidatePlay(a.userId) // 主播(重)开播: 旧源作废
     const cfg = store.getSettings()
     if (cfg.prefetchStream) this.enqueuePrewarm(a.userId) // 后台预取新源写缓存
-    sendToast({ type: 'live', title: `${a.nick} 开播了`, body: a.title || '点击观看' })
+    sendToast({ type: 'live', title: mt('watcher.liveStart', { nick: a.nick }), body: a.title || mt('watcher.clickWatch') })
     if (a.autoRecord && cfg) {
       void recorder.start({ userId: a.userId, nick: a.nick, title: a.title, password: '', auto: true }).catch(() => undefined)
     }
   }
 
   private onLiveEnd(a: Anchor): void {
-    sendToast({ type: 'offline', title: `${a.nick} 下播了`, body: '' })
+    sendToast({ type: 'offline', title: mt('watcher.liveEnd', { nick: a.nick }), body: '' })
   }
 
   private pushAnchors(): void {

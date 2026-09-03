@@ -9,6 +9,7 @@ import { store } from './store'
 import { tsName, diskFreeGb, UA, sleep, defaultRecordRoot } from '../util'
 import { sendToast } from './notify'
 import { logger } from './logger'
+import { mt } from '../i18n'
 
 // ============ 录制引擎 ============
 // - ffmpeg -c copy 分段录制; 直接使用长效 IVS 变体地址(master 一次性: 源缓存复用)
@@ -21,7 +22,7 @@ const STALL_MS = 60 * 1000 // 字节数 60s 无增长视为源失效
 function ffmpegPath(): string {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const p = require('ffmpeg-static') as string
-  if (!p) throw new Error('ffmpeg 未安装')
+  if (!p) throw new Error(mt('rec.ffmpegMissing'))
   return app.isPackaged ? p.replace('app.asar', 'app.asar.unpacked') : p
 }
 
@@ -32,7 +33,7 @@ export function strictName(s: string): string {
       .replace(/[\\/:*?"<>|]/g, '')
       .replace(/\s+/g, ' ')
       .replace(/[.\s]+$/g, '')
-      .trim() || '未命名'
+      .trim() || mt('app.unnamed')
   )
 }
 
@@ -143,7 +144,7 @@ class Task implements RecTask {
     fs.mkdirSync(this.dirPath, { recursive: true })
     const play = await api.getPlayCached(this.userId, this.password)
     if (!play.ok || !play.m3u8) {
-      const err = new Error(play.error || '获取直播流失败')
+      const err = new Error(play.error || mt('rec.fetchFail'))
       ;(err as Error & { needPassword?: boolean }).needPassword = play.needPassword
       throw err
     }
@@ -234,13 +235,13 @@ class Task implements RecTask {
           logger.info('rec', `回放下载完成: ${this.nick}(@${this.userId})`)
           void this.finalize('done')
         } else {
-          this.error = `回放下载中断(${tail || `ffmpeg 退出码 ${code}`}), 请手动重新开始`
+          this.error = mt('rec.vodInterrupted', { reason: tail || `ffmpeg 退出码 ${code}` })
           logger.warn('rec', `${this.nick}(@${this.userId}) ${this.error}`)
           void this.finalize('error')
         }
         return
       }
-      const reason = code === 0 ? '流连接结束' : tail || `ffmpeg 退出码 ${code}`
+      const reason = code === 0 ? mt('rec.streamEnd') : tail || `ffmpeg 退出码 ${code}`
       void this.handleUnexpectedExit(reason)
     })
   }
@@ -255,7 +256,7 @@ class Task implements RecTask {
       stillLive = false // 拉不出也按下播论
     }
     if (stillLive) {
-      this.error = `录制中断(${reason}), 主播仍在播, 请手动重新开始录制`
+      this.error = mt('rec.interrupted', { reason })
       await this.finalize('error')
     } else {
       await this.finalize('done') // 正常下播: 完成态收尾
@@ -270,9 +271,7 @@ class Task implements RecTask {
       this.lastBytes = this.bytes
       this.lastBytesAt = Date.now()
     } else if (this.lastBytesAt && Date.now() - this.lastBytesAt > STALL_MS) {
-      this.error = this.vod
-        ? '下载停滞无数据(源可能已失效), 请手动重新开始'
-        : '源停滞无数据(可能已失效), 请手动重新开始录制'
+      this.error = this.vod ? mt('rec.stallVod') : mt('rec.stall')
       void this.finalize('error')
       return
     }
@@ -281,7 +280,7 @@ class Task implements RecTask {
       this.diskCheckCnt = 0
       const limit = store.getSettings().diskLimitGb
       if (diskFreeGb(this.dirPath) < limit) {
-        this.error = `磁盘剩余空间不足 ${limit}GB, 已停止录制`
+        this.error = mt('rec.diskStop', { limit })
         void this.finalize('error')
       }
     }
@@ -409,8 +408,8 @@ class Task implements RecTask {
     recorder.removeTask(this.userId)
     this.push()
 
-    if (status === 'done') sendToast({ type: 'rec', title: `${this.nick} 录制完成`, body: `${this.files.length} 个分段` })
-    if (status === 'error') sendToast({ type: 'error', title: `${this.nick} 录制出错`, body: this.error.slice(0, 120) })
+    if (status === 'done') sendToast({ type: 'rec', title: mt('rec.toastDone', { nick: this.nick }), body: mt('rec.segs', { n: this.files.length }) })
+    if (status === 'error') sendToast({ type: 'error', title: mt('rec.toastErr', { nick: this.nick }), body: this.error.slice(0, 120) })
   }
 
   private async remux(tsFile: string): Promise<boolean> {
@@ -457,8 +456,8 @@ class Recorder {
     const root = cfg.savePath || defaultRecordRoot()
     const dir = path.join(root, `${strictName(opt.nick)}(${opt.userId})`)
     if (diskFreeGb(dir) < cfg.diskLimitGb) {
-      const err = new Error(`磁盘剩余空间不足 ${cfg.diskLimitGb}GB, 无法开始录制`)
-      sendToast({ type: 'error', title: '录制失败', body: String(err.message) })
+      const err = new Error(mt('rec.diskLow', { limit: cfg.diskLimitGb }))
+      sendToast({ type: 'error', title: mt('rec.failToast'), body: String(err.message) })
       throw err
     }
     const task = new Task(opt, dir)
@@ -470,13 +469,13 @@ class Recorder {
       this.tasks.delete(opt.userId)
       if ((e as Error & { needPassword?: boolean }).needPassword) {
         const err = e as Error & { needPassword?: boolean }
-        err.message = '密码房: 需要密码才能录制'
+        err.message = mt('rec.needPw')
         throw err
       }
-      sendToast({ type: 'error', title: `${opt.nick} 录制启动失败`, body: String((e as Error).message || e) })
+      sendToast({ type: 'error', title: mt('rec.toastStartFail', { nick: opt.nick }), body: String((e as Error).message || e) })
       throw e
     }
-    sendToast({ type: 'rec', title: `开始录制 ${opt.nick}`, body: opt.title || '' })
+    sendToast({ type: 'rec', title: mt('rec.toastStart', { nick: opt.nick }), body: opt.title || '' })
     this.emitUpdate()
     return Recorder.publicTask(task)
   }
@@ -503,14 +502,14 @@ class Recorder {
    */
   async mergeTask(taskId: string): Promise<{ ok: boolean; files?: string[]; error?: string }> {
     const item = store.listHistory().find((h) => h.id === taskId)
-    if (!item) return { ok: false, error: '任务不存在或已被清理' }
+    if (!item) return { ok: false, error: mt('rec.mergeNoTask') }
     const dir = item.dirPath
-    if (!dir || !fs.existsSync(dir)) return { ok: false, error: '录制目录不存在(文件可能已被移动/删除)' }
+    if (!dir || !fs.existsSync(dir)) return { ok: false, error: mt('rec.mergeNoDir') }
 
     const mp4s = (item.files || []).filter((f) => f.toLowerCase().endsWith('.mp4')).sort()
     const tss = (item.files || []).filter((f) => f.toLowerCase().endsWith('.ts')).sort()
     const first = mp4s[0] || tss[0]
-    if (!first) return { ok: false, error: '该任务没有可合并的文件' }
+    if (!first) return { ok: false, error: mt('rec.mergeNoFiles') }
     const base = path.basename(first).replace(/_(\d{4}|vod)\.(mp4|ts)$/i, '')
     const out = path.join(dir, `${base}.mp4`)
 
@@ -536,13 +535,13 @@ class Recorder {
       return { ok: true, files: r.files }
     }
     const segs = mp4s.length >= 2 ? mp4s : tss
-    if (segs.length < 2) return { ok: false, error: '分段不足 2 个, 无需合并' }
+    if (segs.length < 2) return { ok: false, error: mt('rec.mergeFew') }
 
     logger.info('rec', `手动合并开始: ${item.nick}(@${item.userId}) ${segs.length} 段`)
     const ok = await concatSegments(segs, out)
     if (!ok) {
       logger.warn('rec', `手动合并失败: ${item.nick}(@${item.userId})`)
-      return { ok: false, error: '合并失败(ffmpeg 未成功完成, 详见日志)' }
+      return { ok: false, error: mt('rec.mergeFail') }
     }
     if (store.getSettings().mergeDeleteSegments) {
       for (const f of segs) {

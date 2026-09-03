@@ -6,6 +6,8 @@ import { api } from '@/api'
 import { useAppStore } from '@/stores/app'
 import HlsPlayer from '@/components/HlsPlayer.vue'
 import SpinIcon from '@/components/SpinIcon.vue'
+import { useI18n } from 'vue-i18n'
+const { t } = useI18n()
 import type { AnchorTag } from '@shared/types'
 
 const route = useRoute()
@@ -40,7 +42,7 @@ const viewers = computed(() => anchor.value?.viewerCount || discoveryItem.value?
 // master 短寿, 变体长寿: 清晰度选项来自主进程解析后的变体列表
 const levelOptions = computed(() =>
   variants.value.map((v, i) => ({
-    label: v.resolution && v.resolution !== 'master' ? `${v.resolution.split('x')[1]}P` : i === 0 ? '最高档' : `档位 ${i + 1}`,
+    label: v.resolution && v.resolution !== 'master' ? `${v.resolution.split('x')[1]}P` : i === 0 ? t('player.qBest') : t('player.qLevel', { n: i + 1 }),
     value: i
   }))
 )
@@ -50,7 +52,7 @@ async function loadPlay(password = '', forceFresh = false): Promise<boolean> {
   try {
     r = await api.livePlay(userId, password, forceFresh)
   } catch (e) {
-    errorMsg.value = '获取直播流失败: ' + String((e as Error).message || e).replace(/^.*Error: /, '')
+    errorMsg.value = t('player.playFail') + String((e as Error).message || e).replace(/^.*Error: /, '')
     loading.value = false
     return false
   }
@@ -61,7 +63,7 @@ async function loadPlay(password = '', forceFresh = false): Promise<boolean> {
       loading.value = false
       return false
     }
-    errorMsg.value = r.error || '无法播放'
+    errorMsg.value = r.error || t('player.noPlay')
     loading.value = false
     return false
   }
@@ -92,10 +94,10 @@ async function toggleFollow() {
   try {
     if (following.value) {
       await store.unfollow(userId)
-      message.success('已取消关注')
+      message.success(t('player.unfollowedMsg'))
     } else {
       await store.follow(userId)
-      message.success('已关注')
+      message.success(t('player.followedMsg'))
     }
   } catch (e) {
     message.error(String((e as Error).message || e).replace(/^.*Error: /, ''))
@@ -105,16 +107,16 @@ async function toggleFollow() {
 async function toggleRecord() {
   if (recording.value) {
     await api.recStop(userId)
-    message.success('已停止录制')
+    message.success(t('player.recStopped'))
   } else {
     const r = await api.recStart(userId, pwdInput.value || undefined)
     if ('userId' in r) {
-      message.success('开始录制')
+      message.success(t('player.recStarted'))
     } else if (r.needPassword) {
       needPw.value = true
-      message.warning('密码房: 请先输入房间密码')
+      message.warning(t('player.recNeedPw'))
     } else {
-      message.error(r.error || '启动录制失败')
+      message.error(r.error || t('player.recFail'))
     }
   }
 }
@@ -129,7 +131,7 @@ function switchQuality(i: number) {
   const v = variants.value[i]
   if (v?.url) {
     m3u8.value = v.url
-    message.success(`已切换到 ${levelOptions.value[i]?.label || '新档位'}`)
+    message.success(t('player.switched', { label: levelOptions.value[i]?.label || 'new' }))
   }
 }
 
@@ -139,7 +141,7 @@ function switchLine(i: number) {
   if (!u || activeLine.value === i) return
   activeLine.value = i
   m3u8.value = u
-  message.success(i === 0 ? '已切回主线路' : `已切换到备用线路 ${i}(自动清晰度)`)
+  message.success(i === 0 ? t('player.switchMain') : t('player.switchedLine', { n: i }))
 }
 
 /** 紧凑展示源链接(host + 路径前缀, 不展开占版面) */
@@ -157,12 +159,12 @@ function shortUrl(u: string): string {
 /** 复制当前播放源链接 */
 async function copyUrl() {
   if (!m3u8.value) {
-    message.warning('当前没有可复制的源链接')
+    message.warning(t('player.copyEmpty'))
     return
   }
   try {
     await navigator.clipboard.writeText(m3u8.value)
-    message.success('源链接已复制')
+    message.success(t('player.copied'))
   } catch {
     // Electron 旧路径兜底
     const ta = document.createElement('textarea')
@@ -171,7 +173,7 @@ async function copyUrl() {
     ta.select()
     document.execCommand('copy')
     document.body.removeChild(ta)
-    message.success('源链接已复制')
+    message.success(t('player.copied'))
   }
 }
 
@@ -179,10 +181,10 @@ async function copyUrl() {
 function onUrlDead() {
   if (errorMsg.value) return // 已提示过, 等待手动
   lastFailedUrl.value = m3u8.value // 保留上一次失效的源做展示
-  errorMsg.value = '播放源已失效, 请点击「重试」手动获取新源'
+  errorMsg.value = t('player.urlDead')
   loading.value = false
   m3u8.value = '' // 切到错误面板, 提供重试入口
-  message.warning('播放源已失效, 请点击重试获取新源')
+  message.warning(t('player.urlDeadMsg'))
 }
 
 /** 手动刷新: 对当前直播间重新拉取一次数据 */
@@ -192,7 +194,7 @@ async function manualRefresh() {
   manualRefreshing.value = true
   try {
     const ok = await loadPlay(pwdInput.value, true) // 手动刷新强取新源
-    ok ? message.success('已刷新') : undefined
+    ok ? message.success(t('player.refreshed')) : undefined
   } finally {
     manualRefreshing.value = false
   }
@@ -206,7 +208,7 @@ async function manualRefresh() {
       <div class="flex items-center gap-3 shrink-0">
         <button class="flex items-center gap-1.5 text-[12.5px] text-ink2 hover:text-ink1 transition-colors" @click="router.back()">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M15 6l-6 6 6 6"/></svg>
-          返回
+          {{ t('player.back') }}
         </button>
       </div>
 
@@ -216,22 +218,22 @@ async function manualRefresh() {
           <template v-if="loading">
             <n-skeleton class="!w-24 !h-3 rounded" :sharp="false" />
             <n-skeleton class="!w-40 !h-3 rounded" :sharp="false" />
-            <span class="text-[12.5px] text-ink3">正在获取直播流…</span>
+            <span class="text-[12.5px] text-ink3">{{ t('player.loading') }}</span>
           </template>
           <template v-else-if="needPw">
             <div class="text-3xl">🔒</div>
-            <p class="text-[13px] text-gray-200">该直播间为密码房</p>
+            <p class="text-[13px] text-gray-200">{{ t('player.pwRoom') }}</p>
             <div class="flex gap-2">
-              <n-input v-model:value="pwdInput" type="password" placeholder="输入房间密码" class="!w-52" @keyup.enter="submitPwd" />
-              <n-button type="primary" @click="submitPwd">进入</n-button>
+              <n-input v-model:value="pwdInput" type="password" :placeholder="t('player.pwPh')" class="!w-52" @keyup.enter="submitPwd" />
+              <n-button type="primary" @click="submitPwd">{{ t('player.pwEnter') }}</n-button>
             </div>
           </template>
           <template v-else>
             <div class="text-3xl">📡</div>
-            <p class="text-[13px] text-ink3 max-w-[320px] text-center leading-relaxed">{{ errorMsg || '主播未开播' }}</p>
+            <p class="text-[13px] text-ink3 max-w-[320px] text-center leading-relaxed">{{ errorMsg || t('player.offline') }}</p>
             <div class="flex gap-2">
-              <n-button size="small" secondary @click="router.back()">返回大厅</n-button>
-              <n-button size="small" type="primary" @click="loadPlay(pwdInput, true)">重试</n-button>
+              <n-button size="small" secondary @click="router.back()">{{ t('player.backExplore') }}</n-button>
+              <n-button size="small" type="primary" @click="loadPlay(pwdInput, true)">{{ t('player.retry') }}</n-button>
             </div>
           </template>
         </div>
@@ -239,7 +241,7 @@ async function manualRefresh() {
 
       <!-- 控制条 -->
       <div class="shrink-0 flex items-center gap-3 px-5 py-3.5 rounded-2xl bg-card border border-gray-200/70 shadow-card">
-        <span class="text-[12px] text-ink2">清晰度</span>
+        <span class="text-[12px] text-ink2">{{ t('player.quality') }}</span>
         <n-select
           size="small"
           class="!w-36"
@@ -248,16 +250,16 @@ async function manualRefresh() {
           :disabled="activeLine !== 0"
           @update:value="switchQuality"
         />
-        <span v-if="activeLine !== 0" class="text-[11.5px] text-ink3">备用线路自动选档</span>
+        <span v-if="activeLine !== 0" class="text-[11.5px] text-ink3">{{ t('player.lineAuto') }}</span>
         <div class="flex-1"></div>
         <n-button size="small" secondary type="primary" round :disabled="manualRefreshing" @click="manualRefresh" class="!w-[72px]">
-          <span class="inline-flex items-center justify-center gap-1"><SpinIcon v-if="manualRefreshing" :size="12" />刷新</span>
+          <span class="inline-flex items-center justify-center gap-1"><SpinIcon v-if="manualRefreshing" :size="12" />{{ t('player.refresh') }}</span>
         </n-button>
         <n-button size="small" round :secondary="following" :type="following ? 'default' : 'primary'" @click="toggleFollow">
-          {{ following ? '已关注' : '+ 关注' }}
+          {{ following ? t('player.unfollow') : t('player.follow') }}
         </n-button>
         <n-button size="small" round type="error" :secondary="!recording" @click="toggleRecord">
-          {{ recording ? '■ 停止录制' : tags?.liveType === 'rec' ? '⬇ 下载回放' : '⏺ 开始录制' }}
+          {{ recording ? t('player.stopRec') : tags?.liveType === 'rec' ? t('player.dlVod') : t('player.startRec') }}
         </n-button>
       </div>
     </div>
@@ -280,29 +282,29 @@ async function manualRefresh() {
             </span>
           </div>
           <div class="flex flex-wrap gap-1.5">
-            <n-tag v-if="tags?.liveType === 'rec'" size="small" :bordered="false" type="warning">回放</n-tag>
-            <n-tag v-if="tags?.isPw" size="small" :bordered="false" type="info">密码房</n-tag>
+            <n-tag v-if="tags?.liveType === 'rec'" size="small" :bordered="false" type="warning">{{ t('account.tagRec') }}</n-tag>
+            <n-tag v-if="tags?.isPw" size="small" :bordered="false" type="info">{{ t('account.tagPw') }}</n-tag>
             <n-tag v-if="tags?.isAdult" size="small" :bordered="false" type="error">19+</n-tag>
-            <n-tag v-if="tags?.type === 'fan'" size="small" :bordered="false" type="warning">粉丝团</n-tag>
+            <n-tag v-if="tags?.type === 'fan'" size="small" :bordered="false" type="warning">{{ t('account.tagFan') }}</n-tag>
           </div>
           <p class="text-[12.5px] text-ink2 leading-relaxed break-words">{{ title || '—' }}</p>
           <div class="text-[11.5px] text-ink3" v-if="anchor?.startTime || discoveryItem?.startTime">
-            开播于 {{ (anchor?.startTime || discoveryItem?.startTime || '').slice(5, 16) }}
+            {{ t('player.liveSince', { t: (anchor?.startTime || discoveryItem?.startTime || '').slice(5, 16) }) }}
           </div>
         </div>
       </div>
       <!-- 当前源链接(单行截断 + 复制, 附上次失效记录) -->
       <div class="rounded-2xl bg-card border border-gray-200/70 shadow-card p-4 space-y-1.5">
         <div class="flex items-center justify-between">
-          <span class="text-[12.5px] font-semibold text-ink1">当前播放源</span>
-          <n-button size="tiny" tertiary round @click="copyUrl" :disabled="!m3u8">复制</n-button>
+          <span class="text-[12.5px] font-semibold text-ink1">{{ t('player.curSource') }}</span>
+          <n-button size="tiny" tertiary round @click="copyUrl" :disabled="!m3u8">{{ t('player.copy') }}</n-button>
         </div>
         <p class="text-[11px] text-ink2 font-mono truncate" :title="m3u8">
-          {{ m3u8 ? shortUrl(m3u8) + ' · ' + (activeLine === 0 ? levelOptions[quality]?.label || '' : '备用线路') : '未获取到(源失效或未开播)' }}
+          {{ m3u8 ? shortUrl(m3u8) + ' · ' + (activeLine === 0 ? levelOptions[quality]?.label || '' : t('player.lineTag')) : t('player.noSource') }}
         </p>
         <!-- 线路切换: 主线 + hls2/hls3 备用(master 地址, hls.js 自动选档) -->
         <div v-if="backups.length" class="flex items-center gap-1.5 pt-1.5">
-          <span class="text-[11px] text-ink3 shrink-0">线路</span>
+          <span class="text-[11px] text-ink3 shrink-0">{{ t('player.line') }}</span>
           <button
             v-for="i in backups.length + 1"
             :key="i"
@@ -311,15 +313,15 @@ async function manualRefresh() {
               ? 'bg-live/10 text-live font-semibold'
               : 'text-ink3 hover:text-ink1 bg-fill hover:bg-fillh'"
             @click="switchLine(i - 1)"
-          >{{ i === 1 ? '主线' : '备用 ' + (i - 1) }}</button>
+          >{{ i === 1 ? t('player.lineMain') : t('player.lineBak', { n: i - 1 }) }}</button>
         </div>
         <p v-if="lastFailedUrl" class="text-[10.5px] text-ink3/80 font-mono truncate" :title="lastFailedUrl">
-          上次失效： {{ shortUrl(lastFailedUrl) }}
+          {{ t('player.lastFailed') }}{{ shortUrl(lastFailedUrl) }}
         </p>
       </div>
 
       <div class="rounded-2xl bg-live/5 border border-live/15 p-4 text-[12px] text-live/80 leading-relaxed">
-        播放源失效后会提示你手动获取; 卡顿可点左侧"刷新"立即换源。密码房录制会使用本次输入的密码。
+        {{ t('player.tips') }}
       </div>
     </aside>
   </div>

@@ -3,6 +3,7 @@ import { api, SESSION_PARTITION } from './pandalive'
 import { UA } from '../util'
 import { CookieJar } from './vault'
 import { store } from './store'
+import { mt } from '../i18n'
 
 // ============ 网页登录窗(事件驱动版) ============
 // 打开官网让用户自行登录(验证码/二次验证都能过)
@@ -23,7 +24,7 @@ export function openLoginWindow(parent: BrowserWindow): Promise<{ ok: boolean; m
       resizable: true,
       minimizable: false,
       maximizable: false,
-      title: '登录 PandaLive',
+      title: mt('auth.winTitle'),
       autoHideMenuBar: true,
       // 窗口底色随应用主题(页面本体为官网, 内容区颜色由站点决定)
       backgroundColor: store.getSettings().theme === 'dark' ? '#181818' : '#ffffff',
@@ -68,7 +69,7 @@ export function openLoginWindow(parent: BrowserWindow): Promise<{ ok: boolean; m
         const info = await api.checkLoginInfo(jar)
         if (info.isLogin) {
           await api.importCookies(jar)
-          finish(true, info.isAdult ? '登录成功, 账号含成人认证' : '登录成功(账号未通过 pandalive 成人认证)')
+          finish(true, info.isAdult ? mt('auth.loginOkAdult') : mt('auth.loginOkNoAdult'))
         }
       } catch {
         /* 网络抖动不致命, 等下个触发 */
@@ -90,7 +91,7 @@ export function openLoginWindow(parent: BrowserWindow): Promise<{ ok: boolean; m
     // 兜底: 15s 慢速校验
     const slowTimer = setInterval(() => void verifyNow(), 15000)
 
-    win.on('closed', () => finish(false, '已取消登录'))
+    win.on('closed', () => finish(false, mt('auth.cancelled')))
     win.webContents.setUserAgent(UA)
     void win.loadURL('https://www.pandalive.co.kr/')
   })

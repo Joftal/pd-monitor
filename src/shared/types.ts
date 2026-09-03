@@ -75,6 +75,8 @@ export interface Settings {
   mergeDeleteSegments: boolean
   /** 界面主题: light(默认) | dark */
   theme: 'light' | 'dark'
+  /** 界面语言 */
+  locale: 'zh-CN' | 'en-US'
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -94,7 +96,8 @@ export const DEFAULT_SETTINGS: Settings = {
   prefetchStream: true,
   mergeMp4: false,
   mergeDeleteSegments: true,
-  theme: 'light'
+  theme: 'light',
+  locale: 'zh-CN'
 }
 
 export interface AccountState {
