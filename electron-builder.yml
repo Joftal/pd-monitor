@@ -43,6 +43,7 @@ linux:
     - deb
   icon: resources/icon.png
   category: Utility
+  maintainer: Joftal # deb 需要维护者元数据(否则 FpmTarget 构建失败)
   artifactName: '${productName}-${version}-${arch}.${ext}'
 deb:
   depends:
