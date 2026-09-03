@@ -2,6 +2,7 @@ import { BrowserWindow, session } from 'electron'
 import { api, SESSION_PARTITION } from './pandalive'
 import { UA } from '../util'
 import { CookieJar } from './vault'
+import { store } from './store'
 
 // ============ 网页登录窗(事件驱动版) ============
 // 打开官网让用户自行登录(验证码/二次验证都能过)
@@ -24,7 +25,8 @@ export function openLoginWindow(parent: BrowserWindow): Promise<{ ok: boolean; m
       maximizable: false,
       title: '登录 PandaLive',
       autoHideMenuBar: true,
-      backgroundColor: '#ffffff',
+      // 窗口底色随应用主题(页面本体为官网, 内容区颜色由站点决定)
+      backgroundColor: store.getSettings().theme === 'dark' ? '#181818' : '#ffffff',
       webPreferences: { session: ses }
     })
 

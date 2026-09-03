@@ -101,6 +101,14 @@ function resetForm() {
   if (store.settings) form.value = { ...store.settings }
 }
 
+/** 主题特殊通道: 点按即切换并立即持久化(不走"保存设置"批处理), 与页内文案"立即生效"一致 */
+async function applyTheme(t: 'light' | 'dark') {
+  if (!form.value || form.value.theme === t) return
+  form.value.theme = t
+  await store.patchSettings({ theme: t })
+  message.success(t === 'dark' ? '已切换深色主题' : '已切换亮色主题')
+}
+
 /** 头像加载失败(离线等)时静默隐藏, 保留纯渐变横幅 */
 function hideBrokenImg(e: Event): void {
   ;(e.target as HTMLImageElement).style.display = 'none'
@@ -108,6 +116,7 @@ function hideBrokenImg(e: Event): void {
 
 // ---- 左侧锚点导航(手动 scrollspy) ----
 const navs = [
+  { key: 'appearance', label: '外观' },
   { key: 'monitor', label: '监控' },
   { key: 'record', label: '录制' },
   { key: 'network', label: '网络' },
@@ -118,7 +127,7 @@ const navs = [
 type NavKey = (typeof navs)[number]['key']
 
 const scrollRef = ref<HTMLElement | null>(null)
-const activeNav = ref<NavKey>('monitor')
+const activeNav = ref<NavKey>('appearance')
 
 function scrollToSec(key: NavKey): void {
   activeNav.value = key
@@ -131,7 +140,7 @@ function onScroll(): void {
   const box = scrollRef.value
   if (!box) return
   const boxTop = box.getBoundingClientRect().top
-  let cur: NavKey = 'monitor'
+  let cur: NavKey = 'appearance'
   for (const n of navs) {
     const el = box.querySelector(`[data-sec="${n.key}"]`)
     if (el && el.getBoundingClientRect().top - boxTop <= 96) cur = n.key
@@ -141,7 +150,7 @@ function onScroll(): void {
 
 // 开关磁贴公共样式(label+desc 左, NSwitch 右; 无边框, 浅填充)
 const tileCls =
-  'flex items-center gap-2.5 rounded-xl px-3 py-2.5 cursor-pointer transition-colors bg-gray-50/70 hover:bg-gray-100/80'
+  'flex items-center gap-2.5 rounded-xl px-3 py-2.5 cursor-pointer transition-colors bg-fill hover:bg-fillh'
 </script>
 
 <template>
@@ -154,7 +163,7 @@ const tileCls =
       </div>
       <span
         v-if="dirty"
-        class="ml-auto shrink-0 h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#f0a020]/[0.14] text-[#b97a08] animate-pop"
+        class="ml-auto shrink-0 h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#f0a020]/[0.14] text-[#d98a08] animate-pop"
       >有未保存的更改</span>
     </div>
 
@@ -166,8 +175,8 @@ const tileCls =
           :key="n.key"
           class="flex items-center gap-2.5 w-full px-3 py-2 rounded-[9px] text-[13px] transition-colors text-left"
           :class="activeNav === n.key
-            ? 'bg-white text-ink1 font-semibold shadow-card'
-            : 'text-ink2 hover:text-ink1 hover:bg-black/[0.03]'"
+            ? 'bg-card text-ink1 font-semibold shadow-card'
+            : 'text-ink2 hover:text-ink1 hover:bg-fillh'"
           @click="scrollToSec(n.key)"
         >
           <svg v-if="n.key === 'monitor'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-live' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="2.2"/><path stroke-linecap="round" d="M12 6.5a5.5 5.5 0 015.5 5.5M12 2.8a9.2 9.2 0 019.2 9.2"/></svg>
@@ -183,13 +192,47 @@ const tileCls =
 
       <!-- 内容滚动区 -->
       <div ref="scrollRef" class="flex-1 min-w-0 overflow-y-auto pb-1" @scroll="onScroll">
+        <!-- 外观 -->
+        <section data-sec="appearance" class="mb-5">
+          <div class="flex items-baseline gap-2.5 px-1 pb-2">
+            <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">外观</h2>
+            <span class="text-[11px] text-ink3 ml-auto">主题立即生效并随设置保存持久化</span>
+          </div>
+          <div class="bg-card rounded-[14px] shadow-card overflow-hidden">
+            <div class="grid grid-cols-2 gap-2.5 px-4 py-3">
+              <div
+                class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 cursor-pointer transition-all"
+                :class="form.theme === 'light' ? 'bg-live/[0.12] ring-1 ring-live/40' : 'bg-fill hover:bg-fillh'"
+                @click="applyTheme('light')"
+              >
+                <svg class="w-4 h-4 shrink-0" :class="form.theme === 'light' ? 'text-live' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path stroke-linecap="round" d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4l1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+                <div class="min-w-0 flex-1">
+                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">亮色主题</div>
+                  <div class="text-[10.5px] text-ink3">默认 · B 站风浅色</div>
+                </div>
+              </div>
+              <div
+                class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 cursor-pointer transition-all"
+                :class="form.theme === 'dark' ? 'bg-live/[0.12] ring-1 ring-live/40' : 'bg-fill hover:bg-fillh'"
+                @click="applyTheme('dark')"
+              >
+                <svg class="w-4 h-4 shrink-0" :class="form.theme === 'dark' ? 'text-live' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z"/></svg>
+                <div class="min-w-0 flex-1">
+                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">深色主题</div>
+                  <div class="text-[10.5px] text-ink3">护眼暗色 · 全控件适配</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <!-- 监控 -->
         <section data-sec="monitor" class="mb-5">
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
             <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">监控</h2>
             <span class="text-[11px] text-ink3 ml-auto">开播检测方式与请求节流</span>
           </div>
-          <div class="bg-white rounded-[14px] shadow-card overflow-hidden">
+          <div class="bg-card rounded-[14px] shadow-card overflow-hidden">
             <div class="flex items-center justify-between gap-4 px-4 py-3">
               <div>
                 <div class="text-[13px] font-medium text-ink1">检测模式</div>
@@ -223,7 +266,7 @@ const tileCls =
             <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">录制</h2>
             <span class="text-[11px] text-ink3 ml-auto">保存位置 / 输出处理 / 自动化</span>
           </div>
-          <div class="bg-white rounded-[14px] shadow-card overflow-hidden">
+          <div class="bg-card rounded-[14px] shadow-card overflow-hidden">
             <div class="flex items-center justify-between gap-4 px-4 py-3">
               <div class="min-w-0">
                 <div class="text-[13px] font-medium text-ink1">保存目录</div>
@@ -304,7 +347,7 @@ const tileCls =
             <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">网络</h2>
             <span class="text-[11px] text-ink3 ml-auto">代理同时作用于 API 与 ffmpeg 拉流</span>
           </div>
-          <div class="bg-white rounded-[14px] shadow-card overflow-hidden">
+          <div class="bg-card rounded-[14px] shadow-card overflow-hidden">
             <div class="flex items-center justify-between gap-4 px-4 py-3">
               <div>
                 <div class="text-[13px] font-medium text-ink1">代理地址(可选)</div>
@@ -320,7 +363,7 @@ const tileCls =
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
             <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">通知与行为</h2>
           </div>
-          <div class="bg-white rounded-[14px] shadow-card overflow-hidden">
+          <div class="bg-card rounded-[14px] shadow-card overflow-hidden">
             <div class="grid grid-cols-3 gap-2.5 px-4 py-3">
               <div :class="tileCls">
                 <div class="min-w-0 flex-1">
@@ -353,15 +396,15 @@ const tileCls =
             <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">数据与日志</h2>
             <span class="text-[11px] text-ink3 ml-auto">随程序目录整体迁移, 不写系统盘</span>
           </div>
-          <div class="bg-white rounded-[14px] shadow-card overflow-hidden">
+          <div class="bg-card rounded-[14px] shadow-card overflow-hidden">
             <div class="grid grid-cols-2 gap-2.5 px-4 py-3.5">
-              <div class="rounded-xl bg-gray-50/70 px-3.5 py-3 min-w-0">
+              <div class="rounded-xl bg-fill px-3.5 py-3 min-w-0">
                 <div class="text-[12.5px] font-semibold text-ink1">应用数据目录</div>
                 <div class="text-[11px] text-ink3 mt-1 truncate font-mono" :title="dataDir">{{ dataDir || '…' }}</div>
                 <div class="text-[10.5px] text-ink3 mt-0.5">设置 / 关注 / 录制历史 / 加密 Cookie</div>
                 <n-button size="tiny" secondary class="mt-2.5" @click="openDataDir">打开目录</n-button>
               </div>
-              <div class="rounded-xl bg-gray-50/70 px-3.5 py-3 min-w-0">
+              <div class="rounded-xl bg-fill px-3.5 py-3 min-w-0">
                 <div class="text-[12.5px] font-semibold text-ink1">运行日志</div>
                 <div class="text-[11px] text-ink3 mt-1 truncate font-mono">…\data\logs\app-YYYYMMDD.log</div>
                 <div class="text-[10.5px] text-ink3 mt-0.5">按日切分 · 保留 14 天 · 反馈问题请附当日日志</div>
@@ -376,7 +419,7 @@ const tileCls =
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
             <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">关于</h2>
           </div>
-          <div class="rounded-[14px] shadow-card overflow-hidden bg-white">
+          <div class="rounded-[14px] shadow-card overflow-hidden bg-card">
             <!-- 品牌横幅(头像灰度背景) -->
             <div class="relative overflow-hidden text-white" style="background: linear-gradient(115deg, #f0567f 0%, #fb7299 55%, #ffa4bc 100%)">
               <img
@@ -419,10 +462,10 @@ const tileCls =
               <template v-if="upd">
                 <span v-if="!upd.ok" class="text-[11.5px] text-red-500">{{ upd.error || '检查失败' }}</span>
                 <template v-else-if="upd.hasUpdate">
-                  <span class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#f0a020]/[0.14] text-[#b97a08] tabular-nums">发现新版本 v{{ upd.latest }}</span>
+                  <span class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#f0a020]/[0.14] text-[#d98a08] tabular-nums">发现新版本 v{{ upd.latest }}</span>
                   <n-button size="tiny" type="primary" @click="openRelease">前往下载</n-button>
                 </template>
-                <span v-else class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#2fad5f]/[0.12] text-[#1e8a48]">已是最新版本</span>
+                <span v-else class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#2fad5f]/[0.12] text-emerald-600">已是最新版本</span>
               </template>
             </div>
             <p class="px-4 pb-3.5 text-[10.5px] text-ink3/80 leading-relaxed">
@@ -432,9 +475,9 @@ const tileCls =
         </section>
 
         <!-- 悬浮吸底操作条(sticky 于内容滚动区底部) -->
-        <div class="sticky bottom-0 pt-2" style="background: linear-gradient(rgba(241,242,243,0), rgba(241,242,243,.96) 35%)">
-          <div class="flex items-center gap-2.5 bg-white/90 rounded-xl px-3.5 py-[9px] shadow-[0_4px_16px_rgba(0,0,0,.06)] backdrop-blur">
-            <span class="text-[11.5px]" :class="dirty ? 'text-[#b97a08]' : 'text-ink3'">{{ dirty ? '修改尚未保存' : '全部更改已保存' }}</span>
+        <div class="sticky bottom-0 pt-2" style="background: linear-gradient(rgb(var(--c-page) / 0), rgb(var(--c-page) / 0.96) 35%)">
+          <div class="flex items-center gap-2.5 bg-card/90 rounded-xl px-3.5 py-[9px] shadow-[0_4px_16px_rgba(0,0,0,.06)] backdrop-blur">
+            <span class="text-[11.5px]" :class="dirty ? 'text-[#d98a08]' : 'text-ink3'">{{ dirty ? '修改尚未保存' : '全部更改已保存' }}</span>
             <div class="flex-1"></div>
             <n-button secondary :disabled="!dirty" @click="resetForm">放弃更改</n-button>
             <n-button type="primary" :disabled="!dirty || saving" @click="save" class="!w-[128px]">

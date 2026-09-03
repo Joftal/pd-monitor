@@ -73,6 +73,8 @@ export interface Settings {
   mergeMp4: boolean
   /** 合并成功后删除原分段 MP4(仅 mergeMp4 开时生效; 合并失败永远保留原分段) */
   mergeDeleteSegments: boolean
+  /** 界面主题: light(默认) | dark */
+  theme: 'light' | 'dark'
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -91,7 +93,8 @@ export const DEFAULT_SETTINGS: Settings = {
   diskLimitGb: 1,
   prefetchStream: true,
   mergeMp4: false,
-  mergeDeleteSegments: true
+  mergeDeleteSegments: true,
+  theme: 'light'
 }
 
 export interface AccountState {

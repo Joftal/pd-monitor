@@ -155,7 +155,7 @@ async function refresh() {
           class="text-ink3"
         >
           <template #icon>
-            <svg class="w-14 h-14 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.2">
+            <svg class="w-14 h-14 text-ink3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M3 5h18v12H3z M3 21h18 M7 9h6 M7 13h10" />
             </svg>
           </template>
@@ -164,7 +164,7 @@ async function refresh() {
     </div>
 
     <!-- 分页条(有数据即常驻, 与已关注页统一) -->
-    <div v-if="list.length" class="shrink-0 px-7 py-3 flex items-center gap-3 bg-white border-t border-line">
+    <div v-if="list.length" class="shrink-0 px-7 py-3 flex items-center gap-3 bg-card border-t border-line">
       <span class="text-[12px] text-ink3">共 {{ list.length }} 个直播间 · 每页 {{ PAGE_SIZE }} 个</span>
       <div class="flex-1"></div>
       <n-pagination :page="page" :page-count="pageCount" size="small" @update:page="toPage" />

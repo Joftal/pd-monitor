@@ -144,7 +144,7 @@ async function setAuto(userId: string, v: boolean) {
             <div
               v-for="a in offPaged"
               :key="a.userId"
-              class="flex items-center gap-3 px-4 py-3 rounded-xl bg-white border border-line shadow-card hover:shadow-card-hover transition-shadow"
+              class="flex items-center gap-3 px-4 py-3 rounded-xl bg-card border border-line shadow-card hover:shadow-card-hover transition-shadow"
             >
               <img v-if="a.userImg" :src="a.userImg" class="w-9 h-9 rounded-full object-cover grayscale-[0.4]" referrerpolicy="no-referrer" />
               <div v-else class="w-9 h-9 rounded-full bg-page grid place-items-center text-ink3">{{ a.nick.slice(0, 1) }}</div>
@@ -170,7 +170,7 @@ async function setAuto(userId: string, v: boolean) {
       <div v-else class="h-full flex items-center justify-center">
         <n-empty description="还没有关注任何主播" class="text-ink3">
           <template #icon>
-            <svg class="w-14 h-14 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.2">
+            <svg class="w-14 h-14 text-ink3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 21s-7-4.6-9.3-9A5.4 5.4 0 0112 6.3 5.4 5.4 0 0121.3 12C19 16.4 12 21 12 21z"/>
             </svg>
           </template>
@@ -185,7 +185,7 @@ async function setAuto(userId: string, v: boolean) {
     </div>
 
     <!-- 单一底部分页栏(与大厅完全一致) -->
-    <div v-if="store.anchors.length && activeList.length" class="shrink-0 bg-white border-t border-line px-7 py-3 flex items-center gap-3">
+    <div v-if="store.anchors.length && activeList.length" class="shrink-0 bg-card border-t border-line px-7 py-3 flex items-center gap-3">
       <span class="text-[12px] text-ink3">
         {{ activeTab === 'live' ? '直播中' : '离线' }} {{ activeList.length }} 位 · 每页 {{ PAGE_SIZE }} 个
       </span>

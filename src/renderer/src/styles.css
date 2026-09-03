@@ -4,6 +4,36 @@
 
 :root {
   color-scheme: light;
+  /* 语义调色板(亮色默认); 深色主题在 .dark 下整体换值, tailwind 经 rgb(var) 引用 */
+  --c-page: 241 242 243; /* #f1f2f3 */
+  --c-card: 255 255 255;
+  --c-line: 227 229 231; /* #e3e5e7 */
+  --c-ink1: 24 25 28; /* #18191c */
+  --c-ink2: 97 102 109; /* #61666d */
+  --c-ink3: 148 153 160; /* #9499a0 */
+  --c-fill: 244 245 247; /* ≈ gray-50 填充 */
+  --c-fillh: 236 238 241; /* ≈ gray-100 填充(hover 态) */
+  --shadow-card: rgba(0, 0, 0, 0.05);
+  --shadow-card-hover: rgba(0, 0, 0, 0.1);
+  --scrollbar: #d6d9dd;
+  --scrollbar-hover: #c1c6cc;
+}
+
+.dark {
+  color-scheme: dark;
+  /* 参考 VSCode Dark Modern: 中性深灰(无蓝紫倾向), card=编辑器面 #1f1f1f, page=面板底 #181818 */
+  --c-page: 24 24 24; /* #181818 */
+  --c-card: 31 31 31; /* #1f1f1f */
+  --c-line: 43 43 43; /* #2b2b2b */
+  --c-ink1: 204 204 204; /* #cccccc, vscode foreground */
+  --c-ink2: 157 157 157; /* #9d9d9d */
+  --c-ink3: 128 128 128; /* #808080 */
+  --c-fill: 38 38 41; /* #262629(quickInput) */
+  --c-fillh: 49 49 50; /* #313132(≈input bg) */
+  --shadow-card: rgba(0, 0, 0, 0.5);
+  --shadow-card-hover: rgba(0, 0, 0, 0.6);
+  --scrollbar: #3f3f46;
+  --scrollbar-hover: #515159;
 }
 
 html,
@@ -11,7 +41,7 @@ body,
 #app {
   height: 100%;
   margin: 0;
-  background: #f1f2f3;
+  background: rgb(var(--c-page));
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', 'Hiragino Sans GB', Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -34,11 +64,11 @@ body,
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #d6d9dd;
+  background: var(--scrollbar);
   border-radius: 8px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #c1c6cc;
+  background: var(--scrollbar-hover);
 }
 ::-webkit-scrollbar-track {
   background: transparent;

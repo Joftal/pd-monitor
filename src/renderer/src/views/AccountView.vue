@@ -46,7 +46,7 @@ const status = computed(() => {
     mode: 'none' as const,
     title: '未登录',
     dot: 'bg-ink3',
-    tile: 'bg-gray-100 text-ink3',
+    tile: 'bg-fill text-ink3',
     desc: '登录后可解锁成人房 / 粉丝团等权限内容, 大厅显示 19+ 房间',
     badge: null
   }
@@ -120,7 +120,7 @@ async function logout() {
       </div>
 
       <!-- ① 状态横幅(hero + 状态条二合一) -->
-      <div class="mt-4 bg-white rounded-[14px] shadow-card px-[18px] py-4 flex items-center gap-3.5">
+      <div class="mt-4 bg-card rounded-[14px] shadow-card px-[18px] py-4 flex items-center gap-3.5">
         <div class="w-10 h-10 rounded-xl grid place-items-center shrink-0 transition-colors" :class="status.tile">
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 12a4.4 4.4 0 100-8.8 4.4 4.4 0 000 8.8zM4.5 20.4c1-4.1 4.2-6.1 7.5-6.1s6.5 2 7.5 6.1a.9.9 0 01-.88 1.1H5.38a.9.9 0 01-.88-1.1z"/>
@@ -135,7 +135,7 @@ async function logout() {
           <div class="text-[12px] text-ink3 mt-0.5">{{ status.desc }}</div>
         </div>
         <div class="ml-auto flex items-center gap-2 shrink-0">
-          <span v-if="status.badge" class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#2fad5f]/[0.12] text-[#1e8a48]">{{ status.badge }}</span>
+          <span v-if="status.badge" class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#2fad5f]/[0.12] text-emerald-600">{{ status.badge }}</span>
           <span v-if="store.account?.encrypted" class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#61666d]/10 text-ink2">🔒 加密存储</span>
           <n-popconfirm v-if="status.mode !== 'none'" @positive-click="logout">
             <template #trigger>
@@ -154,7 +154,7 @@ async function logout() {
 
       <div class="grid lg:grid-cols-2 gap-3.5">
         <!-- 方式 A: 账号密码 -->
-        <section class="bg-white rounded-[14px] shadow-card px-[18px] py-4 flex flex-col">
+        <section class="bg-card rounded-[14px] shadow-card px-[18px] py-4 flex flex-col">
           <div class="flex items-center gap-2.5">
             <span class="w-[30px] h-[30px] rounded-[9px] grid place-items-center text-ink2 bg-[#9499a0]/10 shrink-0">
               <svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="15" r="4"/><path stroke-linecap="round" stroke-linejoin="round" d="M10.85 12.15L19 4m-4 3l2.5 2.5M14 5.5L16.5 8"/></svg>
@@ -176,7 +176,7 @@ async function logout() {
         </section>
 
         <!-- 方式 B: 网页登录 -->
-        <section class="bg-white rounded-[14px] shadow-card px-[18px] py-4 flex flex-col">
+        <section class="bg-card rounded-[14px] shadow-card px-[18px] py-4 flex flex-col">
           <div class="flex items-center gap-2.5">
             <span class="w-[30px] h-[30px] rounded-[9px] grid place-items-center text-ink2 bg-[#9499a0]/10 shrink-0">
               <svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" d="M3 12h18M12 3c2.5 2.6 3.8 5.7 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.7-3.8-9S9.5 5.6 12 3z"/></svg>
@@ -205,13 +205,13 @@ async function logout() {
       </div>
 
       <!-- 方式 C: Cookie 导入 -->
-      <section class="bg-white rounded-[14px] shadow-card px-[18px] py-4 mt-3.5">
+      <section class="bg-card rounded-[14px] shadow-card px-[18px] py-4 mt-3.5">
         <div class="flex items-center gap-2.5">
           <span class="w-[30px] h-[30px] rounded-[9px] grid place-items-center text-ink2 bg-[#9499a0]/10 shrink-0">
             <svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="4" width="14" height="17" rx="2.5"/><path stroke-linecap="round" d="M9 4.5V3h6v1.5M9 10h6M9 13.5h6M9 17h4"/></svg>
           </span>
           <h3 class="text-[14px] font-bold text-ink1">Cookie 导入登录</h3>
-          <span class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#2fad5f]/[0.12] text-[#1e8a48]">最稳定</span>
+          <span class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#2fad5f]/[0.12] text-emerald-600">最稳定</span>
         </div>
         <div class="grid md:grid-cols-[46%_1fr] gap-4 mt-3">
           <ol class="space-y-2">
@@ -221,11 +221,11 @@ async function logout() {
             </li>
             <li class="flex gap-2.5 items-start">
               <span class="w-[18px] h-[18px] rounded-full grid place-items-center text-[10.5px] font-bold text-brand-dark bg-live/[0.12] shrink-0 mt-px">2</span>
-              <span class="text-[12px] text-ink2 leading-relaxed">按 <code class="bg-gray-50 border border-line rounded px-1 text-[11px] font-mono text-brand-dark">F12</code> 打开开发者工具 → Console 控制台</span>
+              <span class="text-[12px] text-ink2 leading-relaxed">按 <code class="bg-fill border border-line rounded px-1 text-[11px] font-mono text-brand-dark">F12</code> 打开开发者工具 → Console 控制台</span>
             </li>
             <li class="flex gap-2.5 items-start">
               <span class="w-[18px] h-[18px] rounded-full grid place-items-center text-[10.5px] font-bold text-brand-dark bg-live/[0.12] shrink-0 mt-px">3</span>
-              <span class="text-[12px] text-ink2 leading-relaxed">输入 <code class="bg-gray-50 border border-line rounded px-1 text-[11px] font-mono text-brand-dark">document.cookie</code> 回车, 复制整串结果</span>
+              <span class="text-[12px] text-ink2 leading-relaxed">输入 <code class="bg-fill border border-line rounded px-1 text-[11px] font-mono text-brand-dark">document.cookie</code> 回车, 复制整串结果</span>
             </li>
             <li class="flex gap-2.5 items-start">
               <span class="w-[18px] h-[18px] rounded-full grid place-items-center text-[10.5px] font-bold text-brand-dark bg-live/[0.12] shrink-0 mt-px">4</span>

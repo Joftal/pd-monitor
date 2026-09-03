@@ -63,12 +63,12 @@ async function setAuto(v: boolean) {
 <template>
   <!-- 与大厅一致的整体直播间卡片 -->
   <div
-    class="group cursor-pointer bg-white rounded-xl overflow-hidden shadow-card hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-200 animate-pop border"
+    class="group cursor-pointer bg-card rounded-xl overflow-hidden shadow-card hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-200 animate-pop border"
     :class="a.isLive ? 'border-live/30 shadow-glow-live' : 'border-line'"
     @click="a.isLive && watchLive()"
   >
     <!-- 缩略图: 仅左上直播状态 / 右上19+ -->
-    <div class="relative aspect-video bg-gray-200 overflow-hidden">
+    <div class="relative aspect-video bg-fill overflow-hidden">
       <img
         v-if="a.isLive && a.thumbUrl"
         :src="a.thumbUrl"
@@ -76,15 +76,15 @@ async function setAuto(v: boolean) {
         loading="lazy"
         referrerpolicy="no-referrer"
       />
-      <div v-else class="w-full h-full flex items-center justify-center bg-gradient-to-br from-gray-100 to-gray-200">
+      <div v-else class="w-full h-full flex items-center justify-center bg-gradient-to-br from-fill to-fillh">
         <img v-if="a.userImg" :src="a.userImg" class="w-16 h-16 rounded-full object-cover opacity-70" referrerpolicy="no-referrer" />
-        <div v-else class="w-16 h-16 rounded-full bg-white grid place-items-center text-2xl text-ink3 shadow-sm">{{ a.nick.slice(0, 1) }}</div>
+        <div v-else class="w-16 h-16 rounded-full bg-card grid place-items-center text-2xl text-ink3 shadow-sm">{{ a.nick.slice(0, 1) }}</div>
       </div>
 
       <!-- 左上: 直播状态 (+录制中) -->
       <div class="absolute top-2 left-2 flex gap-1.5">
         <span v-if="a.isLive" class="flex items-center gap-1 px-2 py-[3px] rounded bg-live text-[11px] font-bold text-white shadow-sm">
-          <span class="w-1.5 h-1.5 rounded-full bg-white animate-breathe"></span>直播中
+          <span class="w-1.5 h-1.5 rounded-full bg-card animate-breathe"></span>直播中
         </span>
         <span v-else class="px-2 py-[3px] rounded bg-black/45 text-[11px] text-white/85">离线</span>
         <span v-if="recording" class="flex items-center gap-1 px-2 py-[3px] rounded bg-black/60 text-[11px] font-bold text-white">
@@ -100,7 +100,7 @@ async function setAuto(v: boolean) {
         <n-tooltip trigger="hover" :delay="300"><template #trigger>
           <button
             class="w-8 h-8 rounded-lg grid place-items-center shadow-md hover:scale-105 transition-transform"
-            :class="recording ? 'bg-red-500 text-white' : 'bg-white/95 text-red-500'"
+            :class="recording ? 'bg-red-500 text-white' : 'bg-card/95 text-red-500'"
             @click.stop="toggleRecord"
           >
             <svg v-if="!recording" class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="7"/></svg>
@@ -128,7 +128,7 @@ async function setAuto(v: boolean) {
         <span class="text-[11.5px] text-ink3 truncate" :class="a.isLive ? 'shrink-0 ml-auto' : ''">@{{ a.userId }}</span>
         <n-popover trigger="click" placement="bottom-end" :show-arrow="false">
           <template #trigger>
-            <button class="w-7 h-7 rounded-lg grid place-items-center text-ink3 hover:text-ink1 hover:bg-gray-200/70 transition-colors shrink-0" :class="a.isLive ? '' : 'ml-auto'" @click.stop>
+            <button class="w-7 h-7 rounded-lg grid place-items-center text-ink3 hover:text-ink1 hover:bg-fill/70 transition-colors shrink-0" :class="a.isLive ? '' : 'ml-auto'" @click.stop>
               <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
             </button>
           </template>
@@ -137,7 +137,7 @@ async function setAuto(v: boolean) {
               <span>开播自动录制</span>
               <n-switch size="small" :value="a.autoRecord" @update:value="setAuto" />
             </div>
-            <div class="px-3 py-2 text-[12.5px] text-ink2 hover:bg-gray-100 cursor-pointer" @click="api.openExternal('https://www.pandalive.co.kr/play/' + a.userId)">
+            <div class="px-3 py-2 text-[12.5px] text-ink2 hover:bg-fillh cursor-pointer" @click="api.openExternal('https://www.pandalive.co.kr/play/' + a.userId)">
               在浏览器打开
             </div>
             <div class="px-3 py-2 text-[12.5px] text-red-500 hover:bg-red-50 cursor-pointer" @click="emit('remove', a.userId)">

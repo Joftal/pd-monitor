@@ -60,7 +60,8 @@ function createWindow(): void {
     minHeight: 660,
     frame: false,
     show: false,
-    backgroundColor: '#0b0d12',
+    // 启动窗口底色跟随主题, 避免加载瞬间主题不符的闪屏
+    backgroundColor: cfg.theme === 'dark' ? '#181818' : '#f1f2f3',
     title: 'PandaLive Monitor',
     icon: path.join(__dirname, '../../resources/icon.png'),
     webPreferences: {

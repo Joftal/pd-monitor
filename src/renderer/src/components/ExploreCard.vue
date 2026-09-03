@@ -72,11 +72,11 @@ async function toggleRecord() {
 <template>
   <!-- 整体直播间卡片: 缩略图仅状态徽章, 数据下移至结构化行 -->
   <div
-    class="group cursor-pointer bg-white border border-line rounded-xl overflow-hidden shadow-card hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-200 animate-pop"
+    class="group cursor-pointer bg-card border border-line rounded-xl overflow-hidden shadow-card hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-200 animate-pop"
     @click="watchLive"
   >
     <!-- 缩略图: 仅左上直播状态 / 右上19+ -->
-    <div class="relative aspect-video bg-gray-200 overflow-hidden">
+    <div class="relative aspect-video bg-fill overflow-hidden">
       <img
         v-if="x.thumbUrl"
         :src="x.thumbUrl"
@@ -84,14 +84,14 @@ async function toggleRecord() {
         loading="lazy"
         referrerpolicy="no-referrer"
       />
-      <div v-else class="w-full h-full grid place-items-center bg-gradient-to-br from-gray-100 to-gray-200">
-        <div class="w-14 h-14 rounded-full bg-white grid place-items-center text-2xl text-ink3 shadow-sm">{{ x.nick.slice(0, 1) }}</div>
+      <div v-else class="w-full h-full grid place-items-center bg-gradient-to-br from-fill to-fillh">
+        <div class="w-14 h-14 rounded-full bg-card grid place-items-center text-2xl text-ink3 shadow-sm">{{ x.nick.slice(0, 1) }}</div>
       </div>
 
       <!-- 左上: 直播状态 (+录制中) -->
       <div class="absolute top-2 left-2 flex gap-1.5">
         <span class="flex items-center gap-1 px-2 py-[3px] rounded bg-live text-[11px] font-bold text-white shadow-sm">
-          <span class="w-1.5 h-1.5 rounded-full bg-white animate-breathe"></span>直播中
+          <span class="w-1.5 h-1.5 rounded-full bg-card animate-breathe"></span>直播中
         </span>
         <span v-if="recording" class="flex items-center gap-1 px-2 py-[3px] rounded bg-black/60 text-[11px] font-bold text-white">
           <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-breathe"></span>REC
@@ -105,7 +105,7 @@ async function toggleRecord() {
       <div class="absolute bottom-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 translate-y-1 group-hover:translate-y-0 transition-all duration-200">
         <n-tooltip trigger="hover" :delay="300"><template #trigger>
           <button
-            class="w-8 h-8 rounded-lg bg-white/95 grid place-items-center shadow-md hover:scale-105 transition-transform"
+            class="w-8 h-8 rounded-lg bg-card/95 grid place-items-center shadow-md hover:scale-105 transition-transform"
             :class="following ? 'text-live' : 'text-ink2'"
             @click.stop="toggleFollow"
           >
@@ -117,7 +117,7 @@ async function toggleRecord() {
         <n-tooltip trigger="hover" :delay="300"><template #trigger>
           <button
             class="w-8 h-8 rounded-lg grid place-items-center shadow-md hover:scale-105 transition-transform"
-            :class="recording ? 'bg-red-500 text-white' : 'bg-white/95 text-red-500'"
+            :class="recording ? 'bg-red-500 text-white' : 'bg-card/95 text-red-500'"
             @click.stop="toggleRecord"
           >
             <svg v-if="!recording" class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="7"/></svg>

@@ -45,7 +45,7 @@ const keyword = computed({
 </script>
 
 <template>
-  <header class="drag-region h-[64px] shrink-0 flex items-center bg-white border-b border-line relative z-40 select-none px-5">
+  <header class="drag-region h-[64px] shrink-0 flex items-center bg-card border-b border-line relative z-40 select-none px-5">
     <!-- logo -->
     <div class="flex items-center gap-2.5 shrink-0 cursor-pointer" @click="router.push({ name: 'explore' })">
       <div class="w-9 h-9 rounded-xl bg-live flex items-center justify-center shadow-glow-brand">
@@ -85,7 +85,7 @@ const keyword = computed({
           v-model="keyword"
           type="text"
           placeholder="搜索主播 / 标题"
-          class="w-full h-10 pl-4 pr-11 rounded-full bg-page text-[13px] text-ink1 placeholder:text-ink3 outline-none border-2 border-transparent focus:border-live/60 focus:bg-white transition-all"
+          class="w-full h-10 pl-4 pr-11 rounded-full bg-page text-[13px] text-ink1 placeholder:text-ink3 outline-none border-2 border-transparent focus:border-live/60 focus:bg-card transition-all"
           @keyup.enter="router.push({ name: 'explore' })"
         />
         <button
@@ -121,11 +121,11 @@ const keyword = computed({
           <!-- 头像圆: SVG 人像, 登录态渐变粉底, 未登录灰色 -->
           <span
             class="w-8 h-8 rounded-full grid place-items-center overflow-hidden ring-2"
-            :class="store.account?.realLogin ? 'bg-gradient-to-br from-live to-fuchsia-400 ring-live/30' : store.account?.loggedIn ? 'bg-gradient-to-br from-amber-400 to-amber-500 ring-amber-300/40' : 'bg-gray-200 ring-gray-200'"
+            :class="store.account?.realLogin ? 'bg-gradient-to-br from-live to-fuchsia-400 ring-live/30' : store.account?.loggedIn ? 'bg-gradient-to-br from-amber-400 to-amber-500 ring-amber-300/40' : 'bg-fill ring-fill'"
           >
             <svg
               class="w-[18px] h-[18px]"
-              :class="store.account?.loggedIn ? 'text-white' : 'text-gray-400'"
+              :class="store.account?.loggedIn ? 'text-white' : 'text-ink3'"
               viewBox="0 0 24 24" fill="currentColor"
             >
               <path d="M12 12a4.4 4.4 0 100-8.8 4.4 4.4 0 000 8.8zM4.5 20.4c1-4.1 4.2-6.1 7.5-6.1s6.5 2 7.5 6.1a.9.9 0 01-.88 1.1H5.38a.9.9 0 01-.88-1.1z"/>
@@ -134,7 +134,7 @@ const keyword = computed({
           <!-- 状态点: 登录绿/未认证琥珀 -->
           <span
             v-if="store.account?.loggedIn"
-            class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full ring-2 ring-white"
+            class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full ring-2 ring-card"
             :class="store.account?.realLogin ? 'bg-emerald-500' : 'bg-amber-500'"
           ></span>
         </span>
