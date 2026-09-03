@@ -50,11 +50,8 @@ const keyword = computed({
 
 <template>
   <header class="drag-region h-[64px] shrink-0 flex items-center bg-card border-b border-line relative z-40 select-none px-5">
-    <!-- logo -->
+    <!-- logo(纯文字标) -->
     <div class="flex items-center gap-2.5 shrink-0 cursor-pointer" @click="router.push({ name: 'explore' })">
-      <div class="w-9 h-9 rounded-xl bg-live flex items-center justify-center shadow-glow-brand">
-        <svg class="w-[18px] h-[18px] text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>
-      </div>
       <div class="leading-tight">
         <div class="text-[16px] font-bold text-ink1 tracking-wide">PandaLive</div>
         <div class="text-[10px] text-ink3 tracking-[0.2em] -mt-0.5 font-medium">MONITOR</div>
