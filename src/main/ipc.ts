@@ -17,10 +17,12 @@ import { logger } from './services/logger'
 async function pushAccount(): Promise<AccountState> {
   let realLogin = false
   let isAdult = false
+  let userIdx: number | null = null
   if (api.hasSession()) {
     const info = await api.checkLoginInfo()
     realLogin = info.isLogin
     isAdult = info.isAdult
+    userIdx = info.idx
   }
   const state: AccountState = {
     loggedIn: api.hasSession(),
@@ -28,7 +30,7 @@ async function pushAccount(): Promise<AccountState> {
     realLogin,
     isAdult,
     nick: '',
-    userIdx: null,
+    userIdx,
     loginAt: null,
     encrypted: vault.encrypted
   }
