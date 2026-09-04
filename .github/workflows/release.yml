@@ -26,8 +26,16 @@ jobs:
         shell: bash
         run: |
           [[ "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::版本号格式必须是 x.y.z"; exit 1; }
+      # npm version 遇"目标=当前"会硬失败; 重跑同版本发版(如修 Release Notes)必须幂等
       - name: Bump version
-        run: npm version "${{ inputs.version }}" --no-git-tag-version
+        shell: bash
+        run: |
+          current=$(node -p "require('./package.json').version")
+          if [ "$current" = "${{ inputs.version }}" ]; then
+            echo "版本号已是 ${{ inputs.version }}, 跳过 bump"
+          else
+            npm version "${{ inputs.version }}" --no-git-tag-version
+          fi
       - name: Commit version bump
         shell: bash
         run: |
