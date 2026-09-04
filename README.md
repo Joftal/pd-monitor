@@ -8,61 +8,11 @@
 [![Vue](https://img.shields.io/badge/vue-3-42b883)]()
 [![Release](https://img.shields.io/github/v/release/Joftal/pd-monitor)](https://github.com/Joftal/pd-monitor/releases)
 
-基于 **Electron + Vue 3**，卡片式浅色界面。聚合全站在播直播间，一键观看、一键录制、长期监控心仪主播；录制产物由内置**视频库**统一管理：九宫格缩略图点播、分组索引浏览、无损合并与回收站级删除。
+基于 **Electron + Vue 3**，卡片式浅色界面。聚合全站在播直播间，一键观看、一键录制、长期监控心仪主播；录制产物由内置**视频库**统一管理。
 
----
 
-## ✨ 功能特性
 
-### 🏠 直播大厅
-全站在播聚合（分页浏览）· 人气 / 点赞 / 粉丝团 / 最新 多维排序 · 搜索与 19+ 筛选 · 卡片含观众、点赞、粉丝团、开播时长
 
-### ❤️ 关注监控
-开播提醒（系统通知 + 提示音） · 开播自动录制（按主播开关） · **开播预取直播源**（进房零等待） · 链接粘贴即关注
-
-### ▶️ 观看
-内置 HLS 播放器（hls.js） · 清晰度按 IVS 分档切换 · **主线 / 备用线路（hls2/hls3）一键切换** · 密码房 / 19+ / 粉丝团权限房支持
-播放源采用**长效变体地址**（绕开 10 分钟过期 master），失效给手动重试入口，绝不后台私自重拉
-
-### ⏺ 录制
-内置 ffmpeg 零外部依赖 · TS 分段 → 自动无损 remux MP4 · 可选**收尾合并为单文件**
-60s 停滞检测 + 磁盘阈值保护 + 退出优雅停止 · 进行中卡片实时码率（推送差分，零额外请求）
-
-### 🗂️ 视频库
-录制完成的本地视频库：海报卡墙 + **九宫格缩略图**（录完自动从视频均匀抽 9 帧合成，缓存至 `data/thumbs/`，文件变动自动重生成）
-按日期 / 按主播分组 + 左侧索引条（点击跳转 · 跟随高亮 · 固定回顶） + 类型/状态文字角标 + 筛选搜索
-**磨砂玻璃影院浮层**：大屏播放 + 信息面板 + 分段点切（失效段自动跳过）+ 合并单文件 + **删除（文件进系统回收站，可还原；支持单个分段删除）**
-外部删除文件自动对账：删段剔除 · 恢复找回 · 重命名不动条目
-
-### 📼 回放（VOD）
-`[回放]` 房间可直接观看（进度条可拖） · 一键下载为单文件 · 下载进度与估算全长实时可见
-
-### 🔐 账号
-三种登录：账号密码 / 内置官网登录窗（事件驱动零轮询） / **Cookie 导入** · 官方 `login_info` 校验，假登录自动识别回滚 · Cookie 经 **Windows DPAPI 加密** 存储 · 成人认证状态直接显示
-
-### 🛡️ 工程化设计
-全局限速队列 + 随机抖动 · 风控特征识别 + 熔断指数退避 · 列表模式本地匹配（请求量与关注数无关）
-源拉取 100% 用户意图驱动 · 运行日志落盘（`data/logs/`，按日切分） · 设置内置**检查更新**
-
----
-
-## 📦 下载安装
-
-到 [Releases](https://github.com/Joftal/pd-monitor/releases) 下载：
-
-| 平台 | 文件 | 说明 |
-|---|---|---|
-| Windows | `PandaLive Monitor-Setup-x.x.x.exe` | NSIS 安装包（创建桌面快捷方式） |
-| Windows | `PandaLive Monitor-Portable-x.x.x.exe` | 便携版，解压即用，数据随程序目录走 |
-| macOS | `PandaLive Monitor-x.x.x-(x64\|arm64).dmg` | DMG 安装包（免签名分发：首次打开需**右键 → 打开**，或系统设置里放行），x64=Intel / arm64=Apple Silicon |
-| macOS | `PandaLive Monitor-x.x.x-(x64\|arm64).zip` | ZIP 免安装版（同上，右键打开） |
-| Linux | `PandaLive Monitor-x.x.x-x86_64.AppImage` | 免安装，`chmod +x` 即跑 |
-| Linux | `PandaLive Monitor-x.x.x-amd64.deb` | 依赖 `libsecret-1-0`（Cookie 加密存储，安装器自动处理） |
-
-**数据位置**:Windows 下全部在程序目录旁（便携迁移）；macOS 在 `~/Library/Application Support/pandalive-monitor/`;Linux 在 `~/.config/pandalive-monitor/`。
-内容：`data/`（关注 · 设置 · 历史 · 日志 · 加密 Cookie · 九宫格缩略图缓存） + `recording/`（录制产物，可在设置中更改）
-
-**快速上手**：账号 → 登录（推荐 Cookie 导入） → 大厅浏览/搜索 → 点封面观看，心形关注，⏺ 录制。
 
 ---
 
@@ -87,11 +37,11 @@ npm run typecheck      # 双端类型检查
 ```
 src/
 ├─ main/                  # 主进程
-│  ├─ index.ts            #   入口: 窗口/托盘/流域名 Origin 头注入
+│  ├─ index.ts            #   入口: 窗口/托盘/流域名 Origin 头注入/Chromium 数据随程序目录
 │  ├─ ipc.ts              #   IPC 注册
 │  └─ services/
 │     ├─ pandalive.ts     #   API 客户端: 限速队列 + 风控识别 + 双请求栈 + 代理 + 源缓存
-│     ├─ watcher.ts       #   轮询引擎: 列表模式 + 逐个模式 + 兜底复查 + 熔断退避
+│     ├─ watcher.ts       #   轮询引擎: 列表模式 + 逐个模式 + urgent/间隙泵兜底 + 熔断退避
 │     ├─ recorder.ts      #   录制引擎: ffmpeg + 停滞检测 + 分段 + remux + 合并 + VOD + 删除(回收站)
 │     ├─ thumbs.ts        #   九宫格缩略图: 采样拼图 + 签名缓存 + 文件集对账 + 孤儿清扫
 │     ├─ authWin.ts       #   网页登录窗(事件驱动)

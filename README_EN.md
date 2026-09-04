@@ -8,61 +8,10 @@
 [![Vue](https://img.shields.io/badge/vue-3-42b883)]()
 [![Release](https://img.shields.io/github/v/release/Joftal/pd-monitor)](https://github.com/Joftal/pd-monitor/releases)
 
-Built with **Electron + Vue 3**. Aggregates every live channel on the platform into a clean, card-based light UI — watch, record, and keep an eye on your favorite streamers; recordings are managed in a built-in **video library** with 9-grid thumbnails, grouped browsing with an index bar, and frosted-glass playback with recycle-bin deletion.
+Built with **Electron + Vue 3**, card-style light UI. Aggregates every live channel on the platform — watch, record, and keep an eye on your favorite streamers; recordings are managed in a built-in **video library**.
 
----
 
-## ✨ Features
 
-### 🏠 Live Hall
-Site-wide live aggregation (paginated) · sort by viewers / likes / fan club / newest · search & 19+ filters · cards show viewers, likes, fans, air time
-
-### ❤️ Follow & Monitor
-Go-live notifications (system toast + sound) · per-streamer auto-record · **source pre-warm on go-live** (instant playback on entry) · follow by pasting a room URL or ID
-
-### ▶️ Watching
-Built-in HLS player (hls.js) · quality switch maps to IVS variants · **main/backup lines (hls2/hls3) one-click switching** · password / 19+ / fan-club rooms supported
-Streams use **long-lived variant URLs** (bypasses the 10-minute master expiry); a dead source shows a manual retry entry — never silently refetched in the background
-
-### ⏺ Recording
-Bundled ffmpeg, zero external dependencies · TS segments → auto lossless remux to MP4 · optional **merge into a single file** on finish
-60s stall detection + disk threshold guard + graceful shutdown · live bitrate on active cards (diffed from task pushes, zero extra requests)
-
-### 🗂️ Video Library
-Local library of finished recordings: poster wall with **9-grid thumbnails** (9 frames sampled per video, cached in `data/thumbs/`, auto-regenerated when files change)
-Group by date / by streamer + left index rail (jump · scroll-spy highlight · pinned back-to-top) + type/status text badges + filters & search
-**Frosted-glass cinema overlay**: big-screen playback + info panel + segment switching (dead segments auto-skipped) + merge to single file + **delete (files go to the system Recycle Bin, restorable; single-segment delete supported)**
-External file changes self-reconcile: deleted segments pruned · restored segments recovered · renamed files never wipe records
-
-### 📼 Replay (VOD)
-`[Replay]` rooms play directly (seekable progress bar) · one-click single-file download · live progress with estimated total duration
-
-### 🔐 Account
-Three login methods: password / embedded official web login (event-driven, zero polling) / **cookie import** · sessions verified via official `login_info` — fake logins are rolled back · cookies persisted with **Windows DPAPI encryption** · adult-verification status shown
-
-### 🛡️ Engineering
-Global rate-limit queue with jitter · risk-signature detection + circuit breaker with exponential backoff · list mode matches locally (request count independent of follow count)
-Stream fetching is 100% user-intent driven · runtime logs on disk (`data/logs/`, daily rotation) · in-app **update check**
-
----
-
-## 📦 Install
-
-Download from [Releases](https://github.com/Joftal/pd-monitor/releases):
-
-| Platform | File | Notes |
-|---|---|---|
-| Windows | `PandaLive Monitor-Setup-x.x.x.exe` | NSIS installer (desktop shortcut included) |
-| Windows | `PandaLive Monitor-Portable-x.x.x.exe` | Portable build — unzip and run; data stays with the app folder |
-| macOS | `PandaLive Monitor-x.x.x-(x64\|arm64).dmg` | DMG installer (unsigned: **right-click → Open** on first launch, or allow in System Settings); x64=Intel / arm64=Apple Silicon |
-| macOS | `PandaLive Monitor-x.x.x-(x64\|arm64).zip` | ZIP no-install build (same right-click rule) |
-| Linux | `PandaLive Monitor-x.x.x-x86_64.AppImage` | No install — `chmod +x` and run |
-| Linux | `PandaLive Monitor-x.x.x-amd64.deb` | Depends on `libsecret-1-0` (cookie vault encryption; handled by the installer) |
-
-**Data location**: Windows keeps everything next to the app folder (portable). macOS: `~/Library/Application Support/pandalive-monitor/`. Linux: `~/.config/pandalive-monitor/`.
-Contents: `data/` (follows · settings · history · logs · encrypted cookies · thumbnail cache) + `recording/` (recordings; overridable in settings)
-
-**Quick start**: Account → Log in (cookie import recommended) → browse/search in the hall → click a cover to watch, heart to follow, ⏺ to record.
 
 ---
 
@@ -87,11 +36,11 @@ npm run typecheck      # type-check (main + renderer)
 ```
 src/
 ├─ main/                  # main process
-│  ├─ index.ts            #   entry: window/tray/stream-domain Origin header injection
+│  ├─ index.ts            #   entry: window/tray/stream-domain Origin header injection/Chromium data redirected to app folder
 │  ├─ ipc.ts              #   IPC registration
 │  └─ services/
 │     ├─ pandalive.ts     #   API client: rate-limit queue + risk detection + dual stacks + proxy + source cache
-│     ├─ watcher.ts       #   polling engine: list mode + per-anchor + fallback recheck + circuit breaker
+│     ├─ watcher.ts       #   polling engine: list mode + per-anchor + urgent/idle-pump fallback + circuit breaker
 │     ├─ recorder.ts      #   recorder: ffmpeg + stall detection + segments + remux + merge + VOD + delete (Recycle Bin)
 │     ├─ thumbs.ts        #   9-grid thumbnails: frame sampling + signature cache + file-set reconciliation + orphan sweep
 │     ├─ authWin.ts       #   web login window (event-driven)
