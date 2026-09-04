@@ -344,6 +344,8 @@ export default {
     prefetchD: 'Zero wait entering the room',
     autoRec: 'Auto-record for new follows',
     autoRecD: 'Applies to newly followed streamers',
+    autoRetry: 'Auto-resume on source death',
+    autoRetryD: 'Re-fetch source and resume when a recording dies (max 3 in a row; recommended for overnight runs)',
     network: 'Network',
     networkDesc: 'Proxy applies to both API and ffmpeg',
     proxy: 'Proxy (optional)',

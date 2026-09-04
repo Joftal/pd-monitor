@@ -371,6 +371,13 @@ const tileCls =
                 </div>
                 <n-switch size="small" v-model:value="form.autoRecordDefault" />
               </div>
+              <div :class="tileCls">
+                <div class="min-w-0 flex-1">
+                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.autoRetry') }}</div>
+                  <div class="text-[10.5px] text-ink3">{{ t('settings.autoRetryD') }}</div>
+                </div>
+                <n-switch size="small" v-model:value="form.autoRetryRecord" />
+              </div>
             </div>
           </div>
         </section>

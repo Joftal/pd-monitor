@@ -346,6 +346,8 @@ export default {
     prefetchD: '点进房间零等待',
     autoRec: '新增默认自动录制',
     autoRecD: '对新关注主播生效',
+    autoRetry: '源失效自动续录',
+    autoRetryD: '录制因源过期/停滞失败时自动重拉新源续录(连续最多 3 次; 跨天挂机建议开启)',
     network: '网络',
     networkDesc: '代理同时作用于 API 与 ffmpeg 拉流',
     proxy: '代理地址(可选)',

@@ -73,6 +73,8 @@ export interface Settings {
   mergeMp4: boolean
   /** 合并成功后删除原分段 MP4(仅 mergeMp4 开时生效; 合并失败永远保留原分段) */
   mergeDeleteSegments: boolean
+  /** 录制因源失效(停滞/中断)失败时自动重拉新源续录 —— 显式开启才生效(跨签名过期/跨天挂机场景); 每主播连续最多 3 次 */
+  autoRetryRecord: boolean
   /** 界面主题: light(默认) | dark */
   theme: 'light' | 'dark'
   /** 界面语言 */
@@ -96,6 +98,7 @@ export const DEFAULT_SETTINGS: Settings = {
   prefetchStream: true,
   mergeMp4: false,
   mergeDeleteSegments: true,
+  autoRetryRecord: false,
   theme: 'light',
   locale: 'zh-CN'
 }

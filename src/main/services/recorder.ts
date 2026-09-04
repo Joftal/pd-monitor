@@ -243,7 +243,7 @@ class Task implements RecTask {
         } else {
           this.error = mt('rec.vodInterrupted', { reason: tail || `ffmpeg 退出码 ${code}` })
           logger.warn('rec', `${this.nick}(@${this.userId}) ${this.error}`)
-          void this.finalize('error')
+          void this.finalize('error', 'vod')
         }
         return
       }
@@ -263,7 +263,7 @@ class Task implements RecTask {
     }
     if (stillLive) {
       this.error = mt('rec.interrupted', { reason })
-      await this.finalize('error')
+      await this.finalize('error', 'interrupted')
     } else {
       await this.finalize('done') // 正常下播: 完成态收尾
     }
@@ -278,7 +278,7 @@ class Task implements RecTask {
       this.lastBytesAt = Date.now()
     } else if (this.lastBytesAt && Date.now() - this.lastBytesAt > STALL_MS) {
       this.error = this.vod ? mt('rec.stallVod') : mt('rec.stall')
-      void this.finalize('error')
+      void this.finalize('error', 'stall')
       return
     }
     // 每 ~30s 检查一次磁盘, 避免跨天录制把磁盘写满
@@ -287,7 +287,7 @@ class Task implements RecTask {
       const limit = store.getSettings().diskLimitGb
       if (diskFreeGb(this.dirPath) < limit) {
         this.error = mt('rec.diskStop', { limit })
-        void this.finalize('error')
+        void this.finalize('error', 'disk')
       }
     }
   }
@@ -352,8 +352,8 @@ class Task implements RecTask {
     await this.finalize('stopped')
   }
 
-  /** 收尾: remux / 入库 / 通知 */
-  private async finalize(status: RecTask['status']): Promise<void> {
+  /** 收尾: remux / 入库 / 通知; failKind 标记失败类别(续录策略据此收窄: 源失效类才续, 满盘/回放不续) */
+  private async finalize(status: RecTask['status'], failKind?: 'stall' | 'interrupted' | 'disk' | 'vod'): Promise<void> {
     // H1: 任何来源(停滞/磁盘/错误/exit 回调/手动)只允许第一个进入者执行收尾
     if (this.finalized) return
     this.finalized = true
@@ -425,6 +425,16 @@ class Task implements RecTask {
 
     if (status === 'done') sendToast({ type: 'rec', title: mt('rec.toastDone', { nick: this.nick }), body: mt('rec.segs', { n: this.files.length }) })
     if (status === 'error') sendToast({ type: 'error', title: mt('rec.toastErr', { nick: this.nick }), body: this.error.slice(0, 120) })
+
+    // 源失效自动续录(设置开启才生效): 仅"源死而主播仍在"类失败(停滞/中断)触发; 正常收尾给连续失败计数清白
+    if (status === 'error') {
+      recorder.maybeRetry(
+        { userId: this.userId, nick: this.nick, title: this.title, password: this.password, vod: this.vod, startedAt: this.startedAt },
+        failKind
+      )
+    } else {
+      recorder.clearRetry(this.userId)
+    }
   }
 
   private async remux(tsFile: string): Promise<boolean> {
@@ -502,6 +512,7 @@ class Recorder {
   }
 
   async stopAll(): Promise<void> {
+    this.shuttingDown = true // 退出流程: 封堵"收尾期间 error 触发自动续录"的竞态
     for (const t of [...this.tasks.values()]) {
       await t.stop()
       await sleep(300)
@@ -510,6 +521,40 @@ class Recorder {
 
   removeTask(userId: string): void {
     this.tasks.delete(userId)
+  }
+
+  // ---- 源失效自动续录(设置 autoRetryRecord 开启才生效) ----
+  // 健康判定: 上个任务活满 10 分钟才死 → 视为新一轮失败, 连续计数清白; 快速连续死 → 计满 3 次停手
+  private static HEALTHY_MS = 10 * 60 * 1000
+  private static MAX_RETRY = 3
+  private retryStreak = new Map<string, number>()
+  private shuttingDown = false
+
+  clearRetry(userId: string): void {
+    this.retryStreak.delete(userId)
+  }
+
+  maybeRetry(prev: { userId: string; nick: string; title: string; password: string; vod: boolean; startedAt: number }, failKind?: string): void {
+    if (this.shuttingDown) return
+    if (prev.vod) return // 回放下载不续(进度无法无损接回)
+    if (failKind !== 'stall' && failKind !== 'interrupted') return // 满盘等不可续场景直接放行
+    const cfg = store.getSettings()
+    if (!cfg.autoRetryRecord) return
+    const healthy = Date.now() - prev.startedAt >= Recorder.HEALTHY_MS
+    let streak = healthy ? 0 : this.retryStreak.get(prev.userId) || 0
+    if (streak >= Recorder.MAX_RETRY) {
+      logger.warn('rec', `${prev.nick}(@${prev.userId}) 自动续录已连续失败 ${streak} 次, 停手(下个健康周期清白)`)
+      sendToast({ type: 'error', title: mt('rec.toastErr', { nick: prev.nick }), body: mt('rec.retryGiveUp', { n: streak }) })
+      return
+    }
+    streak += 1
+    this.retryStreak.set(prev.userId, streak)
+    logger.warn('rec', `${prev.nick}(@${prev.userId}) 源失效(${failKind}), 自动续录第 ${streak} 次`)
+    sendToast({ type: 'info', title: mt('rec.toastStart', { nick: prev.nick }), body: mt('rec.retryResume', { n: streak }) })
+    // finalize(error) 已 invalidatePlay: 新任务必换新签名源 —— 这正是续录要解决的问题
+    void this.start({ userId: prev.userId, nick: prev.nick, title: prev.title, password: prev.password, auto: true }).catch(() => {
+      // start 失败已弹"启动失败"气泡; streak 保留, 待下个健康周期清白
+    })
   }
 
   /**
