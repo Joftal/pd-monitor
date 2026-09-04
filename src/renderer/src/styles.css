@@ -99,19 +99,6 @@ body,
   display: none;
 }
 
-/* 录制中底部流光(不确定进度): 渐变块从左滑到右 */
-@keyframes bar-slide {
-  0% {
-    left: -40%;
-  }
-  100% {
-    left: 100%;
-  }
-}
-.bar-slide {
-  animation: bar-slide 1.8s ease-in-out infinite;
-}
-
 /* 顶栏导航下划线动画 */
 .nav-tab {
   position: relative;

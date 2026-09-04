@@ -49,6 +49,12 @@ export interface RecTask {
   vodDoneSec?: number
   /** 直播间封面(取自拉源响应; 录制卡片展示用, 旧历史记录无此字段) */
   thumbUrl?: string
+  /** 进行中的管线阶段(对 status 的细化; 历史条目无此字段):
+   *  fetch 拉源 → recording 录制/下载 → stopping 收尾 → remux 转码 → merge 合并 */
+  stage?: 'fetch' | 'recording' | 'stopping' | 'remux' | 'merge'
+  /** 阶段内件数进度(转码/合并: 第 cur/total 件; 为 0 表示未知) */
+  stageCur?: number
+  stageTotal?: number
 }
 
 export type RecHistoryItem = RecTask

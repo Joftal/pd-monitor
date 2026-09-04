@@ -100,6 +100,9 @@ class Task implements RecTask {
   vodTotalSec = 0
   vodDoneSec = 0
   thumbUrl = ''
+  stage: NonNullable<RecTask['stage']> = 'fetch'
+  stageCur = 0
+  stageTotal = 0
 
   password: string
   private proc: ChildProcessByStdio<Writable, Readable | null, Readable> | null = null
@@ -169,6 +172,7 @@ class Task implements RecTask {
     this.spawnFfmpeg(src)
     this.statTimer = setInterval(() => this.statFiles(), 2000)
     this.stallTimer = setInterval(() => this.checkStall(), 10000)
+    this.stage = 'recording'
     this.push()
   }
 
@@ -231,6 +235,10 @@ class Task implements RecTask {
     ff.on('exit', (code) => {
       const expected = this.stopping
       this.proc = null
+      if (!expected && !this.finalized && this.status === 'recording') {
+        // 自然结束/意外退出同样进入"收尾"棒: 棒清单是固定序列, 跳过会让"停止收尾"谎绿
+        this.stage = 'stopping'
+      }
       this.statFiles()
       if (expected || this.finalized) return // 已收尾/收尾中: 不得二次进入(H1)
       if (this.status !== 'recording') return
@@ -348,6 +356,8 @@ class Task implements RecTask {
     if (this.status !== 'recording') return
     logger.info('rec', `手动停止: ${this.nick}(@${this.userId})`)
     this.stopping = true
+    this.stage = 'stopping' // 用户视角: ffmpeg 优雅退出窗口(≤8s+待写盘)
+    this.push()
     await this.killProc()
     await this.finalize('stopped')
   }
@@ -367,10 +377,16 @@ class Task implements RecTask {
     const cfg = store.getSettings()
     if (status !== 'error' && cfg.autoMp4 && this.files.some((f) => f.endsWith('.ts'))) {
       this.status = 'remuxing'
+      this.stage = 'remux'
+      const tss = this.files.filter((f) => f.endsWith('.ts'))
+      this.stageCur = 0
+      this.stageTotal = tss.length
       this.push()
       for (const f of [...this.files]) {
         if (!f.endsWith('.ts')) continue
         const ok = await this.remux(f)
+        this.stageCur += 1
+        this.push()
         if (ok && cfg.deleteTs) {
           try {
             fs.unlinkSync(f)
@@ -386,6 +402,11 @@ class Task implements RecTask {
       if (mp4s.length >= 2) {
         const out = path.join(this.dirPath, `${this.baseName}.mp4`)
         this.status = 'remuxing'
+        this.stage = 'merge'
+        // 合并是一次 concat: 无可推进的件数进度, 不显示计数(stageTotal=0),
+        // 芯片点亮+呼吸点即"合并进行中"信号(显示 0/N 反而假卡死)
+        this.stageCur = 0
+        this.stageTotal = 0
         this.push()
         const ok = await concatSegments(mp4s, out)
         if (ok) {
@@ -455,8 +476,8 @@ class Recorder {
 
   static publicTask(t: Task): RecTask {
     // 剥离私有实现字段(进程句柄/房间密码), 只暴露公开数据
-    const { id, userId, nick, title, startedAt, endedAt, status, dirPath, currentFile, files, bytes, error, auto, vod, vodTotalSec, vodDoneSec, thumbUrl } = t
-    return { id, userId, nick, title, startedAt, endedAt, status, dirPath, currentFile, files: [...files], bytes, error, auto, vod, vodTotalSec, vodDoneSec, thumbUrl }
+    const { id, userId, nick, title, startedAt, endedAt, status, dirPath, currentFile, files, bytes, error, auto, vod, vodTotalSec, vodDoneSec, thumbUrl, stage, stageCur, stageTotal } = t
+    return { id, userId, nick, title, startedAt, endedAt, status, dirPath, currentFile, files: [...files], bytes, error, auto, vod, vodTotalSec, vodDoneSec, thumbUrl, stage, stageCur, stageTotal }
   }
 
   emitUpdate(): void {
@@ -487,12 +508,14 @@ class Recorder {
       throw err
     }
     const task = new Task(opt, dir)
-    // 先占位再初始化, 防双击/并发产生两个 ffmpeg
+    // 先占位再初始化, 防双击/并发产生两个 ffmpeg; 立刻推送: 卡片即现"拉取直播源"棒(否则卡片要等 run() 走完拉源+spawn 才首见, 管线首棒名存实亡)
     this.tasks.set(opt.userId, task)
+    this.emitUpdate()
     try {
       await task.run()
     } catch (e) {
       this.tasks.delete(opt.userId)
+      this.emitUpdate() // 拉源失败: 撤掉刚才的 fetch 卡片, 不留僵尸
       if ((e as Error & { needPassword?: boolean }).needPassword) {
         const err = e as Error & { needPassword?: boolean }
         err.message = mt('rec.needPw')

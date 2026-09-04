@@ -83,6 +83,29 @@ function enterRoom(task: RecTask): void {
   void router.push({ name: 'player', params: { userId: task.userId } })
 }
 
+// ---- 管线阶段指示: 告诉用户任务在"哪一棒"、还有多少棒要跑(替代裸进度条, 收尾期不再像卡死) ----
+interface PipeStage {
+  key: NonNullable<RecTask['stage']>
+  label: string
+}
+/** 阶段清单: 随任务类型(vod/直播)与设置(autoMp4/mergeMp4 决定收尾有没有转码/合并棒)动态拼 */
+function pipeStages(task: RecTask): PipeStage[] {
+  const st = store.settings
+  const out: PipeStage[] = [
+    { key: 'fetch', label: t('rec.pipeFetch') },
+    { key: 'recording', label: t(task.vod ? 'rec.pipeDownload' : 'rec.pipeRecord') },
+    { key: 'stopping', label: t('rec.pipeStop') }
+  ]
+  if (st?.autoMp4) out.push({ key: 'remux', label: t('rec.pipeRemux') })
+  if (!task.vod && st?.autoMp4 && st?.mergeMp4) out.push({ key: 'merge', label: t('rec.pipeMerge') })
+  return out
+}
+/** 当前所处阶段下标; stage 缺失(旧推送而在)或清单中找不到(录制中改了设置) → 维持"进行中"位 */
+function pipeCur(task: RecTask): number {
+  const i = pipeStages(task).findIndex((s) => s.key === (task.stage || 'recording'))
+  return i < 0 ? 1 : i
+}
+
 async function stop(userId: string) {
   await api.recStop(userId)
   message.success(t('rec.stopped'))
@@ -195,20 +218,27 @@ async function openFolder(dir: string) {
               <n-button size="small" tertiary round class="!w-[88px]" @click="openFolder(task.dirPath)">{{ t('rec.dir') }}</n-button>
             </div>
           </div>
-          <!-- 底部进度带 -->
-          <div class="flex items-center gap-3.5 mt-3.5 pl-[72px]">
-            <div class="flex-1 h-1.5 rounded bg-fill overflow-hidden relative">
-              <span
-                v-if="!task.vod || vodPct(task) === null"
-                class="absolute top-0 bottom-0 w-[40%] rounded bg-gradient-to-r from-transparent to-transparent bar-slide"
-                :class="task.vod ? 'via-[#f0a020]' : 'via-live'"
-              ></span>
-              <span v-else class="absolute left-0 top-0 bottom-0 rounded bg-[#f0a020]" :style="{ width: vodPct(task) + '%' }"></span>
+          <!-- 底部: 管线阶段指示(任务跑在哪一棒、还剩几棒; 收尾期不再像卡死) -->
+          <div class="flex items-center gap-3 mt-3.5 pl-[72px] flex-wrap">
+            <!-- 单行文本链: 已过=淡灰 / 当前=加粗+呼吸点 / 未跑=幽灵灰; 无芯片无箭头, 信息靠字重与透明度分层 -->
+            <div class="flex items-center gap-1.5 flex-wrap text-[11.5px] leading-none">
+              <template v-for="(s, i) in pipeStages(task)" :key="s.key">
+                <span
+                  class="whitespace-nowrap"
+                  :class="i < pipeCur(task) ? 'text-ink3/70' : i === pipeCur(task) ? 'text-ink1 font-semibold' : 'text-ink3/40'"
+                >
+                  <span
+                    v-if="i === pipeCur(task)"
+                    class="inline-block w-1.5 h-1.5 rounded-full align-[1px] mr-1 animate-breathe"
+                    :class="task.vod ? 'bg-[#f0a020]' : 'bg-live'"
+                  ></span>{{ s.label }}<span v-if="i === pipeCur(task) && task.stageTotal" class="text-ink3 tabular-nums font-normal"> {{ task.stageCur }}/{{ task.stageTotal }}</span><span v-else-if="i === pipeCur(task) && task.vod && vodPct(task) !== null" class="text-ink3 tabular-nums font-normal"> {{ vodPct(task) }}%</span>
+                </span>
+                <span v-if="i < pipeStages(task).length - 1" class="text-ink3/30 select-none">→</span>
+              </template>
             </div>
-            <div class="text-[11px] text-ink3 shrink-0 tabular-nums">
+            <div class="text-[11px] text-ink3 shrink-0 tabular-nums ml-auto">
               <template v-if="task.vod">
-                <b v-if="vodPct(task) !== null" class="text-ink2 font-semibold">{{ vodPct(task) }}%</b>
-                <span v-if="vodPct(task) !== null"> · </span>{{ t('rec.vodCap', { done: fmtDurSec(task.vodDoneSec || 0), total: vodTotalLabel(task) }) }}
+                {{ t('rec.vodCap', { done: fmtDurSec(task.vodDoneSec || 0), total: vodTotalLabel(task) }) }}
               </template>
               <template v-else>
                 {{ t('rec.segInfo', { min: splitMin }) }} · <b class="font-semibold" :class="diskLow ? 'text-red-500' : 'text-ink2'">{{ diskCaption }}</b> · {{ t('rec.collecting') }}
