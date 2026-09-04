@@ -165,6 +165,8 @@ export default {
     rateVod: '下载速度',
     stop: '■ 停止',
     stopVod: '■ 取消',
+    enterRoom: '进直播间',
+    enterVod: '进回放间',
     dir: '目录',
     segInfo: '分段 {min} 分钟/段',
     diskFull: '磁盘充足',

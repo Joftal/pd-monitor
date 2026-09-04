@@ -111,9 +111,10 @@ onMounted(async () => {
           <div class="h-full flex flex-col bg-page text-ink1 select-none">
             <TopNav />
             <main class="flex-1 min-h-0 overflow-hidden relative">
-              <router-view v-if="ready" v-slot="{ Component }">
+              <router-view v-if="ready" v-slot="{ Component, route }">
                 <transition name="fade" mode="out-in">
-                  <component :is="Component" />
+                  <!-- key=fullPath: 同记录不同参数(如 player/A -> player/B)也强制重挂, 杜绝实例复用带来的跨房间状态残留 -->
+                  <component :is="Component" :key="route.fullPath" />
                 </transition>
               </router-view>
               <div v-else class="h-full flex items-center justify-center text-ink3 text-sm">{{ t('common.loading') }}</div>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, useMessage } from 'naive-ui'
+import { useRouter } from 'vue-router'
 import { api } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useI18n } from 'vue-i18n'
@@ -10,6 +11,7 @@ import type { RecTask } from '@shared/types'
 const { t } = useI18n()
 const store = useAppStore()
 const message = useMessage()
+const router = useRouter()
 
 const diskFree = ref(0)
 const tick = ref(0)
@@ -74,6 +76,11 @@ function vodPct(task: RecTask): number | null {
 function vodTotalLabel(task: RecTask): string {
   if (!task.vodTotalSec) return ''
   return task.vodTotalSec < 3600 ? `~${Math.round(task.vodTotalSec / 60)} ${t('common.min')}` : `~${fmtDurSec(task.vodTotalSec)}`
+}
+
+/** 跳转到任务对应的直播间/回放间(PlayerView 自治拉源; 录制中的源已在缓存, 秒开零请求; 与录制进程互不影响) */
+function enterRoom(task: RecTask): void {
+  void router.push({ name: 'player', params: { userId: task.userId } })
 }
 
 async function stop(userId: string) {
@@ -182,6 +189,7 @@ async function openFolder(dir: string) {
             </div>
             <!-- 操作 -->
             <div class="flex flex-col gap-1.5 shrink-0 ml-2">
+              <n-button size="small" tertiary round class="!w-[88px]" @click="enterRoom(task)">{{ t(task.vod ? 'rec.enterVod' : 'rec.enterRoom') }}</n-button>
               <n-button v-if="task.vod" size="small" type="error" secondary round class="!w-[88px]" @click="stop(task.userId)">{{ t('rec.stopVod') }}</n-button>
               <n-button v-else size="small" type="error" round class="!w-[88px]" @click="stop(task.userId)">{{ t('rec.stop') }}</n-button>
               <n-button size="small" tertiary round class="!w-[88px]" @click="openFolder(task.dirPath)">{{ t('rec.dir') }}</n-button>

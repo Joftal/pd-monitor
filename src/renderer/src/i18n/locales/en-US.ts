@@ -163,6 +163,8 @@ export default {
     rateVod: 'Download speed',
     stop: '■ Stop',
     stopVod: '■ Cancel',
+    enterRoom: 'Join live',
+    enterVod: 'Open replay',
     dir: 'Folder',
     segInfo: '{min} min / segment',
     diskFull: 'Disk OK',
