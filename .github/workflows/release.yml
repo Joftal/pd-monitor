@@ -156,4 +156,4 @@ jobs:
             | [PandaLive Monitor-${{ inputs.version }}-x86_64.AppImage](https://github.com/Joftal/pd-monitor/releases/download/v${{ inputs.version }}/PandaLive.Monitor-${{ inputs.version }}-x86_64.AppImage) | Linux x64 | 免安装, `chmod +x` 直接运行 |
             | [PandaLive Monitor-${{ inputs.version }}-amd64.deb](https://github.com/Joftal/pd-monitor/releases/download/v${{ inputs.version }}/PandaLive.Monitor-${{ inputs.version }}-amd64.deb) | Linux x64 | 安装包(依赖 `libsecret-1-0`, 安装器自动处理) |
 
-            **数据位置**: Windows = 程序目录旁(便携); macOS = `~/Library/Application Support/pandalive-monitor/`; Linux = `~/.config/pandalive-monitor/`
+            **数据位置**: Windows = 程序所在目录(data/ + electron-data/ + recording/, 安装版与便携版统一, 整体目录可备份迁移); macOS = `~/Library/Application Support/`; Linux = `~/.config/`

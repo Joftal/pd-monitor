@@ -5,7 +5,7 @@ import { api, SESSION_PARTITION, applyProxy } from './services/pandalive'
 import { store } from './services/store'
 import { watcher } from './services/watcher'
 import { recorder } from './services/recorder'
-import { UA } from './util'
+import { UA, redirectElectronDataDir } from './util'
 import { mt, setMainLocale } from './i18n'
 import { logger } from './services/logger'
 import { registerMediaScheme, installMediaHandler } from './services/localMedia'
@@ -14,6 +14,8 @@ import { registerMediaScheme, installMediaHandler } from './services/localMedia'
 
 // 本地录制回看协议(plocal://): 特权声明必须在 app ready 前完成
 registerMediaScheme()
+// Chromium 运行时数据(session/cache/crashpad)随程序目录: 必须在 app ready 前完成重定向
+redirectElectronDataDir()
 
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {

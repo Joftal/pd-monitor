@@ -7,14 +7,25 @@ export const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 
 export function dataRoot(): string {
-  // Windows 便携哲学: 数据放程序所在目录(便携版经 PORTABLE_EXECUTABLE_DIR 指回原始目录)
+  // 全部数据与程序同目录(Windows 打包, 统一便携哲学) ——
+  //   portable 经 PORTABLE_EXECUTABLE_DIR 指回便携 exe 目录; NSIS 安装版取安装目录。
+  //   应用数据(db/cookie/缩略图/日志/录制)与 Chromium 运行时(见 redirectElectronDataDir)同根:
+  //   备份/迁移只需带走程序目录; NSIS 升级卸载只删安装清单内文件, data 天然保留。
   // macOS 的 .app 是只读包(可能 translocation 到隔离区)、Linux AppImage 是只读 squashfs:
-  // 打包版在 mac/linux 必须落系统用户数据目录; 开发态三平台都用项目根
+  // 打包版在 mac/linux 只能落系统用户数据目录; 开发态三平台都用项目根
   if (app.isPackaged) {
     if (process.platform === 'win32') return process.env.PORTABLE_EXECUTABLE_DIR || path.dirname(app.getPath('exe'))
     return app.getPath('userData')
   }
   return app.getAppPath()
+}
+
+/** Chromium/Electron 运行时数据(Cache/GPUCache/Partitions(官网登录 session)/Crashpad 等)
+ *  重定向到程序目录 electron-data/ —— 与应用数据同根, 全量数据单目录收口。
+ *  必须在 app ready 前调用(session partition 存储位置在首次使用时确定); 仅 win 打包生效。 */
+export function redirectElectronDataDir(): void {
+  if (!app.isPackaged || process.platform !== 'win32') return
+  app.setPath('userData', path.join(dataRoot(), 'electron-data'))
 }
 
 export function dataDir(): string {
@@ -24,12 +35,13 @@ export function dataDir(): string {
   return dir
 }
 
-/** 默认录制根目录: 程序所在目录/recording(未配置 savePath 时使用) */
+/** 默认录制根目录: 数据根/recording(未配置 savePath 时使用; 数据根三态见 dataRoot) */
 export function defaultRecordRoot(): string {
   return path.join(dataRoot(), 'recording')
 }
 
-// 旧版本数据在 %APPDATA%/pandalive-monitor/plm-data, 首次运行自动迁移过来
+// 远古内测数据认领: %APPDATA%/pandalive-monitor/plm-data(2026-09 前内部版本的散落位置)
+// 只补缺口不覆盖现存; per-file 容错(单文件失败不拖垮另一文件)
 let migrated = false
 function migrateLegacyData(target: string): void {
   // 旧版本仅存在于 Windows, 其他平台无需迁移
@@ -39,13 +51,16 @@ function migrateLegacyData(target: string): void {
   try {
     const roaming = process.env.APPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Roaming')
     const legacy = path.join(roaming, 'pandalive-monitor', 'plm-data')
-    if (!fs.existsSync(legacy) || legacy === target) return
+    if (!fs.existsSync(legacy) || path.resolve(legacy) === path.resolve(target)) return
     for (const f of ['db.json', 'vault.dat']) {
       const src = path.join(legacy, f)
       const dst = path.join(target, f)
-      if (fs.existsSync(src) && !fs.existsSync(dst)) {
+      if (!fs.existsSync(src) || fs.existsSync(dst)) continue
+      try {
         fs.copyFileSync(src, dst)
         console.log(`[migrate] 已迁移旧数据: ${f}`)
+      } catch (e) {
+        console.warn(`[migrate] 迁移失败 ${f}: ${String((e as Error).message || e)}`)
       }
     }
   } catch (e) {
