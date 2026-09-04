@@ -69,10 +69,6 @@ const diskCaption = computed(() => {
 const splitMin = computed(() => Math.round((store.settings?.splitSeconds ?? 900) / 60))
 
 // ---- VOD 进度 ----
-function vodPct(task: RecTask): number | null {
-  if (!task.vodTotalSec || !task.vodDoneSec) return null
-  return Math.min(100, Math.floor((100 * task.vodDoneSec) / task.vodTotalSec))
-}
 function vodTotalLabel(task: RecTask): string {
   if (!task.vodTotalSec) return ''
   return task.vodTotalSec < 3600 ? `~${Math.round(task.vodTotalSec / 60)} ${t('common.min')}` : `~${fmtDurSec(task.vodTotalSec)}`
@@ -231,7 +227,7 @@ async function openFolder(dir: string) {
                     v-if="i === pipeCur(task)"
                     class="inline-block w-1.5 h-1.5 rounded-full align-[1px] mr-1 animate-breathe"
                     :class="task.vod ? 'bg-[#f0a020]' : 'bg-live'"
-                  ></span>{{ s.label }}<span v-if="i === pipeCur(task) && task.stageTotal" class="text-ink3 tabular-nums font-normal"> {{ task.stageCur }}/{{ task.stageTotal }}</span><span v-else-if="i === pipeCur(task) && task.vod && vodPct(task) !== null" class="text-ink3 tabular-nums font-normal"> {{ vodPct(task) }}%</span>
+                  ></span>{{ s.label }}<span v-if="i === pipeCur(task) && task.stageTotal" class="text-ink3 tabular-nums font-normal"> {{ task.stageCur }}/{{ task.stageTotal }}</span>
                 </span>
                 <span v-if="i < pipeStages(task).length - 1" class="text-ink3/30 select-none">→</span>
               </template>
