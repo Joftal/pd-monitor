@@ -3,7 +3,7 @@ import { spawn, ChildProcessByStdio } from 'child_process'
 import { Readable, Writable } from 'stream'
 import * as fs from 'fs'
 import * as path from 'path'
-import { EV, RecTask } from '../../shared/types'
+import { EV, RecHistoryItem, RecTask } from '../../shared/types'
 import { api } from './pandalive'
 import { store } from './store'
 import { thumbs } from './thumbs'
@@ -562,6 +562,81 @@ class Recorder {
     thumbs.enqueue(taskId)
     logger.info('rec', `手动合并完成: ${item.nick} -> ${path.basename(out)}`)
     return { ok: true, files: r.files }
+  }
+
+  /**
+   * 视频库 ↔ 磁盘实况全量对账 —— recHistory 入口每次先行调用, 渲染层所见即实况:
+   *  - 外部删段剔除 / 恢复找回(按"目录+文件基名"扫描, 与 mergeTask.refresh 同规约, 无关流浪文件不进库)
+   *  - 全灭条目收窄移除: 目录已删(盘仍在) / 目录内媒体清零 → 移除条目并清缩略图;
+   *    目录内剩别的媒体 = 重命名/手动挪动 → 保留(守"重命名不动条目"); 盘消失 → 本条跳过不判
+   * 同理上移到单点: recHistory 覆盖启动首拉(store.init)与进库刷新, 无需 fs.watch/轮询
+   */
+  reconcileHistory(): { changed: number; dropped: number } {
+    let changed = 0
+    let dropped = 0
+    // 迭代副本: 对账过程中可能 removeHistory
+    for (const item of [...store.listHistory()]) {
+      try {
+        const r = this.reconcileItem(item)
+        if (r === 'changed') changed++
+        if (r === 'dropped') dropped++
+      } catch (e) {
+        logger.warn('rec', `视频库对账失败(${item.nick}@${item.userId}): ${String((e as Error).message || e)}`)
+      }
+    }
+    if (changed || dropped) logger.info('rec', `视频库对账: 写回 ${changed} 条, 移除 ${dropped} 条`)
+    return { changed, dropped }
+  }
+
+  private reconcileItem(item: RecHistoryItem): 'same' | 'changed' | 'dropped' {
+    const dir = item.dirPath
+    if (!dir) return 'same'
+    const listed = (item.files || []).filter((f) => /\.(mp4|ts)$/i.test(f))
+    if (!listed.length) return 'same' // 条目本就是空集: 没在管的文件, 无从对账
+    if (!fs.existsSync(dir)) {
+      // 目录不存在: 盘拔掉则保守保留; 盘在而目录没了 = 被删 → 移除条目
+      if (this.diskGone(dir)) return 'same'
+      thumbs.remove(item.id)
+      store.removeHistory(item.id)
+      logger.info('rec', `对账移除(目录已删): ${item.nick}(@${item.userId})`)
+      return 'dropped'
+    }
+    const base = path.basename(listed[0]).replace(/_(\d{4}|vod)\.(mp4|ts)$/i, '')
+    const { files: scanned, bytes } = scanTaskMedia(dir, base)
+    if (scanned.length) {
+      // listed 来自录制期已排序 statFiles, 但历史库里可能有旧/手工数据, 用集合比对稳妥
+      const same = scanned.length === listed.length && listed.every((f) => scanned.includes(f))
+      if (!same) {
+        store.updateHistory(item.id, { files: scanned, bytes })
+        logger.info('rec', `对账写回: ${item.nick}(@${item.userId}) ${listed.length} -> ${scanned.length} 现存`)
+        return 'changed'
+      }
+      return 'same'
+    }
+    // 基名扫描为 0: 目录里还有别的媒体 = 重命名/挪动(保留); 一个媒体都不剩 = 删空(移除)
+    const anyMedia = fs.readdirSync(dir).some((n) => /\.(mp4|ts)$/i.test(n))
+    if (anyMedia) return 'same'
+    thumbs.remove(item.id)
+    store.removeHistory(item.id)
+    logger.info('rec', `对账移除(文件已删空): ${item.nick}(@${item.userId})`)
+    return 'dropped'
+  }
+
+  /** 掉盘判定: Windows 看盘符存在与否即可; POSIX(含 mac 的 /Volumes)看最近现存上级距目标是否 ≥2 层(挂载点消失) */
+  private diskGone(dirPath: string): boolean {
+    const resolved = path.resolve(dirPath)
+    if (process.platform === 'win32') {
+      return !fs.existsSync(path.parse(resolved).root)
+    }
+    const depOf = (p: string): number => p.split(path.sep).filter(Boolean).length
+    let cur = resolved
+    for (let i = 0; i < 12; i++) {
+      const parent = path.dirname(cur)
+      if (parent === cur) return true // 一路到根都不存在: 视为掉盘
+      if (fs.existsSync(parent)) return depOf(resolved) - depOf(parent) >= 2
+      cur = parent
+    }
+    return true
   }
 
   /** 删除录制任务: 文件移入回收站 → 清缩略图 → 移出历史。任一文件被占用则失败并保留条目 */

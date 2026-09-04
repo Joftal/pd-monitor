@@ -218,7 +218,11 @@ export function registerIpc(): void {
 
   // ---------- 录制 ----------
   ipcMain.handle(CH.recList, () => recorder.list())
-  ipcMain.handle(CH.recHistory, () => store.listHistory())
+  // 每次取历史先对账外部删改(启动首拉/进库刷新同走此口), 渲染层所见即磁盘实况
+  ipcMain.handle(CH.recHistory, () => {
+    recorder.reconcileHistory()
+    return store.listHistory()
+  })
 
   ipcMain.handle(CH.recStart, async (_e, userId: string, password?: string) => {
     // 允许录制未监控的主播(大厅/播放页直接录制)

@@ -5,7 +5,7 @@ import { spawn } from 'child_process'
 import { app, BrowserWindow } from 'electron'
 import { store } from './store'
 import { logger } from './logger'
-import { dataRoot, scanTaskMedia } from '../util'
+import { dataRoot } from '../util'
 import { EV } from '../../shared/types'
 import type { RecHistoryItem } from '../../shared/types'
 
@@ -263,38 +263,19 @@ async function pump(): Promise<void> {
 export const thumbs = {
   /**
    * 确保任务缩略图存在: 命中直接返回 URL; 未命中入队后台生成(完成后走 EV.recThumb 推送)。
-   * 文件集全灭(外部删除) → 清掉残留缩略图并返回空串。
+   * 文件集对账(外部删段剔除/恢复找回/全灭条目移除)已上移至 recorder.reconcileHistory —
+   * 它在 recHistory 入口先行跑, 本函数只按"现存文件"算 sig, 文件集变动自然触发重生成。
    */
   ensure(taskId: string): { url: string } {
     const item = store.listHistory().find((h) => h.id === taskId)
     if (!item) return { url: '' }
-    let files = eligibleFiles(item)
+    const files = eligibleFiles(item)
     const h = hashId(taskId)
     if (!files.length) {
+      // 全灭(外部删空): 清残留缩略图并返回空串(条目自身的移除由 reconcileHistory 判定)
       if (!fs.existsSync(thumbsRoot())) return { url: '' }
       removeTaskFiles(taskId)
       return { url: '' }
-    }
-    // 自愈对账: 按"目录+文件基名"对齐磁盘实况 —— 外部删段(缩)/外部恢复(长)都能写回 db;
-    // 只纳入同基名的录制产物(mergeTask.refresh 同规约), 目录里无关流浪文件永不进来; 全灭不动条目(可能是盘掉了)
-    const listed = (item.files || []).filter((f) => /\.(mp4|ts)$/i.test(f))
-    const first = listed[0]
-    if (first && item.dirPath) {
-      const base = path.basename(first).replace(/_(\d{4}|vod)\.(mp4|ts)$/i, '')
-      // 扫到 0 个 = 基名对不上(手工重命名/移动) → 不覆盖, 绝不让对账把条目掏空
-      const { files: scanned } = scanTaskMedia(item.dirPath, base)
-      if (scanned.length) files = scanned
-    }
-    if (files.length !== listed.length) {
-      const bytes = files.reduce((s, f) => {
-        try {
-          return s + fs.statSync(f).size
-        } catch {
-          return s
-        }
-      }, 0)
-      store.updateHistory(taskId, { files, bytes })
-      logger.info('thumb', `文件集对账: ${item.nick}(@${item.userId}) ${listed.length} -> ${files.length} 现存`)
     }
     const sig = signature(files)
     const finalName = `${h}_${sig}.jpg`

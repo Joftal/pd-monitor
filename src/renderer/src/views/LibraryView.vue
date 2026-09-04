@@ -14,7 +14,7 @@ const message = useMessage()
 
 const diskFree = ref(0)
 onMounted(async () => {
-  // 进页先刷新历史: 主进程 ensureThumb 的对账(外部删段/恢复)可能已改 db, 立即反映到卡片
+  // 刷新历史即对账: recHistory 入口先跑 reconcileHistory 对齐外部删改再返回, 卡片所见即实况
   await store.refreshHistory()
   diskFree.value = await api.recDiskFree()
 })
