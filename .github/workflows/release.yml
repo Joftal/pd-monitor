@@ -139,13 +139,13 @@ jobs:
 
             | 文件(可点击) | 平台 | 说明 |
             |---|---|---|
-            | [PandaLive Monitor-Setup-${{ inputs.version }}.exe](https://github.com/Joftal/pd-monitor/releases/download/v${{ inputs.version }}/PandaLive%20Monitor-Setup-${{ inputs.version }}.exe) | Windows x64 | NSIS 安装包(推荐, 自动创建桌面快捷方式) |
-            | [PandaLive Monitor-Portable-${{ inputs.version }}.exe](https://github.com/Joftal/pd-monitor/releases/download/v${{ inputs.version }}/PandaLive%20Monitor-Portable-${{ inputs.version }}.exe) | Windows x64 | 便携免安装版, 数据随程序目录迁移 |
-            | [PandaLive Monitor-${{ inputs.version }}-x64.dmg](https://github.com/Joftal/pd-monitor/releases/download/v${{ inputs.version }}/PandaLive%20Monitor-${{ inputs.version }}-x64.dmg) | macOS Intel | DMG 安装包(免签名分发: 首次请右键 → 打开) |
-            | [PandaLive Monitor-${{ inputs.version }}-arm64.dmg](https://github.com/Joftal/pd-monitor/releases/download/v${{ inputs.version }}/PandaLive%20Monitor-${{ inputs.version }}-arm64.dmg) | macOS Apple Silicon(M 系列) | DMG 安装包(免签名分发: 首次请右键 → 打开) |
-            | [PandaLive Monitor-${{ inputs.version }}-x64.zip](https://github.com/Joftal/pd-monitor/releases/download/v${{ inputs.version }}/PandaLive%20Monitor-${{ inputs.version }}-x64.zip) | macOS Intel | ZIP 免安装版(同上, 右键打开) |
-            | [PandaLive Monitor-${{ inputs.version }}-arm64.zip](https://github.com/Joftal/pd-monitor/releases/download/v${{ inputs.version }}/PandaLive%20Monitor-${{ inputs.version }}-arm64.zip) | macOS Apple Silicon(M 系列) | ZIP 免安装版(同上, 右键打开) |
-            | [PandaLive Monitor-${{ inputs.version }}-x86_64.AppImage](https://github.com/Joftal/pd-monitor/releases/download/v${{ inputs.version }}/PandaLive%20Monitor-${{ inputs.version }}-x86_64.AppImage) | Linux x64 | 免安装, `chmod +x` 直接运行 |
-            | [PandaLive Monitor-${{ inputs.version }}-amd64.deb](https://github.com/Joftal/pd-monitor/releases/download/v${{ inputs.version }}/PandaLive%20Monitor-${{ inputs.version }}-amd64.deb) | Linux x64 | 安装包(依赖 `libsecret-1-0`, 安装器自动处理) |
+            | [PandaLive Monitor-Setup-${{ inputs.version }}.exe](https://github.com/Joftal/pd-monitor/releases/download/v${{ inputs.version }}/PandaLive.Monitor-Setup-${{ inputs.version }}.exe) | Windows x64 | NSIS 安装包(推荐, 自动创建桌面快捷方式) |
+            | [PandaLive Monitor-Portable-${{ inputs.version }}.exe](https://github.com/Joftal/pd-monitor/releases/download/v${{ inputs.version }}/PandaLive.Monitor-Portable-${{ inputs.version }}.exe) | Windows x64 | 便携免安装版, 数据随程序目录迁移 |
+            | [PandaLive Monitor-${{ inputs.version }}-x64.dmg](https://github.com/Joftal/pd-monitor/releases/download/v${{ inputs.version }}/PandaLive.Monitor-${{ inputs.version }}-x64.dmg) | macOS Intel | DMG 安装包(免签名分发: 首次请右键 → 打开) |
+            | [PandaLive Monitor-${{ inputs.version }}-arm64.dmg](https://github.com/Joftal/pd-monitor/releases/download/v${{ inputs.version }}/PandaLive.Monitor-${{ inputs.version }}-arm64.dmg) | macOS Apple Silicon(M 系列) | DMG 安装包(免签名分发: 首次请右键 → 打开) |
+            | [PandaLive Monitor-${{ inputs.version }}-x64.zip](https://github.com/Joftal/pd-monitor/releases/download/v${{ inputs.version }}/PandaLive.Monitor-${{ inputs.version }}-x64.zip) | macOS Intel | ZIP 免安装版(同上, 右键打开) |
+            | [PandaLive Monitor-${{ inputs.version }}-arm64.zip](https://github.com/Joftal/pd-monitor/releases/download/v${{ inputs.version }}/PandaLive.Monitor-${{ inputs.version }}-arm64.zip) | macOS Apple Silicon(M 系列) | ZIP 免安装版(同上, 右键打开) |
+            | [PandaLive Monitor-${{ inputs.version }}-x86_64.AppImage](https://github.com/Joftal/pd-monitor/releases/download/v${{ inputs.version }}/PandaLive.Monitor-${{ inputs.version }}-x86_64.AppImage) | Linux x64 | 免安装, `chmod +x` 直接运行 |
+            | [PandaLive Monitor-${{ inputs.version }}-amd64.deb](https://github.com/Joftal/pd-monitor/releases/download/v${{ inputs.version }}/PandaLive.Monitor-${{ inputs.version }}-amd64.deb) | Linux x64 | 安装包(依赖 `libsecret-1-0`, 安装器自动处理) |
 
             **数据位置**: Windows = 程序目录旁(便携); macOS = `~/Library/Application Support/pandalive-monitor/`; Linux = `~/.config/pandalive-monitor/`
