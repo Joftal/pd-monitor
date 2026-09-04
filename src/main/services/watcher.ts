@@ -11,6 +11,7 @@ import { mt } from '../i18n'
 // ============ 轮询引擎 ============
 // list 模式: 每轮拉全站直播列表(分页, 每页一个请求), 本地匹配监控主播 —— 防封核心
 // per-anchor 模式: 逐个 member/bj (兜底, 限速队列生效)
+// 列表外离线关注(pumpIdle): 轮次间隙按 gap 持续轮扫, 开播发现延迟 ≈ N×gap, 与轮询间隔脱钩
 // 熔断: 连续失败 N 轮 -> 暂停 + 指数退避, 并通知 UI
 // ==================================
 
@@ -24,8 +25,6 @@ class Watcher {
   private cooldownUntil = 0
   private roundInFlight = false
   private discovery: DiscoveryItem[] = []
-  private missCursor = 0
-  private static FALLBACK_BATCH = 3
   status: WatcherStatus = {
     running: false,
     mode: 'list',
@@ -97,6 +96,7 @@ class Watcher {
         await this.roundByList(anchors)
       } else {
         // 逐个模式下大厅无数据源: 清空并广播, 让大厅显示"模式不可用"空态
+        this.idleQueue = [] // per-anchor 每轮全量复查: list 残留的 rest 快照作废, 间隙泵在此模式无职责
         if (this.discovery.length) {
           this.discovery = []
           this.pushDiscovery()
@@ -108,20 +108,7 @@ class Watcher {
       this.status.circuitOpen = false
       this.status.message = ''
     } catch (e) {
-      this.errorStreak++
-      const msg = e instanceof Error ? e.message : String(e)
-      if (e instanceof RiskError || this.errorStreak >= 3) {
-        // 指数退避: 1min -> 2 -> 4 -> ... 上限 15min
-        const minutes = Math.min(15, 2 ** Math.min(4, this.errorStreak - 1))
-        this.cooldownUntil = Date.now() + minutes * 60_000
-        this.status.circuitOpen = true
-        this.status.message = mt('watcher.circuit', { msg, minutes })
-        logger.warn('watcher', this.status.message)
-        sendToast({ type: 'error', title: mt('watcher.circuitTitle'), body: this.status.message })
-      } else {
-        this.status.message = mt('watcher.roundFail', { msg })
-        logger.warn('watcher', `本轮失败(#${this.errorStreak}): ${msg}`)
-      }
+      this.noteFailure(e)
     } finally {
       this.roundInFlight = false
       this.status.lastRoundAt = Date.now()
@@ -131,7 +118,26 @@ class Watcher {
         store.flush()
         const interval = this.status.circuitOpen ? 30_000 : store.getSettings().pollIntervalSec * 1000
         this.schedule(interval)
+        void this.pumpIdle() // 轮次间隙: 启动离线关注兜底泵(幂等, 在跑则 no-op)
       }
+    }
+  }
+
+  /** 轮询/间隙泵统一失败处置: 连续失败熔断 + 指数退避 + UI 通知(原 round catch 原语义) */
+  private noteFailure(e: unknown): void {
+    this.errorStreak++
+    const msg = e instanceof Error ? e.message : String(e)
+    if (e instanceof RiskError || this.errorStreak >= 3) {
+      // 指数退避: 1min -> 2 -> 4 -> ... 上限 15min
+      const minutes = Math.min(15, 2 ** Math.min(4, this.errorStreak - 1))
+      this.cooldownUntil = Date.now() + minutes * 60_000
+      this.status.circuitOpen = true
+      this.status.message = mt('watcher.circuit', { msg, minutes })
+      logger.warn('watcher', this.status.message)
+      sendToast({ type: 'error', title: mt('watcher.circuitTitle'), body: this.status.message })
+    } else {
+      this.status.message = mt('watcher.roundFail', { msg })
+      logger.warn('watcher', `本轮失败(#${this.errorStreak}): ${msg}`)
     }
   }
 
@@ -202,22 +208,15 @@ class Watcher {
       if (!wasLive) this.onLiveStart({ ...a, ...patch } as Anchor)
     }
 
-    // 兜底: 列表不可见的关注主播(19+/隐藏房)用 member/bj 节流复查
-    // - urgent: 上轮还在播的, 全部立即复查(防止误判下播)
-    // - rotate: 其余离线主播, 每轮轮换小批量复查(发现列表外新开播, 含成人房)
+    // 兜底: 列表不可见的关注主播(19+/隐藏房/500名外) member/bj 节流复查
+    // - urgent: 上轮还在播的, 全部立即复查(防止误判下播) —— 轮内完成
+    // - rest: 离线关注交间隙泵(pumpIdle)在轮询空档持续轮扫 —— 发现延迟 ≈ N×gap, 与轮询间隔脱钩
     const urgent = missing.filter((a) => a.isLive)
-    const rest = missing.filter((a) => !a.isLive)
-    const queue: Anchor[] = [...urgent]
-    if (rest.length > 0) {
-      const k = Math.min(Watcher.FALLBACK_BATCH, rest.length)
-      this.missCursor = this.missCursor % rest.length
-      for (let i = 0; i < k; i++) queue.push(rest[(this.missCursor + i) % rest.length])
-      this.missCursor = (this.missCursor + k) % rest.length
-    }
-    for (const a of queue) {
+    for (const a of urgent) {
       const info = await api.fetchBj(a.userId)
       liveFound += await this.applyBj(a, info)
     }
+    this.idleQueue = missing.filter((a) => !a.isLive) // 新快照整批替换(上轮未扫完的按最新状态重排)
 
     this.status.liveFound = liveFound
     // 登录态检测: loginInfo 非空即视为 cookie 有效(结构宽容)
@@ -233,6 +232,10 @@ class Watcher {
   ): Promise<number> {
     const now = Date.now()
     const { nick, userIdx, userImg, media } = info
+    // 先拍翻转快照: updateAnchor 是原地 Object.assign(listAnchors 返回原数组, 改的就是 a 本体),
+    // 改后再读 a.isLive 恒为新值 → 开播翻转判定会被吞(通知/预取/自录/源作废全丢);
+    // 与主循环 wasLive 同规约
+    const wasLive = a.isLive
     if (media && media.isLive) {
       const patch: Partial<Anchor> = {
         isLive: true,
@@ -249,10 +252,10 @@ class Watcher {
         lastSeenAt: now
       }
       store.updateAnchor(a.userId, patch)
-      if (!a.isLive) this.onLiveStart({ ...a, ...patch } as Anchor)
+      if (!wasLive) this.onLiveStart({ ...a, ...patch } as Anchor)
       return 1
     }
-    if (a.isLive) {
+    if (wasLive) {
       store.updateAnchor(a.userId, { isLive: false, title: '', tags: null, startTime: '', viewerCount: 0, thumbUrl: '' })
       this.onLiveEnd(a)
     }
@@ -268,6 +271,46 @@ class Watcher {
     }
     this.status.liveFound = liveFound
     this.pushAnchors()
+  }
+
+  // ---- 轮次间隙兜底泵: rest(离线且列表不可见的关注)在轮询空档持续轮扫 ----
+  // 与主轮询共用同一限速队列(gap+抖动), 单请求速率与轮内完全一致, 但节奏摊平到整条
+  // 时间轴: 发现延迟 ≈ N×gap(50 离线 ≈ 60s), 与 pollIntervalSec 无关 —— 不论 30s 还是
+  // 300s 一档, 空闲时间轴全部利用起来。让路规则: round 进行中不跑; 熔断期清空停扫;
+  // 每人每轮至多扫一次(快照消费制, 新 round 发新快照)。
+  private idleQueue: Anchor[] = []
+  private idlePumping = false
+
+  private async pumpIdle(): Promise<void> {
+    if (this.idlePumping) return
+    this.idlePumping = true
+    try {
+      while (this.idleQueue.length) {
+        // 让路: 下一轮开始即停(下轮会发新快照); 停轮(stop)同样中止
+        if (!this.running || this.roundInFlight) break
+        if (this.status.circuitOpen) {
+          // 熔断高压期避开(与 prewarm 泵同语义)
+          this.idleQueue.length = 0
+          break
+        }
+        const a = this.idleQueue.shift()!
+        // 快照生成后被取关: 跳过(不再为其发请求; 事件层另有 onLiveStart/onLiveEnd 守卫双保险)
+        if (!this.stillMonitored(a.userId)) continue
+        api.setGap(store.getSettings().requestGapMs) // 与轮内同节奏(设置页改动即时生效)
+        try {
+          const info = await api.fetchBj(a.userId)
+          if (!this.running) break // 请求在飞期间已停轮: 事件不落, 剩余快照直接作废
+          const found = await this.applyBj(a, info)
+          if (found) this.pushAnchors() // rest 上"在播"恒为开播翻转: 即时点亮 UI(不等下一轮)
+        } catch (e) {
+          this.noteFailure(e)
+          this.push()
+          break // 出错即停, 剩余待下轮新快照(保守: 不在风控/坏网下硬闯)
+        }
+      }
+    } finally {
+      this.idlePumping = false
+    }
   }
 
   // ---- 开播预取源泵: 逐个节流拉源写缓存, 点进房间即命中 ----
@@ -296,6 +339,8 @@ class Watcher {
           break
         }
         const uid = this.prewarmQueue.shift()!
+        // 入队后被取关: 不再为其拉源(与 pumpIdle/事件守卫同规约; 开播入口(onLiveStart)已挡)
+        if (!this.stillMonitored(uid)) continue
         const cfg = store.getSettings()
         api.setGap(cfg.requestGapMs)
         await api.getPlayCached(uid).catch(() => undefined) // 失败静默(不打扰用户流)
@@ -306,7 +351,13 @@ class Watcher {
     }
   }
 
+  /** 翻转事件统一守卫: 拉列表/拉 bj 飞行窗口内主播可能已被取关; 事件不得落(防幽灵 toast/自录) */
+  private stillMonitored(userId: string): boolean {
+    return store.listAnchors().some((x) => x.userId === userId)
+  }
+
   private onLiveStart(a: Anchor): void {
+    if (!this.stillMonitored(a.userId)) return
     api.invalidatePlay(a.userId) // 主播(重)开播: 旧源作废
     const cfg = store.getSettings()
     if (cfg.prefetchStream) this.enqueuePrewarm(a.userId) // 后台预取新源写缓存
@@ -323,6 +374,7 @@ class Watcher {
   }
 
   private onLiveEnd(a: Anchor): void {
+    if (!this.stillMonitored(a.userId)) return // 同 onLiveStart 守卫: 已取关不弹下播
     sendToast({ type: 'offline', title: mt('watcher.liveEnd', { nick: a.nick }), body: '' })
   }
 

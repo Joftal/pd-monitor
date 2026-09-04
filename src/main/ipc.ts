@@ -162,8 +162,10 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle(CH.anchorsRemove, async (_e, userId: string) => {
-    await recorder.stop(userId)
+    // 先取关再停录: removeAnchor 先于 await 落库, watcher 的 stillMonitored 守卫立即生效 ——
+    // 否则 stop 的慢窗口(remuxing 收尾最长达分钟级)内开播翻转会穿过守卫启动孤儿录制
     store.removeAnchor(userId)
+    await recorder.stop(userId)
     const win = BrowserWindow.getAllWindows()[0]
     win?.webContents.send(EV.anchors, store.listAnchors())
     return true
