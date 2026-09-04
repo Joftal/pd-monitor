@@ -10,8 +10,8 @@ import type { RecHistoryItem } from '@shared/types'
 
 // ============ 影院浮层(视频库点播) ============
 // 全屏磨砂玻璃覆盖层: 重模糊背景 + 玻璃面板
-//   顶栏: 返回 / 标题 / 状态 / 文件数 / 关闭
-//   主体: 左侧播放器(舞台位) | 右侧信息 k-v + 分段列表 + 操作行
+//   顶栏: 返回 / 标题 / 文件数 / 关闭(点播面不展示任何状态加工徽标)
+//   主体: 左侧播放器(舞台与右栏等高, 画面 object-contain) | 右侧信息 k-v + 分段列表 + 操作行
 // 仅播放 MP4(plocal 协议); 合并按钮仅在可合并时出现
 // ==========================================
 
@@ -113,19 +113,8 @@ function onVideoError(): void {
   }
   playError.value = t('playback.err')
 }
-// 状态标签: 静态映射表(不再动态拼 key, 与 LibraryView 同一机制)
-const STATUS_KEYS: Record<string, string> = {
-  recording: 'rec.stRecording',
-  remuxing: 'rec.stRemuxing',
-  done: 'rec.stDone',
-  stopped: 'rec.stStopped',
-  error: 'rec.stError'
-}
-const statusLabel = computed(() => (props.task ? t(STATUS_KEYS[props.task.status] || 'rec.stStopped') : ''))
-const statusCls = computed(() => {
-  const s = props.task?.status
-  return s === 'done' ? 'text-emerald-400' : s === 'error' ? 'text-red-400' : 'text-white/60'
-})
+// 状态徽标: 播放界面(点播浮层)不展示任何收尾状态加工状态——对"已入库条目"全是噪音
+// (库列表卡片上的角标不受影响, 属另一显示面)
 const avgMbps = computed(() => {
   const h = props.task
   if (!h || !h.endedAt) return ''
@@ -143,8 +132,7 @@ const infoRows = computed(() => {
     { label: t('rec.durLabel'), value: fmtDur(h.startedAt, h.endedAt) },
     { label: t('rec.sizeLabel'), value: fmtBytes(h.bytes) },
     { label: 'Mbps', value: avgMbps.value },
-    { label: t('playback.segsLabel'), value: t('playback.nMp4', { n: files.value.length }) },
-    { label: '', value: statusLabel.value, cls: statusCls.value }
+    { label: t('playback.segsLabel'), value: t('playback.nMp4', { n: files.value.length }) }
   ]
   return rows
 })
@@ -176,7 +164,6 @@ function openDir(): void {
             <div class="text-[15px] font-bold text-white truncate" :title="task?.title">{{ task?.title || '—' }}</div>
             <span class="shrink-0 h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-white/10 border border-white/10 text-white/85">{{ task?.nick }}</span>
           </div>
-          <span class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-white/10 border border-white/10" :class="statusCls">{{ statusLabel }}</span>
           <span class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-medium bg-white/5 border border-white/10 text-white/60 tabular-nums">{{ t('playback.nMp4', { n: files.length }) }}</span>
           <button
             class="w-8 h-8 rounded-lg grid place-items-center bg-white/10 hover:bg-white/20 border border-white/10 text-white/80 transition-colors"
@@ -188,9 +175,9 @@ function openDir(): void {
 
         <!-- 主体: 居中大容器, 左舞台右栏 -->
         <div class="flex-1 min-h-0 w-full max-w-[1500px] mx-auto flex gap-5 px-6 py-5">
-          <!-- 视频舞台 -->
-          <div class="flex-1 min-w-0 self-center rounded-2xl overflow-hidden bg-black/80 border border-white/10 shadow-2xl aspect-video max-h-full relative">
-            <video v-if="src && !playError" :key="src" :src="src" controls autoplay class="w-full h-full" @error="onVideoError"></video>
+          <!-- 视频舞台: 容器与右侧信息栏等高(stretch), 画面 object-contain 黑底留边居中 -->
+          <div class="flex-1 min-w-0 rounded-2xl overflow-hidden bg-black/80 border border-white/10 shadow-2xl relative">
+            <video v-if="src && !playError" :key="src" :src="src" controls autoplay class="w-full h-full object-contain" @error="onVideoError"></video>
             <div v-else class="w-full h-full grid place-items-center text-[12.5px] text-white/50">
               {{ playError || t('playback.noMp4') }}
             </div>
