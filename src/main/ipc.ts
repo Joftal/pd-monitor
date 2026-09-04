@@ -148,6 +148,13 @@ export function registerIpc(): void {
       lastSeenAt: disc ? Date.now() : 0
     }
     store.addAnchor(anchor)
+    // 关注"已在播"主播: 后台预取一次直播源(进房零等待)。列表模式下 onLiveStart 只认
+    // 离线→在线翻转, 对关注时已在播的主播永不再触发 —— 这里补洞, 与逐个模式语义对齐。
+    // 不作废旧缓存: 先进房再关注 = 命中刚拉取的新鲜源, 预取泵自然 no-op, 不重发请求;
+    // 密码房已验证源得以保留(playCache 免密复用契约), 不会二次进房重问密码。
+    if (anchor.isLive && cfg.prefetchStream) {
+      watcher.prewarmNow(anchor.userId)
+    }
     // 不再触发 tick: 大厅数据已即时点亮; 列表不可见的由轮询规范的轮换兜底在后续轮次发现
     const win = BrowserWindow.getAllWindows()[0]
     win?.webContents.send(EV.anchors, store.listAnchors())
@@ -190,6 +197,7 @@ export function registerIpc(): void {
       m3u8: r.m3u8,
       variants: r.variants,
       hlsBackups: r.hlsBackups,
+      fetchedAt: r.fetchedAt,
       title: r.title || '',
       nick: r.nick || '',
       thumbUrl: r.thumbUrl || '',

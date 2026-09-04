@@ -124,6 +124,7 @@ export default {
     copyEmpty: 'No source URL to copy',
     noSource: 'Not available (source dead or offline)',
     lastFailed: 'Last failed:',
+    fetchedAt: 'Fetched at',
     line: 'Line',
     lineMain: 'Main',
     lineBak: 'Backup {n}',

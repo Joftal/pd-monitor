@@ -280,6 +280,11 @@ class Watcher {
     void this.pumpPrewarm()
   }
 
+  /** 对外入口: 关注"已在播"主播时补一发预取(列表模式下该类主播永不再触发 onLiveStart, 预取泵对其缺席) */
+  prewarmNow(userId: string): void {
+    this.enqueuePrewarm(userId)
+  }
+
   private async pumpPrewarm(): Promise<void> {
     if (this.prewarmPumping) return
     this.prewarmPumping = true

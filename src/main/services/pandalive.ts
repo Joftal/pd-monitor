@@ -63,6 +63,8 @@ export interface PlayResult {
   thumbUrl?: string
   userImg?: string
   media?: Record<string, unknown>
+  /** 本源包的生成时刻(缓存写入时打戳; 缓存命中/在途复用返回同一对象, 时戳天然一致) */
+  fetchedAt?: number
 }
 
 export interface VariantInfo {
@@ -545,7 +547,11 @@ class PandaApi {
     const p = (async () => {
       try {
         const r = await this.fetchPlay(userId, password)
-        if (r.ok) this.playCache.set(userId, r)
+        // 打戳写法: 随缓存对象共存亡 —— invalidate/clear 时戳自动作废, 与不设 TTL 的契约一致
+        if (r.ok) {
+          r.fetchedAt = Date.now()
+          this.playCache.set(userId, r)
+        }
         return r
       } finally {
         this.playInflight.delete(key)

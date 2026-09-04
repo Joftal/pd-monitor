@@ -35,6 +35,7 @@ const variants = ref<{ url: string; bandwidth: number; resolution: string }[]>([
 const lastFailedUrl = ref('') // 上一次失效的源(仅展示)
 const backups = ref<string[]>([]) // 备用线路(hls2/hls3 master, hls.js 自动选档)
 const activeLine = ref(0) // 0=主线, 1..N=备用线路
+const fetchedAt = ref(0) // 当前源包(主线分档+备用线路)在主进程缓存中的生成时刻
 
 const recording = computed(() => store.isRecording(userId))
 const discoveryItem = computed(() => store.discovery.find((d) => d.userId === userId))
@@ -92,9 +93,18 @@ async function loadPlay(password = '', forceFresh = false): Promise<boolean> {
   if (r.thumbUrl) thumb.value = r.thumbUrl
   if (r.userImg) userImg.value = r.userImg
   if (r.tags) tags.value = r.tags
+  if (r.fetchedAt) fetchedAt.value = r.fetchedAt
   loading.value = false
   return true
 }
+
+/** 源包获取时刻展示(HH:MM:SS, 本地时区; 绝对时间无歧义, 不需要 ticking) */
+const fetchedAtText = computed(() => {
+  if (!fetchedAt.value) return '—'
+  const d = new Date(fetchedAt.value)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+})
 
 async function submitPwd() {
   const ok = await loadPlay(pwdInput.value)
@@ -376,6 +386,10 @@ async function manualRefresh() {
             <div class="flex items-center justify-between text-[11.5px] py-1.5 border-t border-line/50">
               <span class="text-ink3">{{ t('player.quality') }}</span>
               <span class="text-ink1 font-medium tabular-nums">{{ activeLine === 0 ? (levelOptions[quality]?.label || '—') : t('player.lineAuto') }}</span>
+            </div>
+            <div v-if="fetchedAt" class="flex items-center justify-between text-[11.5px] py-1.5 border-t border-line/50">
+              <span class="text-ink3">{{ t('player.fetchedAt') }}</span>
+              <span class="text-ink1 font-medium tabular-nums">{{ fetchedAtText }}</span>
             </div>
             <div v-if="lastFailedUrl" class="flex items-center justify-between text-[11.5px] py-1.5 border-t border-line/50">
               <span class="text-ink3">{{ t('player.lastFailed') }}</span>
