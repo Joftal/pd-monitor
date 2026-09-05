@@ -56,7 +56,12 @@ const liveDuration = computed(() => fmtLiveDuration(anchor.value?.startTime || d
 
 const sinceText = computed(() => {
   const st = anchor.value?.startTime || discoveryItem.value?.startTime
-  return st ? t('player.liveSince', { t: st.slice(5, 16) }) : ''
+  if (!st) return ''
+  // startTime 为 KST(UTC+9)钟面: 转本地时间再显示, 裸切片会把韩国钟点当本地时刻(差 1 小时)
+  const d = new Date(st.replace(' ', 'T') + '+09:00')
+  if (isNaN(d.getTime())) return ''
+  const p = (n: number) => String(n).padStart(2, '0')
+  return t('player.liveSince', { t: `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}` })
 })
 
 async function loadPlay(password = '', forceFresh = false): Promise<boolean> {

@@ -38,10 +38,11 @@ export function fmtNum(n: number, isZh: boolean): string {
   return n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : String(n)
 }
 
-/** 开播时长: pandalive startTime("YYYY-MM-DD HH:mm:ss") → 时长文案(card.h/card.m) */
+/** 开播时长: pandalive startTime("YYYY-MM-DD HH:mm:ss", 韩国时间 KST=UTC+9) → 时长文案(card.h/card.m)
+ *  实勘: startTime 为 KST 钟面, 裸解析会按本地时区落点 —— 非 KST 地区时长错误(UTC+8 下前 1 小时恒显 0 分, 之后恒少 1h) */
 export function fmtLiveDuration(startTime: string | undefined, t: (key: string, p?: Record<string, unknown>) => string): string {
   if (!startTime) return ''
-  const ts = new Date(startTime.replace(' ', 'T')).getTime()
+  const ts = new Date(startTime.replace(' ', 'T') + '+09:00').getTime()
   const dsec = Math.max(0, Math.floor((Date.now() - ts) / 1000))
   if (!Number.isFinite(dsec)) return ''
   const h = Math.floor(dsec / 3600)
