@@ -54,7 +54,6 @@ body,
 /* naive-ui 供应商组件渲染真实 div, 必须占满高度否则整页链条被内容撑开导致无法滚动 */
 .n-config-provider,
 .n-message-provider,
-.n-notification-provider,
 .n-dialog-provider {
   height: 100%;
 }

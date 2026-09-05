@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { NConfigProvider, NMessageProvider, NNotificationProvider, NDialogProvider, darkTheme, zhCN, dateZhCN, enUS, dateEnUS } from 'naive-ui'
+import { NConfigProvider, NMessageProvider, NDialogProvider, darkTheme, zhCN, dateZhCN, enUS, dateEnUS } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
 import ToastBridge from '@/components/ToastBridge.vue'
 import TopNav from '@/components/TopNav.vue'
@@ -105,23 +105,21 @@ onMounted(async () => {
 <template>
   <n-config-provider :theme="isDark ? darkTheme : null" :theme-overrides="themeOverrides" :locale="naiveLocale" :date-locale="naiveDateLocale" class="h-full">
     <n-message-provider>
-      <n-notification-provider placement="bottom-right">
-        <n-dialog-provider>
-          <ToastBridge />
-          <div class="h-full flex flex-col bg-page text-ink1 select-none">
-            <TopNav />
-            <main class="flex-1 min-h-0 overflow-hidden relative">
-              <router-view v-if="ready" v-slot="{ Component, route }">
-                <transition name="fade" mode="out-in">
-                  <!-- key=fullPath: 同记录不同参数(如 player/A -> player/B)也强制重挂, 杜绝实例复用带来的跨房间状态残留 -->
-                  <component :is="Component" :key="route.fullPath" />
-                </transition>
-              </router-view>
-              <div v-else class="h-full flex items-center justify-center text-ink3 text-sm">{{ t('common.loading') }}</div>
-            </main>
-          </div>
-        </n-dialog-provider>
-      </n-notification-provider>
+      <n-dialog-provider>
+        <ToastBridge />
+        <div class="h-full flex flex-col bg-page text-ink1 select-none">
+          <TopNav />
+          <main class="flex-1 min-h-0 overflow-hidden relative">
+            <router-view v-if="ready" v-slot="{ Component, route }">
+              <transition name="fade" mode="out-in">
+                <!-- key=fullPath: 同记录不同参数(如 player/A -> player/B)也强制重挂, 杜绝实例复用带来的跨房间状态残留 -->
+                <component :is="Component" :key="route.fullPath" />
+              </transition>
+            </router-view>
+            <div v-else class="h-full flex items-center justify-center text-ink3 text-sm">{{ t('common.loading') }}</div>
+          </main>
+        </div>
+      </n-dialog-provider>
     </n-message-provider>
   </n-config-provider>
 </template>

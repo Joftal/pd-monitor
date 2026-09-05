@@ -504,7 +504,8 @@ class Recorder {
     const dir = path.join(root, `${strictName(opt.nick)}(${opt.userId})`)
     if (diskFreeGb(dir) < cfg.diskLimitGb) {
       const err = new Error(mt('rec.diskLow', { limit: cfg.diskLimitGb }))
-      sendToast({ type: 'error', title: mt('rec.failToast'), body: String(err.message) })
+      // 手动路径由 IPC 报错回传视图 message 反馈(单通道统一); 自动路径无人代答, 仍走事件气泡
+      if (opt.auto) sendToast({ type: 'error', title: mt('rec.failToast'), body: String(err.message) })
       throw err
     }
     const task = new Task(opt, dir)
@@ -521,10 +522,11 @@ class Recorder {
         err.message = mt('rec.needPw')
         throw err
       }
-      sendToast({ type: 'error', title: mt('rec.toastStartFail', { nick: opt.nick }), body: String((e as Error).message || e) })
+      if (opt.auto) sendToast({ type: 'error', title: mt('rec.toastStartFail', { nick: opt.nick }), body: String((e as Error).message || e) })
       throw e
     }
-    sendToast({ type: 'rec', title: mt('rec.toastStart', { nick: opt.nick }), body: opt.title || '' })
+    // 手动开始: 视图已弹"开始录制"message, 不重复; 自动开始(开播自录/续录): 事件气泡通知到位
+    if (opt.auto) sendToast({ type: 'rec', title: mt('rec.toastStart', { nick: opt.nick }), body: opt.title || '' })
     this.emitUpdate()
     return Recorder.publicTask(task)
   }
