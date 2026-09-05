@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { NButton, NInput, NSkeleton, useMessage } from 'naive-ui'
 import { api } from '@/api'
@@ -8,7 +8,7 @@ import HlsPlayer from '@/components/HlsPlayer.vue'
 import SpinIcon from '@/components/SpinIcon.vue'
 import { useI18n } from 'vue-i18n'
 import { fmtLiveDuration } from '@/utils/media'
-import type { AnchorTag } from '@shared/types'
+import type { AnchorTag, KeepaliveStatus } from '@shared/types'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -142,8 +142,49 @@ async function toggleRecord() {
   }
 }
 
+// ---- 源保活状态展示: 5s 轮询快照 + 相对时间跳动 ----
+const ka = ref<KeepaliveStatus | null>(null)
+const kaNow = ref(Date.now())
+let kaTimer: number | null = null
+
+async function refreshKa(): Promise<void> {
+  try {
+    ka.value = await api.keepaliveStatus(userId)
+  } catch {
+    /* ignore */
+  }
+}
+
+const kaText = computed(() => {
+  const k = ka.value
+  if (!k) return '—'
+  if (isVod.value) return t('player.kaVod')
+  if (!k.enabled) return t('player.kaOff')
+  if (!k.cached) return t('player.kaNone')
+  if (!k.lastOk) return t('player.kaBad')
+  if (!k.lastAt) return t('player.kaWait')
+  const s = Math.max(0, Math.round((kaNow.value - k.lastAt) / 1000))
+  return t('player.kaOn', { s, n: k.variants })
+})
+
+const kaClass = computed(() => {
+  const k = ka.value
+  if (!k || isVod.value || !k.enabled || !k.cached) return 'text-ink1'
+  if (!k.lastOk) return 'text-[#d98a08]'
+  return 'text-[#2fad5f]'
+})
+
 onMounted(async () => {
   await loadPlay()
+  void refreshKa()
+  kaTimer = window.setInterval(() => {
+    kaNow.value = Date.now()
+    void refreshKa()
+  }, 5000)
+})
+
+onUnmounted(() => {
+  if (kaTimer) clearInterval(kaTimer)
 })
 
 /** 切换清晰度 = 直接换用对应变体的长效地址(仅主线; 备用线路由 hls.js 自动选档) */
@@ -393,6 +434,11 @@ async function manualRefresh() {
             <div v-if="fetchedAt" class="flex items-center justify-between text-[11.5px] py-1.5 border-t border-line/50">
               <span class="text-ink3">{{ t('player.fetchedAt') }}</span>
               <span class="text-ink1 font-medium tabular-nums">{{ fetchedAtText }}</span>
+            </div>
+            <!-- 源保活运行状态: 心跳是否正常/几秒前 -->
+            <div v-if="ka" class="flex items-center justify-between text-[11.5px] py-1.5 border-t border-line/50">
+              <span class="text-ink3">{{ t('player.keepalive') }}</span>
+              <span class="font-medium" :class="kaClass">{{ kaText }}</span>
             </div>
             <div v-if="lastFailedUrl" class="flex items-center justify-between text-[11.5px] py-1.5 border-t border-line/50">
               <span class="text-ink3">{{ t('player.lastFailed') }}</span>

@@ -4,8 +4,10 @@ import * as https from 'https'
 import * as tls from 'tls'
 import * as net2 from 'net'
 import { EV } from '../../shared/types'
+import type { Anchor } from '../../shared/types'
 import { UA, sleep } from '../util'
 import { vault, CookieJar } from './vault'
+import { store } from './store'
 import { logger } from './logger'
 import { mt } from '../i18n'
 
@@ -225,7 +227,12 @@ class PandaApi {
     } catch (e) {
       if ((e as { httpStatus?: number }).httpStatus) throw e // 原则同上: 只兜网络层异常
       const res = await nodeHttpRequest('GET', url, headers, undefined, nodeProxyUrl)
-      if (res.status !== 200) throw new Error(`HTTP ${res.status}`)
+      if (res.status !== 200) {
+        // 与主路径同构打标: 保活泵等消费方凭 httpStatus 区分"真死(403/404)"与"网络层未知"
+        const err = new Error(`HTTP ${res.status}`) as Error & { httpStatus?: number }
+        err.httpStatus = res.status
+        throw err
+      }
       return res.text
     }
   }
@@ -530,6 +537,111 @@ class PandaApi {
     return [...this.playCache.entries()].filter(([, v]) => v.ok).map(([k]) => k)
   }
 
+  // ---- 源保活泵: 轻量心跳维持 IVS 会话活性 ----
+  // 场景: 前期取了源退出观看, 后期房间满员无法再调 /v1/live/play —— 满员拦截的是拉源 API,
+  // 不是流本身; 只要会话被持续请求养着, 旧源就能一直看。
+  // 心跳 = 每源每档只拉清单(数 KB), 不拉分片; 直达 CDN, 不占用 pandalive API 限速队列。
+  // 判死纪律: 只有主档 403/404(会话真死)计 strike; 网络层错误(断网/休眠/超时)不计 ——
+  // 否则断网恢复瞬间全量误杀+对瘫痪 API 群重铸。连续 2 次真死才收尸; 收尸后若在播+开预取立即重铸。
+  private static KEEPALIVE_MS = 15_000
+  /** 泳道并发数: 串行泵在大关注量下有效心跳会被拉长(实测 100 源×5 档 ≈ 148s/源);
+   *  4 泳道 + 50ms 间隙把 100 源心跳压回 ~16s, 对 CDN/本地均为平缓节奏 */
+  private static KEEPALIVE_LANES = 4
+  private keepaliveTimer: NodeJS.Timeout | null = null
+  private keepaliveBusy = false
+  private deadStreak = new Map<string, number>()
+  /** 重铸串行链: 泳道并发的群体性收尸合并为链式排队, 与主请求队列同节奏(1.2s+抖动),
+   *  防 API 突发触发风控(机器驱动的后台修复, 不配用 jsonPriority 的用户级特权) */
+  private remintTail: Promise<void> = Promise.resolve()
+
+  private enqueueRemint(userId: string): void {
+    this.remintTail = this.remintTail.then(async () => {
+      await this.getPlayCached(userId).catch(() => undefined)
+      const jitter = 1200 * (0.7 + Math.random() * 0.6)
+      await sleep(jitter)
+    })
+  }
+
+  startKeepalive(): void {
+    if (this.keepaliveTimer) return
+    logger.info('api', `源保活泵已启动(基准 ${PandaApi.KEEPALIVE_MS / 1000}s, 随缓存规模 0.4s/源 自适应放宽, 封顶 120s)`)
+    const loop = async (): Promise<void> => {
+      try {
+        await this.keepaliveTick()
+      } finally {
+        if (this.keepaliveTimer) {
+          // 自适应间隔: 15s 基准; 每多一缓存源放宽 400ms(上限 120s) —— 大规模关注下日流量封顶 ~2.7GB,
+          // 单源心跳 40s~120s 对 IVS 会话闲置容忍仍属健康量级
+          const wait = Math.min(120_000, Math.max(PandaApi.KEEPALIVE_MS, this.playCache.size * 400))
+          this.keepaliveTimer = setTimeout(() => void loop(), wait)
+        }
+      }
+    }
+    this.keepaliveTimer = setTimeout(() => void loop(), PandaApi.KEEPALIVE_MS)
+  }
+
+  private async keepaliveTick(): Promise<void> {
+    if (this.keepaliveBusy) return
+    if (!store.getSettings().keepaliveStream) return
+    this.keepaliveBusy = true
+    try {
+      const anchors = new Map(store.listAnchors().map((a) => [a.userId, a]))
+      // 快照防漂移: tick 期间缓存可能增删
+      const queue = [...this.playCache.entries()].filter(([userId, pack]) => {
+        if (!pack.ok || pack.vod) return false // 回放是静态分片, 无会话活性概念
+        const a = anchors.get(userId)
+        return !a || a.isLive // 已知下播: 会话死亡属预期, 不耗心跳; 未关注源(回访场景)照常养
+      })
+      const lanes = Array.from({ length: PandaApi.KEEPALIVE_LANES }, async () => {
+        for (let next = queue.shift(); next; next = queue.shift()) {
+          await this.keepaliveSource(next[0], next[1], anchors.get(next[0]))
+          await sleep(50)
+        }
+      })
+      await Promise.all(lanes)
+    } finally {
+      this.keepaliveBusy = false
+    }
+  }
+
+  /** 单源心跳: 全档齐养(只看最高档会让其它档会话饿死, 切清晰度时暴毙); 主档 403/404 才计真死 */
+  private async keepaliveSource(userId: string, pack: PlayResult, a: Anchor | undefined): Promise<void> {
+    const urls = [
+      ...new Set((pack.variants?.length ? pack.variants.map((v) => v.url) : [pack.m3u8 || '']).filter((u): u is string => Boolean(u)))
+    ]
+    if (!urls.length) return
+    let primaryDead = false
+    for (const url of urls) {
+      const isPrimary = url === urls[0]
+      try {
+        await Promise.race([
+          this.fetchText(url),
+          new Promise<never>((_, rej) => setTimeout(() => rej(new Error('keepalive timeout')), 12_000))
+        ])
+      } catch (e) {
+        const st = (e as { httpStatus?: number }).httpStatus
+        if (isPrimary && (st === 403 || st === 404)) primaryDead = true
+        // 网络层错误: 不计死(断网即整批阵亡的语义错误); 非主档失败: 仅观测
+      }
+      await sleep(50)
+    }
+    this.keepaliveInfo.set(userId, { at: Date.now(), ok: !primaryDead, variants: urls.length })
+    if (!primaryDead) {
+      this.deadStreak.delete(userId)
+      return
+    }
+    const n = (this.deadStreak.get(userId) || 0) + 1
+    this.deadStreak.set(userId, n)
+    if (n < 2) return
+    this.deadStreak.delete(userId)
+    logger.warn('api', `保活连续真死(403/404), 源收尸: @${userId}`)
+    this.invalidatePlay(userId)
+    // 立即重铸(串行链, 与主请求队列同节奏): 房间未满即秒回有效态; 满员/风控高压则静默失败, 徽标保持熄灭(诚实态)
+    if (a?.isLive && store.getSettings().prefetchStream) {
+      this.enqueueRemint(userId)
+    }
+  }
+
   /** 源缓存变动统一广播: 渲染层据此点亮/熄灭卡片「秒开」徽标 */
   private pushSrcCache(): void {
     const win = BrowserWindow.getAllWindows()[0]
@@ -538,12 +650,34 @@ class PandaApi {
 
   invalidatePlay(userId: string): void {
     this.playCache.delete(userId)
+    this.keepaliveInfo.delete(userId)
     this.pushSrcCache()
   }
 
   clearPlayCache(): void {
     this.playCache.clear()
+    this.keepaliveInfo.clear()
     this.pushSrcCache()
+  }
+
+  // ---- 保活运行状态(供播放页"播放源卡"展示) ----
+  private keepaliveInfo = new Map<string, { at: number; ok: boolean; variants: number }>()
+
+  keepaliveStatus(userId: string): {
+    enabled: boolean
+    cached: boolean
+    lastAt: number
+    lastOk: boolean
+    variants: number
+  } {
+    const info = this.keepaliveInfo.get(userId)
+    return {
+      enabled: store.getSettings().keepaliveStream,
+      cached: this.playCache.get(userId)?.ok === true,
+      lastAt: info?.at || 0,
+      lastOk: info?.ok ?? true,
+      variants: info?.variants || 0
+    }
   }
 
   private playInflight = new Map<string, Promise<PlayResult>>()

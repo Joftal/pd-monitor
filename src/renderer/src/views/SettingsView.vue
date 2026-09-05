@@ -366,6 +366,13 @@ const tileCls =
               </div>
               <div :class="tileCls">
                 <div class="min-w-0 flex-1">
+                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.keepalive') }}</div>
+                  <div class="text-[10.5px] text-ink3">{{ t('settings.keepaliveD') }}</div>
+                </div>
+                <n-switch size="small" v-model:value="form.keepaliveStream" />
+              </div>
+              <div :class="tileCls">
+                <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.autoRec') }}</div>
                   <div class="text-[10.5px] text-ink3">{{ t('settings.autoRecD') }}</div>
                 </div>

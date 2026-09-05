@@ -75,6 +75,8 @@ export interface Settings {
   diskLimitGb: number
   /** 开播即预取直播源(后台节流泵), 点进房间零等待 */
   prefetchStream: boolean
+  /** 源保活: 对已缓存源做轻量心跳维持 IVS 会话活性(退出观看后满员房间仍能凭旧源继续看), 死源及时作废重铸 */
+  keepaliveStream: boolean
   /** 录制收尾时自动把分段 MP4 合并为单个文件 */
   mergeMp4: boolean
   /** 合并成功后删除原分段 MP4(仅 mergeMp4 开时生效; 合并失败永远保留原分段) */
@@ -102,6 +104,7 @@ export const DEFAULT_SETTINGS: Settings = {
   closeToTray: true,
   diskLimitGb: 1,
   prefetchStream: true,
+  keepaliveStream: true,
   mergeMp4: false,
   mergeDeleteSegments: true,
   autoRetryRecord: false,
@@ -151,6 +154,20 @@ export interface PlayInfo {
   hlsBackups?: string[]
   /** 本源包在主进程缓存中的生成时刻(ms 时间戳; 切换清晰度/线路不刷新, 手动刷新/重拉才更新) */
   fetchedAt?: number
+}
+
+/** 源保活单源运行状态(播放页"播放源卡"展示) */
+export interface KeepaliveStatus {
+  /** 设置开关是否启用 */
+  enabled: boolean
+  /** 该房间当前是否持有有效源(缓存命中) */
+  cached: boolean
+  /** 最近一次心跳时刻(ms; 0=从未心跳) */
+  lastAt: number
+  /** 最近一次心跳是否正常(主档可用) */
+  lastOk: boolean
+  /** 该源包养着的分档数 */
+  variants: number
 }
 
 /** 大厅: 全平台在播直播间条目 */
@@ -235,6 +252,7 @@ export interface ApiBridge {
   anchorsRefresh(): Promise<boolean>
   livePlay(userId: string, password?: string, fresh?: boolean): Promise<PlayInfo>
   liveSrcCache(): Promise<string[]>
+  keepaliveStatus(userId: string): Promise<KeepaliveStatus>
   discoveryList(): Promise<DiscoveryItem[]>
   recList(): Promise<RecTask[]>
   recHistory(): Promise<RecHistoryItem[]>
@@ -282,6 +300,7 @@ export const CH = {
   anchorsRefresh: 'anchors:refresh',
   livePlay: 'live:play',
   liveSrcCache: 'live:src-cache',
+  liveKeepaliveStatus: 'live:keepalive-status',
   discoveryList: 'discovery:list',
   recList: 'rec:list',
   recHistory: 'rec:history',

@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron'
 import { CH, EV } from '../shared/types'
 import type { ApiBridge } from '../shared/types'
 import type {
-  AccountState, Anchor, AppInfo, DiscoveryItem, PlayInfo, RecDeleteFileResult, RecDeleteResult, RecHistoryItem, RecTask, RecThumbReady, Settings, Toast, UpdateCheckResult, WatcherStatus
+  AccountState, Anchor, AppInfo, DiscoveryItem, KeepaliveStatus, PlayInfo, RecDeleteFileResult, RecDeleteResult, RecHistoryItem, RecTask, RecThumbReady, Settings, Toast, UpdateCheckResult, WatcherStatus
 } from '../shared/types'
 
 function on<T>(channel: string, cb: (payload: T) => void): () => void {
@@ -34,6 +34,7 @@ const apiBridge: ApiBridge = {
   livePlay: (userId: string, password?: string, fresh?: boolean): Promise<PlayInfo> =>
     ipcRenderer.invoke(CH.livePlay, userId, password, fresh),
   liveSrcCache: (): Promise<string[]> => ipcRenderer.invoke(CH.liveSrcCache),
+  keepaliveStatus: (userId: string): Promise<KeepaliveStatus> => ipcRenderer.invoke(CH.liveKeepaliveStatus, userId),
 
   // 大厅
   discoveryList: (): Promise<DiscoveryItem[]> => ipcRenderer.invoke(CH.discoveryList),

@@ -216,6 +216,7 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle(CH.liveSrcCache, () => api.cachedSourceIds())
+  ipcMain.handle(CH.liveKeepaliveStatus, (_e, userId: string) => api.keepaliveStatus(String(userId)))
 
   // ---------- 大厅 ----------
   ipcMain.handle(CH.discoveryList, () => watcher.getDiscovery())
