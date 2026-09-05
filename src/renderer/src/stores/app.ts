@@ -32,7 +32,17 @@ interface State {
   watcher: WatcherStatus | null
   account: AccountState | null
   searchKeyword: string
-  /** 已获取有效直播源的主播 userId 集(主进程播放源缓存的快照推送; 卡片绿框依据) */
+  /** 大厅筛选/排序/分页/滚动状态(视图切换不重置; 生命周期内存态, 重启回默认) */
+  exploreFilter: {
+    sortBy: 'viewers' | 'likes' | 'fans' | 'recent'
+    onlyFollowed: boolean
+    onlyAdult: boolean
+    onlyFan: boolean
+    page: number
+    /** 列表滚动位置(px) */
+    scrollTop: number
+  }
+  /** 已获取有效直播源的主播 userId 集(主进程播放源缓存的快照推送; 卡片「秒开」徽标依据) */
   srcCache: string[]
 }
 
@@ -46,6 +56,7 @@ export const useAppStore = defineStore('app', {
     watcher: null,
     account: null,
     searchKeyword: '',
+    exploreFilter: { sortBy: 'viewers', onlyFollowed: false, onlyAdult: false, onlyFan: false, page: 1, scrollTop: 0 },
     srcCache: []
   }),
   getters: {

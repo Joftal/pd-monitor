@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api'
 import ExploreCard from '@/components/ExploreCard.vue'
@@ -10,14 +10,12 @@ import { NButton, NEmpty, NPagination, useMessage } from 'naive-ui'
 
 const store = useAppStore()
 const message = useMessage()
-const sortBy = ref<'viewers' | 'likes' | 'fans' | 'recent'>('viewers')
-const onlyFollowed = ref(false)
-const onlyAdult = ref(false)
-const onlyFan = ref(false)
 const refreshing = ref(false)
 
+// 排序/筛选/分页态托管在 store(exploreFilter): 视图切换/进出房间返回后保持
+const filter = store.exploreFilter
+
 const PAGE_SIZE = 20
-const page = ref(1)
 const scrollRef = ref<HTMLElement | null>(null)
 
 const sortChips = computed(() => [
@@ -34,12 +32,12 @@ const sortVal = (x: { viewers: number; likes: number; fans: number; startTime: s
 
 const list = computed(() => {
   let items = [...store.discovery]
-  if (onlyFollowed.value) items = items.filter((x) => store.isFollowing(x.userId))
-  if (onlyAdult.value) items = items.filter((x) => x.isAdult)
-  if (onlyFan.value) items = items.filter((x) => x.type === 'fan')
+  if (filter.onlyFollowed) items = items.filter((x) => store.isFollowing(x.userId))
+  if (filter.onlyAdult) items = items.filter((x) => x.isAdult)
+  if (filter.onlyFan) items = items.filter((x) => x.type === 'fan')
   items.sort((a, b) => {
-    const av = sortVal(a, sortBy.value)
-    const bv = sortVal(b, sortBy.value)
+    const av = sortVal(a, filter.sortBy)
+    const bv = sortVal(b, filter.sortBy)
     return typeof av === 'string' ? String(bv).localeCompare(String(av)) : Number(bv) - Number(av)
   })
   if (keyword.value.trim()) {
@@ -52,25 +50,38 @@ const list = computed(() => {
 })
 
 const pageCount = computed(() => Math.max(1, Math.ceil(list.value.length / PAGE_SIZE)))
-const paged = computed(() => list.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
+const paged = computed(() => list.value.slice((filter.page - 1) * PAGE_SIZE, filter.page * PAGE_SIZE))
 
-watch([keyword, sortBy, onlyFollowed, onlyAdult, onlyFan], () => {
-  page.value = 1
+watch([keyword, () => filter.sortBy, () => filter.onlyFollowed, () => filter.onlyAdult, () => filter.onlyFan], () => {
+  filter.page = 1
 })
-watch(pageCount, (n) => {
-  if (page.value > n) page.value = n
-})
+watch(
+  pageCount,
+  (n) => {
+    if (filter.page > n) filter.page = n
+  },
+  // 持久化页码挂载即夹紧: 页码存活在 store, 离开期间列表可能收缩(下播/取关致 pageCount 缩水) ——
+  // 页数不变时原 watch 不触发, 会卡在"空墙 + 页码 3/2"的死态
+  { immediate: true }
+)
 
 function toPage(p: number) {
-  page.value = p
+  filter.page = p
   scrollRef.value?.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+// ---- 滚动位置保持(与筛选/页码同生命周期; 卡片高由 aspect-video 占位, nextTick 恢复即可) ----
+function onListScroll(e: Event): void {
+  filter.scrollTop = (e.target as HTMLElement).scrollTop
 }
 
 // ---- 刷新信息展示: 上次/预计下次更新时间 ----
 const nowTick = ref(Date.now())
 let nowTimer: number | null = null
-onMounted(() => {
+onMounted(async () => {
   nowTimer = window.setInterval(() => (nowTick.value = Date.now()), 1000)
+  await nextTick()
+  if (scrollRef.value && filter.scrollTop > 0) scrollRef.value.scrollTop = filter.scrollTop
 })
 onUnmounted(() => {
   if (nowTimer) clearInterval(nowTimer)
@@ -128,31 +139,31 @@ async function refresh() {
           v-for="c in sortChips"
           :key="c.key"
           class="text-[13px] pb-0.5 border-b-2 transition-all shrink-0"
-          :class="sortBy === c.key
+          :class="filter.sortBy === c.key
             ? 'text-live font-semibold border-live'
             : 'text-ink2 border-transparent hover:text-ink1'"
-          @click="sortBy = c.key"
+          @click="filter.sortBy = c.key"
         >
           {{ c.label }}
         </button>
         <button
           class="text-[13px] pb-0.5 border-b-2 transition-all shrink-0"
-          :class="onlyFollowed ? 'text-live font-semibold border-live' : 'text-ink2 border-transparent hover:text-ink1'"
-          @click="onlyFollowed = !onlyFollowed"
+          :class="filter.onlyFollowed ? 'text-live font-semibold border-live' : 'text-ink2 border-transparent hover:text-ink1'"
+          @click="filter.onlyFollowed = !filter.onlyFollowed"
         >
           {{ t('explore.onlyFollowed') }}
         </button>
         <button
           class="text-[13px] pb-0.5 border-b-2 transition-all shrink-0"
-          :class="onlyAdult ? 'text-live font-semibold border-live' : 'text-ink2 border-transparent hover:text-ink1'"
-          @click="onlyAdult = !onlyAdult"
+          :class="filter.onlyAdult ? 'text-live font-semibold border-live' : 'text-ink2 border-transparent hover:text-ink1'"
+          @click="filter.onlyAdult = !filter.onlyAdult"
         >
           {{ t('explore.onlyAdult') }}
         </button>
         <button
           class="text-[13px] pb-0.5 border-b-2 transition-all shrink-0"
-          :class="onlyFan ? 'text-live font-semibold border-live' : 'text-ink2 border-transparent hover:text-ink1'"
-          @click="onlyFan = !onlyFan"
+          :class="filter.onlyFan ? 'text-live font-semibold border-live' : 'text-ink2 border-transparent hover:text-ink1'"
+          @click="filter.onlyFan = !filter.onlyFan"
         >
           {{ t('explore.onlyFan') }}
         </button>
@@ -162,7 +173,7 @@ async function refresh() {
     </div>
 
     <!-- 卡片墙 + 分页 -->
-    <div ref="scrollRef" class="flex-1 min-h-0 overflow-y-auto px-7">
+    <div ref="scrollRef" class="flex-1 min-h-0 overflow-y-auto px-7" @scroll.passive="onListScroll">
       <div v-if="paged.length" class="grid gap-x-5 gap-y-6 pb-3 pt-1" style="grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); grid-auto-rows: min-content">
         <ExploreCard v-for="x in paged" :key="x.userId" :item="x" />
       </div>
@@ -184,7 +195,7 @@ async function refresh() {
     <div v-if="list.length" class="shrink-0 px-7 py-3 flex items-center gap-3 bg-card border-t border-line">
       <span class="text-[12px] text-ink3">{{ t('explore.pageInfo', { n: list.length, size: PAGE_SIZE }) }}</span>
       <div class="flex-1"></div>
-      <n-pagination :page="page" :page-count="pageCount" size="small" @update:page="toPage" />
+      <n-pagination :page="filter.page" :page-count="pageCount" size="small" @update:page="toPage" />
     </div>
   </div>
 </template>
