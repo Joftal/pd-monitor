@@ -1,8 +1,9 @@
-import { net, session } from 'electron'
+import { BrowserWindow, net, session } from 'electron'
 import * as http from 'http'
 import * as https from 'https'
 import * as tls from 'tls'
 import * as net2 from 'net'
+import { EV } from '../../shared/types'
 import { UA, sleep } from '../util'
 import { vault, CookieJar } from './vault'
 import { logger } from './logger'
@@ -524,12 +525,25 @@ class PandaApi {
   // ---- 拉源缓存: 不设时限, 源能用就一直用; 仅显式事件作废(重开播/录制出错/换号/手动强刷) ----
   private playCache = new Map<string, PlayResult>()
 
+  /** "已获取有效直播源"的主播 userId 集(缓存即事实源; 卡片绿框/秒开语义的用户可见投影) */
+  cachedSourceIds(): string[] {
+    return [...this.playCache.entries()].filter(([, v]) => v.ok).map(([k]) => k)
+  }
+
+  /** 源缓存变动统一广播: 渲染层据此点亮/熄灭卡片绿框 */
+  private pushSrcCache(): void {
+    const win = BrowserWindow.getAllWindows()[0]
+    win?.webContents.send(EV.srcCache, this.cachedSourceIds())
+  }
+
   invalidatePlay(userId: string): void {
     this.playCache.delete(userId)
+    this.pushSrcCache()
   }
 
   clearPlayCache(): void {
     this.playCache.clear()
+    this.pushSrcCache()
   }
 
   private playInflight = new Map<string, Promise<PlayResult>>()
@@ -551,6 +565,7 @@ class PandaApi {
         if (r.ok) {
           r.fetchedAt = Date.now()
           this.playCache.set(userId, r)
+          this.pushSrcCache()
         }
         return r
       } finally {

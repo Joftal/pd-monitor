@@ -33,6 +33,7 @@ const apiBridge: ApiBridge = {
   // 播放
   livePlay: (userId: string, password?: string, fresh?: boolean): Promise<PlayInfo> =>
     ipcRenderer.invoke(CH.livePlay, userId, password, fresh),
+  liveSrcCache: (): Promise<string[]> => ipcRenderer.invoke(CH.liveSrcCache),
 
   // 大厅
   discoveryList: (): Promise<DiscoveryItem[]> => ipcRenderer.invoke(CH.discoveryList),
@@ -86,7 +87,8 @@ const apiBridge: ApiBridge = {
   onAccount: (cb: (s: AccountState) => void) => on<AccountState>(EV.account, cb),
   onToast: (cb: (t: Toast) => void) => on<Toast>(EV.toast, cb),
   onDiscovery: (cb: (list: DiscoveryItem[]) => void) => on<DiscoveryItem[]>(EV.discovery, cb),
-  onRecThumb: (cb: (p: RecThumbReady) => void) => on<RecThumbReady>(EV.recThumb, cb)
+  onRecThumb: (cb: (p: RecThumbReady) => void) => on<RecThumbReady>(EV.recThumb, cb),
+  onSrcCache: (cb: (ids: string[]) => void) => on<string[]>(EV.srcCache, cb)
 }
 
 contextBridge.exposeInMainWorld('api', apiBridge)

@@ -23,6 +23,7 @@ const model = computed<LiveCardModel>(() => {
     userImg: a.userImg || '',
     isLive: !!a.isLive,
     recording: store.isRecording(a.userId),
+    srcReady: store.isSrcReady(a.userId),
     isAdult: a.tags?.isAdult,
     isPw: a.tags?.isPw,
     isRec: a.tags?.liveType === 'rec',

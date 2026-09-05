@@ -25,6 +25,7 @@ const model = computed<LiveCardModel>(() => {
     userImg: x.userImg || '',
     isLive: true, // 大厅条目恒在播
     recording: store.isRecording(x.userId),
+    srcReady: store.isSrcReady(x.userId),
     following: following.value,
     isAdult: x.isAdult,
     isPw: x.isPw,

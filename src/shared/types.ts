@@ -234,6 +234,7 @@ export interface ApiBridge {
   anchorsSetAuto(userId: string, auto: boolean): Promise<boolean>
   anchorsRefresh(): Promise<boolean>
   livePlay(userId: string, password?: string, fresh?: boolean): Promise<PlayInfo>
+  liveSrcCache(): Promise<string[]>
   discoveryList(): Promise<DiscoveryItem[]>
   recList(): Promise<RecTask[]>
   recHistory(): Promise<RecHistoryItem[]>
@@ -263,6 +264,8 @@ export interface ApiBridge {
   onToast(cb: (t: Toast) => void): () => void
   onDiscovery(cb: (list: DiscoveryItem[]) => void): () => void
   onRecThumb(cb: (p: RecThumbReady) => void): () => void
+  /** 有效直播源缓存快照(已获取源的主播 userId 集; 卡片绿框依据) */
+  onSrcCache(cb: (ids: string[]) => void): () => void
 }
 
 // ---------- IPC invoke 通道 ----------
@@ -278,6 +281,7 @@ export const CH = {
   anchorsSetAuto: 'anchors:set-auto',
   anchorsRefresh: 'anchors:refresh',
   livePlay: 'live:play',
+  liveSrcCache: 'live:src-cache',
   discoveryList: 'discovery:list',
   recList: 'rec:list',
   recHistory: 'rec:history',
@@ -309,5 +313,6 @@ export const EV = {
   watcher: 'ev:watcher',
   account: 'ev:account',
   toast: 'ev:toast',
-  discovery: 'ev:discovery'
+  discovery: 'ev:discovery',
+  srcCache: 'ev:src-cache'
 } as const

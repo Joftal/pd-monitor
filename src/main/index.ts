@@ -149,6 +149,13 @@ app.whenReady().then(() => {
 
   // 启动轮询
   watcher.start()
+  // 重启后源缓存(内存态)为空: 对库态"已关注且在播"的主播补一轮预取 ——
+  // 与 anchorsAdd 关注已在播补洞同构; db 陈旧态(实际已下播)拉源失败不落缓存, 仅白耗一发节流请求
+  if (cfg.prefetchStream) {
+    for (const a of store.listAnchors()) {
+      if (a.isLive) watcher.prewarmNow(a.userId)
+    }
+  }
 
   app.on('second-instance', () => {
     if (mainWin) {

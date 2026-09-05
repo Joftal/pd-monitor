@@ -21,6 +21,8 @@ export interface LiveCardModel {
   userImg: string
   isLive: boolean
   recording: boolean
+  /** 已获取有效直播源(播放源缓存命中): 卡片绿色外边框 */
+  srcReady?: boolean
   following?: boolean
   isAdult?: boolean
   isPw?: boolean
@@ -69,7 +71,7 @@ async function toggleRecord(): Promise<void> {
 <template>
   <div
     class="group cursor-pointer bg-card rounded-xl overflow-hidden shadow-card hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-200 animate-pop border"
-    :class="[m.isLive ? 'border-live/30 shadow-glow-live' : 'border-line']"
+    :class="[m.isLive && m.srcReady ? 'border-[#2fad5f]/60 shadow-glow-ready' : m.isLive ? 'border-live/30 shadow-glow-live' : 'border-line']"
     @click="watchLive"
   >
     <!-- 缩略图: 左上状态 / 右上 19+ / 右下悬浮操作 -->
