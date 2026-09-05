@@ -23,6 +23,8 @@ const zh: Dict = {
   'watcher.circuit': '检测到风控/连续失败({msg}), 已熔断 {minutes} 分钟',
   'watcher.cooling': '风控冷却中, {remain}s 后恢复',
   'watcher.roundFail': '本轮失败: {msg}',
+  'watcher.bjGone': '关注的主播 @{id} 查无此人',
+  'watcher.bjGoneHint': '该账号可能已改名/注销(或 ID 填错), 后续不再为其发请求; 建议到已关注页核对移除',
   // recorder
   'rec.toastStart': '开始录制 {nick}',
   'rec.toastDone': '{nick} 录制完成',
@@ -103,6 +105,8 @@ const en: Dict = {
   'watcher.circuit': 'Risk control / consecutive failures ({msg}); paused for {minutes} min',
   'watcher.cooling': 'Cooling down, resume in {remain}s',
   'watcher.roundFail': 'Round failed: {msg}',
+  'watcher.bjGone': 'Watched streamer @{id} not found',
+  'watcher.bjGoneHint': 'The account may be renamed/deleted (or a wrong ID); no more requests for it — double-check in Followed',
   'rec.toastStart': 'Recording started: {nick}',
   'rec.toastDone': '{nick} recording finished',
   'rec.segs': '{n} segments',

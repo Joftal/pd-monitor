@@ -1,5 +1,5 @@
 import { BrowserWindow } from 'electron'
-import { api, RiskError, LiveItem } from './pandalive'
+import { api, RiskError, BjNotFoundError, LiveItem } from './pandalive'
 import { store } from './store'
 import { EV, WatcherStatus, Anchor, DiscoveryItem } from '../../shared/types'
 import { recorder } from './recorder'
@@ -123,6 +123,28 @@ class Watcher {
     }
   }
 
+  // ---- 查无此人(改名/注销/错 id)单点处置: 标离线 + 一次性提醒 + 后续不再发请求 ----
+  // 绝不计入 errorStreak/熔断: 单主播数据错误无权拖垮全局轮询
+  private bjGone = new Set<string>()
+  private onBjNotFound(a: Anchor): void {
+    this.bjGone.add(a.userId)
+    if (a.isLive) {
+      store.updateAnchor(a.userId, { isLive: false, title: '', tags: null, startTime: '', viewerCount: 0, thumbUrl: '' })
+      this.pushAnchors()
+    }
+    logger.warn('watcher', `关注的主播查无此人(改名/注销/错 id): @${a.userId}`)
+    sendToast({ type: 'info', title: mt('watcher.bjGone', { id: a.userId }), body: mt('watcher.bjGoneHint') })
+  }
+  /** 该锚点是否已确认不存在: true 则所有 bj 复查路径直接跳过(不再发请求) */
+  private isGone(userId: string): boolean {
+    return this.bjGone.has(userId)
+  }
+
+  /** 关注增删时清除"查无此人"标记: 移除可重加, 改名/错 id 修正(或平台恢复)后重新探活 */
+  unmarkGone(userId: string): void {
+    this.bjGone.delete(userId)
+  }
+
   /** 轮询/间隙泵统一失败处置: 连续失败熔断 + 指数退避 + UI 通知(原 round catch 原语义) */
   private noteFailure(e: unknown): void {
     this.errorStreak++
@@ -211,10 +233,18 @@ class Watcher {
     // 兜底: 列表不可见的关注主播(19+/隐藏房/500名外) member/bj 节流复查
     // - urgent: 上轮还在播的, 全部立即复查(防止误判下播) —— 轮内完成
     // - rest: 离线关注交间隙泵(pumpIdle)在轮询空档持续轮扫 —— 发现延迟 ≈ N×gap, 与轮询间隔脱钩
-    const urgent = missing.filter((a) => a.isLive)
+    const urgent = missing.filter((a) => a.isLive && !this.isGone(a.userId))
     for (const a of urgent) {
-      const info = await api.fetchBj(a.userId)
-      liveFound += await this.applyBj(a, info)
+      try {
+        const info = await api.fetchBj(a.userId)
+        liveFound += await this.applyBj(a, info)
+      } catch (e) {
+        if (e instanceof BjNotFoundError) {
+          this.onBjNotFound(a)
+          continue // 单点数据错误: 不污染本轮(不升级熔断/连败)
+        }
+        throw e // 其余错误维持轮次失败语义
+      }
     }
     this.idleQueue = missing.filter((a) => !a.isLive) // 新快照整批替换(上轮未扫完的按最新状态重排)
 
@@ -267,7 +297,16 @@ class Watcher {
   private async roundByBj(anchors: Anchor[]): Promise<void> {
     let liveFound = 0
     for (const a of anchors) {
-      liveFound += await this.applyBj(a, await api.fetchBj(a.userId))
+      if (this.isGone(a.userId)) continue
+      try {
+        liveFound += await this.applyBj(a, await api.fetchBj(a.userId))
+      } catch (e) {
+        if (e instanceof BjNotFoundError) {
+          this.onBjNotFound(a)
+          continue
+        }
+        throw e
+      }
     }
     this.status.liveFound = liveFound
     this.pushAnchors()
@@ -296,6 +335,7 @@ class Watcher {
         const a = this.idleQueue.shift()!
         // 快照生成后被取关: 跳过(不再为其发请求; 事件层另有 onLiveStart/onLiveEnd 守卫双保险)
         if (!this.stillMonitored(a.userId)) continue
+        if (this.isGone(a.userId)) continue // 查无此人: 不发请求(每轮都会被快照带回, 必须在消费前挡)
         api.setGap(store.getSettings().requestGapMs) // 与轮内同节奏(设置页改动即时生效)
         try {
           const info = await api.fetchBj(a.userId)
@@ -303,6 +343,10 @@ class Watcher {
           const found = await this.applyBj(a, info)
           if (found) this.pushAnchors() // rest 上"在播"恒为开播翻转: 即时点亮 UI(不等下一轮)
         } catch (e) {
+          if (e instanceof BjNotFoundError) {
+            this.onBjNotFound(a)
+            continue // 查无此人: 不熔断不停泵, 继续消磨剩余快照
+          }
           this.noteFailure(e)
           this.push()
           break // 出错即停, 剩余待下轮新快照(保守: 不在风控/坏网下硬闯)

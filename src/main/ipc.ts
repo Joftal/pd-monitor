@@ -148,6 +148,7 @@ export function registerIpc(): void {
       lastSeenAt: disc ? Date.now() : 0
     }
     store.addAnchor(anchor)
+    watcher.unmarkGone(userId) // 也可能是已修正的新 ID: 允许重新探活
     // 关注"已在播"主播: 后台预取一次直播源(进房零等待)。列表模式下 onLiveStart 只认
     // 离线→在线翻转, 对关注时已在播的主播永不再触发 —— 这里补洞, 与逐个模式语义对齐。
     // 不作废旧缓存: 先进房再关注 = 命中刚拉取的新鲜源, 预取泵自然 no-op, 不重发请求;
@@ -165,6 +166,7 @@ export function registerIpc(): void {
     // 先取关再停录: removeAnchor 先于 await 落库, watcher 的 stillMonitored 守卫立即生效 ——
     // 否则 stop 的慢窗口(remuxing 收尾最长达分钟级)内开播翻转会穿过守卫启动孤儿录制
     store.removeAnchor(userId)
+    watcher.unmarkGone(userId) // 查无此人标记一并解除(将来重加/账号恢复可重新探活)
     await recorder.stop(userId)
     const win = BrowserWindow.getAllWindows()[0]
     win?.webContents.send(EV.anchors, store.listAnchors())

@@ -31,6 +31,17 @@ export class RiskError extends Error {
   }
 }
 
+/** 查无此人(改名/注销/错 id): 单主播数据错误 —— 非风控, watcher 单点处置, 绝不得升级为全局熔断 */
+export class BjNotFoundError extends Error {
+  constructor(
+    message: string,
+    public readonly userId: string
+  ) {
+    super(message)
+    this.name = 'BjNotFoundError'
+  }
+}
+
 export interface LiveItem {
   userId: string
   userIdx: number
@@ -519,7 +530,12 @@ class PandaApi {
       media?: LiveItem & { userImg?: string }
       message?: string
     }>('POST', '/v1/member/bj', { userId, info: 'media' })
-    if (j.result === false) throw new RiskError(j.message || mt('api.bjFail'))
+    if (j.result === false) {
+      const msg = j.message || mt('api.bjFail')
+      // "유저 정보가 없습니다(查无此人)"类业务错误: 非风控 —— 抛 BjNotFoundError 由 watcher 单点处置
+      if (/유저|없습|not[\s_-]?found/i.test(msg)) throw new BjNotFoundError(msg, userId)
+      throw new RiskError(`@${userId}: ${msg}`)
+    }
     const media = j.media ?? null
     return {
       nick: j.bjInfo?.nick || media?.userNick || userId,
