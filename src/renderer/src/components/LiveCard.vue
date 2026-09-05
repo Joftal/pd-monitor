@@ -21,7 +21,7 @@ export interface LiveCardModel {
   userImg: string
   isLive: boolean
   recording: boolean
-  /** 已获取有效直播源(播放源缓存命中): 卡片绿色外边框 */
+  /** 已获取有效直播源(播放源缓存命中): 卡片绿色「秒开」徽标 */
   srcReady?: boolean
   following?: boolean
   isAdult?: boolean
@@ -71,7 +71,7 @@ async function toggleRecord(): Promise<void> {
 <template>
   <div
     class="group cursor-pointer bg-card rounded-xl overflow-hidden shadow-card hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-200 animate-pop border"
-    :class="[m.isLive && m.srcReady ? 'border-[#2fad5f]/60 shadow-glow-ready' : m.isLive ? 'border-live/30 shadow-glow-live' : 'border-line']"
+    :class="[m.isLive ? 'border-live/30 shadow-glow-live' : 'border-line']"
     @click="watchLive"
   >
     <!-- 缩略图: 左上状态 / 右上 19+ / 右下悬浮操作 -->
@@ -96,6 +96,14 @@ async function toggleRecord(): Promise<void> {
         <span v-else class="px-2 py-[3px] rounded bg-black/45 text-[11px] text-white/85">{{ t('card.offlineBadge') }}</span>
         <span v-if="m.recording" class="flex items-center gap-1 px-2 py-[3px] rounded bg-black/60 text-[11px] font-bold text-white">
           <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-breathe"></span>REC
+        </span>
+        <!-- 源就绪徽标: 已获取有效直播源(播放源缓存命中), 进房/开录零等待 -->
+        <span
+          v-if="m.isLive && m.srcReady"
+          class="flex items-center gap-1 px-2 py-[3px] rounded bg-[#2fad5f] text-[11px] font-bold text-white shadow-sm"
+          :title="t('card.srcReadyTip')"
+        >
+          <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 3 14h7l-1 8 11-13h-8l1-7z"/></svg>{{ t('card.srcReady') }}
         </span>
       </div>
 

@@ -264,7 +264,7 @@ export interface ApiBridge {
   onToast(cb: (t: Toast) => void): () => void
   onDiscovery(cb: (list: DiscoveryItem[]) => void): () => void
   onRecThumb(cb: (p: RecThumbReady) => void): () => void
-  /** 有效直播源缓存快照(已获取源的主播 userId 集; 卡片绿框依据) */
+  /** 有效直播源缓存快照(已获取源的主播 userId 集; 卡片「秒开」徽标依据) */
   onSrcCache(cb: (ids: string[]) => void): () => void
 }
 

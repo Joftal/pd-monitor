@@ -24,8 +24,6 @@ module.exports = {
       boxShadow: {
         'glow-live': '0 0 0 1px rgba(251,114,153,.4), 0 10px 30px rgba(251,114,153,.18)',
         'glow-brand': '0 0 0 1px rgba(251,114,153,.35), 0 10px 26px rgba(251,114,153,.2)',
-        // 有效直播源就绪: 绿框外发光(#2fad5f 与 naive-ui successColor 同色系)
-        'glow-ready': '0 0 0 1px rgba(47,173,95,.45), 0 10px 30px rgba(47,173,95,.18)',
         card: '0 1px 2px var(--shadow-card)',
         'card-hover': '0 10px 28px var(--shadow-card-hover)'
       },

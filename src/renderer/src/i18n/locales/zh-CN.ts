@@ -48,6 +48,8 @@ export default {
   card: {
     live: '直播中',
     offlineBadge: '离线',
+    srcReady: '秒开',
+    srcReadyTip: '直播源已就绪, 点进房间/开始录制零等待',
     rec: '回放',
     pw: '密码',
     fan: '粉丝',

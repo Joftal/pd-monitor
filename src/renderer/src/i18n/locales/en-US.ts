@@ -46,6 +46,8 @@ export default {
   card: {
     live: 'LIVE',
     offlineBadge: 'Offline',
+    srcReady: 'Ready',
+    srcReadyTip: 'Stream source cached — opens and records instantly',
     rec: 'Replay',
     pw: 'Pwd',
     fan: 'Fan',
