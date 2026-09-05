@@ -33,6 +33,7 @@ const world = {
   bjMedia: {},    // userId -> liveItem|null: member/bj 返回的 media
   bj403: {},      // userId -> bool: member/bj 返回 403(触发 RiskError 熔断链)
   bjThrow: {},    // userId -> bool: member/bj 抛普通网络错误(不触发节点兜底, 直抛)
+  bjNotFound: {}, // userId -> bool: member/bj 返回 result:false "유저 정보가 없습니다."(查无此人)
   latency: { liveMs: 0, bjMs: {} }, // 请求人为延迟(T10 让路/T11 取关时序窗口)
   playCalls: [],   // /v1/live/play 真实发起记录(判定"是否重新拉源"的唯一依据)
   liveCalls: [],   // /v1/live 分页请求记录(T16 复用性断言)
@@ -52,6 +53,11 @@ const fakeRes = (status, obj) => ({
 
 const fakeFetch = async (url, init = {}) => {
   const u = new URL(url)
+  if (u.hostname === 'api.pandalive.co.kr' && u.pathname === '/v1/member/bj' && world.bjNotFound?.[new URLSearchParams(init.body || '').get('userId')]) {
+    // 查无此人专用拦截(仅 notFound 时接管, 其余调用落原分支, 不双重计数)
+    world.bjCalls.push({ userId: new URLSearchParams(init.body || '').get('userId'), at: Date.now() })
+    return fakeRes(200, { result: false, message: '유저 정보가 없습니다.' }) // → BjNotFoundError
+  }
   if (u.hostname === 'api.pandalive.co.kr' && u.pathname === '/v1/live') {
     world.liveCalls.push(u.searchParams.get('offset') || '0')
     if (world.latency.liveMs) await new Promise((r) => setTimeout(r, world.latency.liveMs))
@@ -112,7 +118,7 @@ const mocks = {
   '../util': { UA: 'verify-script', sleep: (ms) => new Promise((r) => setTimeout(r, ms)) },
   './vault': { vault: { encrypted: false, load: () => null, save() {}, clear() {} } },
   './logger': { logger: { info() {}, warn() {} } },
-  '../i18n': { mt: (k) => k, setMainLocale() {} },
+  '../i18n': { mt: (k, p) => (p ? `${k}${JSON.stringify(p)}` : k), setMainLocale() {} },
   './store': { store },
   './notify': { sendToast: (t) => world.toasts.push(t) },
   './recorder': {
@@ -179,7 +185,8 @@ async function reset() {
   watcher.status.message = ''
   db.anchors = []
   db.settings = { ...DEFAULT_SETTINGS }
-  world.inList = {}; world.bjMedia = {}; world.bj403 = {}; world.bjThrow = {}; world.latency = { liveMs: 0, bjMs: {} }
+  world.inList = {}; world.bjMedia = {}; world.bj403 = {}; world.bjThrow = {}; world.bjNotFound = {}; world.latency = { liveMs: 0, bjMs: {} }
+  watcher.bjGone?.clear?.() // 查无此人内存集跨场景复位(T23)
   world.playCalls.length = 0; world.liveCalls.length = 0; world.bjCalls.length = 0; world.toasts.length = 0; world.recStarts.length = 0
   world.recStops.length = 0; world.recStartThrow = false; world.stopDelayMs = 0
   api.clearPlayCache()
@@ -340,7 +347,7 @@ console.log('\n■ T15 熔断闭环(承接 T9): 冷却压制 → 过期恢复 �
 {
   await round() // 冷却中: 走 cooling 分支, 不拉列表不发任何请求
   check('T15-1 冷却分支压制(circuitOpen 保持, message=cooling)',
-    watcher.status.circuitOpen === true && watcher.status.message === 'watcher.cooling')
+    watcher.status.circuitOpen === true && String(watcher.status.message).startsWith('watcher.cooling'))
   const bjN0 = world.bjCalls.length
   check('T15-2 冷却中无任何复查请求', world.bjCalls.length === bjN0)
   watcher.cooldownUntil = Date.now() - 1000 // 伪造冷却过期
@@ -586,6 +593,32 @@ world.stopDelayMs = 600
   check('T22-2 R5时序: stop 窗口内无孤儿录制', !world.recStarts.some((r) => r.userId === 'w9'))
   check('T22-3 R5时序: stop 已对该主播执行', world.recStops.includes('w9'))
   check('T22-4 R5时序: 开播在列表里仍不发通知(守卫)', !world.toasts.some((t) => t.type === 'live'))
+}
+
+console.log('\n■ T23 隔离: 关注主播查无此人(注销/改名/错 id) — 不熔断不连败, 标离线+一次性提醒+不再请求')
+await reset()
+db.anchors = [mkAnchor('ghost', { isLive: true })]
+world.inList = {} // 列表不可见 → missing(在播) → urgent 路径
+world.bjNotFound = { ghost: true }
+{
+  await round()
+  check('T23-1 查无此人被标离线(不再示在播)', db.anchors[0].isLive === false)
+  check('T23-2 一次性提醒已发(带 userId)', world.toasts.some((t) => t.type === 'info' && String(t.title).includes('ghost')))
+  check('T23-3 无熔断无连败(单点错误不扩散)', watcher.status.circuitOpen === false && watcher.errorStreak === 0)
+  await sleep(600) // 给间隙泵机会(不应)发请求
+  const n1 = world.bjCalls.filter((c) => c.userId === 'ghost').length
+  await round()
+  await sleep(600)
+  const n2 = world.bjCalls.filter((c) => c.userId === 'ghost').length
+  check('T23-4 后续轮次不再为其发请求', n1 === 1 && n2 === 1, `ghost bj 请求数恒定=${n2}`)
+  check('T23-5 提醒不重复', world.toasts.filter((t) => t.type === 'info').length === 1)
+  // T23-6: 解除标记(移除/重加或账号恢复)后可重新探活
+  watcher.unmarkGone('ghost')
+  world.bjNotFound = {}
+  world.bjMedia = { ghost: liveItem({ userId: 'ghost' }) } // 账号恢复且在播
+  await round()
+  const revived = await waitUntil(() => db.anchors[0].isLive === true, 3000)
+  check('T23-6 解除标记后重新探活(恢复开播翻转)', revived === true && world.bjCalls.filter((c) => c.userId === 'ghost').length >= 2)
 }
 
 console.log('解读: T1/T2/T3 PASS ⇒ 「大厅轮询刷新会清源缓存」不成立(真实源码+可计数请求实证);')
