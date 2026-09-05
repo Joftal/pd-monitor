@@ -567,13 +567,36 @@ class PandaApi {
   private keepaliveBusy = false
   private deadStreak = new Map<string, number>()
   /** 重铸串行链: 泳道并发的群体性收尸合并为链式排队, 与主请求队列同节奏(1.2s+抖动),
-   *  防 API 突发触发风控(机器驱动的后台修复, 不配用 jsonPriority 的用户级特权) */
+   *  防 API 突发触发风控(机器驱动的后台修复, 不配用 jsonPriority 的用户级特权)。
+   *  风控自闭环: 重铸撞上 RiskError 即可知 API 在高压期 → 全链冷却 5 分钟闭嘴(与 watcher 熔断同语义,
+   *  跨模块零依赖); 冷却期补源暂缓(徽标暂熄可接受), 用户进房 getPlayCached 仍会即时重建。 */
   private remintTail: Promise<void> = Promise.resolve()
+  private remintCooldownUntil = 0
+  private remintCoolLogged = false
 
   private enqueueRemint(userId: string): void {
+    if (Date.now() < this.remintCooldownUntil) {
+      if (!this.remintCoolLogged) {
+        this.remintCoolLogged = true
+        logger.info('api', '重铸冷却中(重铸曾撞风控), 暂缓补源 —— 徽标暂熄, 进房时即重建')
+      }
+      return
+    }
     this.remintTail = this.remintTail.then(async () => {
-      logger.info('api', `保活重铸: @${userId}`)
-      await this.getPlayCached(userId).catch(() => undefined)
+      // 链步内二次检查: 前序步可能刚把冷却立起来 —— 双检查让"冷却期零重铸"成为结构保证而非时序运气
+      if (Date.now() >= this.remintCooldownUntil) {
+        try {
+          await this.getPlayCached(userId)
+          logger.info('api', `保活重铸: @${userId}`)
+        } catch (e) {
+          if (e instanceof RiskError) {
+            this.remintCooldownUntil = Date.now() + 5 * 60_000
+            this.remintCoolLogged = false
+            logger.warn('api', `保活重铸撞风控(@${userId}), 全链冷却 5 分钟`)
+          }
+          // 其余错误(满员/网络)维持静默语义
+        }
+      }
       const jitter = 1200 * (0.7 + Math.random() * 0.6)
       await sleep(jitter)
     })

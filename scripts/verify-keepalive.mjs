@@ -67,6 +67,7 @@ const fakeFetch = async (url, init = {}) => {
     const userId = new URLSearchParams(init.body || '').get('userId')
     world.playCalls.push(userId)
     if (world.playLatencyMs) await settle(world.playLatencyMs)
+    if (world.play403) return fakeRes(403, 'risk') // rawFetch → RiskError
     if (!world.playOk) return fakeRes(200, { result: false, message: '房间已满员' })
     return fakeRes(200, {
       result: true,
@@ -158,7 +159,9 @@ function resetWorld() {
   world.variantMode = 'ok'
   world.playOk = true
   world.playLatencyMs = 0
+  world.play403 = false
   api.clearPlayCache()
+  api.remintCooldownUntil = 0 // 重铸风控冷却跨场景复位(S14)
 }
 
 const variantCount = (userId) => world.cdnCalls.filter((p) => p.includes(`/${userId}/`) && !p.endsWith('/master.m3u8')).length
@@ -309,6 +312,22 @@ store.setSettings({ keepaliveStream: true })
 api.invalidatePlay('a')
 st = api.keepaliveStatus('a')
 assert(st.cached === false && st.lastAt === 0, 'S13-5 作废后状态清档(不残留尸态)')
+
+// S14 重铸风控自闭环: 重铸撞 403 → 全链冷却 5 分钟, 后续收尸重铸直接丢弃(零请求)
+resetWorld()
+db.anchors.push({ userId: 'd1', isLive: true }, { userId: 'd2', isLive: true })
+await api.getPlayCached('d1')
+await api.getPlayCached('d2')
+world.variantMode = 'dead404'
+world.play403 = true
+world.playLatencyMs = 150 // 重铸 d1 慢行: 保证 d2 在冷却立下之前已入队 —— 专治"时序运气"(结构检查必考)
+await tick() // 双双 strike=1
+await tick() // 双双收尸 → d1 重铸撞 403 → 冷却; d2 入队即丢弃(链步内二次检查)
+for (let i = 0; i < 30 && world.playCalls.filter((u) => u === 'd1').length < 2; i++) await settle(100)
+await settle(300) // 留 d2 若有漏按的时间(不应有)
+assert(api.keepaliveStatus('d1').cached === false, 'S14-1 重铸撞风控后保持熄灭')
+assert(world.playCalls.filter((u) => u === 'd1').length === 2, 'S14-2 d1 重铸整好一发(撞风控那发)')
+assert(world.playCalls.filter((u) => u === 'd2').length === 1, 'S14-3 冷却期后续重铸被丢弃: d2 零额外 API 请求')
 
 console.log(`\n==== 结果: ${PASS} 通过 / ${FAIL} 失败 ====`)
 if (FAIL) {
