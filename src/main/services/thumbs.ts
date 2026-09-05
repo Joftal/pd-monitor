@@ -1,7 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import * as crypto from 'crypto'
-import { spawn } from 'child_process'
+import { spawn, ChildProcess } from 'child_process'
 import { app, BrowserWindow } from 'electron'
 import { store } from './store'
 import { logger } from './logger'
@@ -81,22 +81,29 @@ function removeTaskFiles(id: string, keepName = ''): void {
   }
 }
 
+/** 在跑 ffmpeg 注册表(退出钩子统一杀, 保证零子进程残留) */
+const runningProcs = new Set<ChildProcess>()
+/** 关停没收口: 退出中不再接新活 + 被杀的作业不写 .bad 负缓存(否则重启后缩略图永久不重生) */
+let terminating = false
+
 function runFf(args: string[], timeoutMs = 30000): Promise<{ ok: boolean; stderr: string }> {
   return new Promise((resolve) => {
     let done = false
     const finish = (ok: boolean, stderr: string): void => {
       if (!done) {
         done = true
+        if (p) runningProcs.delete(p)
         resolve({ ok, stderr })
       }
     }
-    let p
+    let p: ChildProcess | undefined
     try {
       p = spawn(ffmpegPath(), args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true })
     } catch (e) {
       finish(false, String(e))
       return
     }
+    runningProcs.add(p)
     let stderr = ''
     p.stderr?.on('data', (b) => {
       if (stderr.length < 64 * 1024) stderr += String(b)
@@ -219,10 +226,13 @@ async function workJob(job: Job): Promise<string> {
     logger.info('thumb', `缩略图生成: ${finalName}(${job.files.length} 段, 总时长 ${Math.round(total)}s)`)
     return finalPath
   } catch (e) {
-    try {
-      fs.writeFileSync(badPath, job.sig, 'utf-8')
-    } catch { /* ignore */ }
-    logger.warn('thumb', `缩略图生成失败(${job.id}): ${(e as Error).message || e}`)
+    if (!terminating) {
+      // 关停期被杀不写负缓存: 让重启后能自然重试
+      try {
+        fs.writeFileSync(badPath, job.sig, 'utf-8')
+      } catch { /* ignore */ }
+      logger.warn('thumb', `缩略图生成失败(${job.id}): ${(e as Error).message || e}`)
+    }
     return ''
   } finally {
     try {
@@ -267,6 +277,7 @@ export const thumbs = {
    * 它在 recHistory 入口先行跑, 本函数只按"现存文件"算 sig, 文件集变动自然触发重生成。
    */
   ensure(taskId: string): { url: string } {
+    if (terminating) return { url: '' } // 关停期不接新活(防 stopAll 尾巴上 enqueue 再生孤儿)
     const item = store.listHistory().find((h) => h.id === taskId)
     if (!item) return { url: '' }
     const files = eligibleFiles(item)
@@ -297,6 +308,16 @@ export const thumbs = {
   remove(taskId: string): void {
     removeTaskFiles(taskId)
     for (let i = queue.length - 1; i >= 0; i--) if (queue[i].id === taskId) queue.splice(i, 1)
+  },
+  /** 退出钩子: 杀掉在跑缩略图 ffmpeg + 清空队列 + 关闸(.tmp_ 目录由启动 sweep 回收; 被杀作业不写负缓存) */
+  terminateAll(): void {
+    terminating = true
+    queue.length = 0
+    for (const p of runningProcs) {
+      try {
+        p.kill('SIGKILL')
+      } catch { /* ignore */ }
+    }
   },
   sweep
 }

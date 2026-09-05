@@ -9,6 +9,7 @@ import { UA, redirectElectronDataDir } from './util'
 import { mt, setMainLocale } from './i18n'
 import { logger } from './services/logger'
 import { registerMediaScheme, installMediaHandler } from './services/localMedia'
+import { thumbs } from './services/thumbs'
 
 // ============ 应用入口 ============
 
@@ -174,18 +175,34 @@ app.whenReady().then(() => {
 let stoppingForQuit = false
 app.on('before-quit', (e) => {
   quitting = true
+  // 任何退出路径先杀缩略图子进程(不挂录制收尾链; .tmp_ 由启动 sweep 回收)
+  try {
+    thumbs.terminateAll()
+  } catch {
+    /* ignore */
+  }
   // M1: remuxing(转码/合并中)同样不可直接退出, 否则截断 MP4 收尾产物
   const hasActive = recorder.list().some((t) => t.status === 'recording' || t.status === 'remuxing')
   if (hasActive && !stoppingForQuit) {
     e.preventDefault()
     stoppingForQuit = true
-    void recorder.stopAll().then(() => {
-      store.flush()
-      app.quit()
-    })
+    void recorder
+      .stopAll()
+      .catch(() => undefined) // 收尾异常不得卡死退出
+      .finally(() => {
+        store.flush()
+        app.quit()
+      })
     return
   }
   store.flush()
+})
+
+// OS 关机/注销(Windows WM_ENDSESSION): 走同一优雅退出链 —— 否则录制被硬杀
+// (runtime 的 App 事件 'session-end'; electron.d.ts 只把它生成在 AutoUpdater/BluetoothDevice 上,
+//  App 侧缺载 —— 经 EventEmitter 显式声明接入, 见 node_modules/electron/electron.d.ts:2216)
+;(app as NodeJS.EventEmitter).on('session-end', () => {
+  app.quit()
 })
 
 app.on('window-all-closed', () => {
