@@ -257,15 +257,24 @@ export function registerIpc(): void {
   ipcMain.handle(CH.recStop, (_e, userId: string) => recorder.stop(userId))
 
   ipcMain.handle(CH.recOpenFolder, async (_e, dir: string) => {
-    // M10: 只允许打开录制相关目录(任意路径探测封堵; 对照 openExternal 已有白名单)
+    // M10: 只允许打开录制/应用数据相关目录(任意路径探测封堵; 对照 openExternal 已有白名单)
     const resolved = path.resolve(String(dir || ''))
-    const roots = new Set<string>([path.resolve(store.getSettings().savePath || defaultRecordRoot()), path.resolve(defaultRecordRoot())])
+    const roots = new Set<string>([
+      path.resolve(store.getSettings().savePath || defaultRecordRoot()),
+      path.resolve(defaultRecordRoot()),
+      // 设置页「打开目录」按钮传的是应用数据目录(data/), 与录制根平级 —— 不放行则恒被拒
+      path.resolve(dataDir())
+    ])
     for (const h of store.listHistory()) if (h.dirPath) roots.add(path.resolve(h.dirPath))
     const ok = [...roots].some((root) => {
       const rel = path.relative(root, resolved)
       return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
     })
-    if (ok) await shell.openPath(resolved)
+    if (ok) {
+      await shell.openPath(resolved)
+    } else {
+      logger.warn('ipc', `打开目录被白名单拒绝: ${resolved}`)
+    }
     return ok
   })
 
