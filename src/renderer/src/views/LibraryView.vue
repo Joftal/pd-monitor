@@ -105,7 +105,7 @@ const groups = computed(() => {
       if (arr) arr.push(h)
       else map.set(k, [h])
     }
-    for (const [k, rows] of map) out.push({ label: rows[0].nick, key: k, short: Array.from(rows[0].nick).slice(0, 4).join(''), rows })
+    for (const [k, rows] of map) out.push({ label: rows[0].nick, key: k, short: k, rows })
     return out
   }
   for (const h of sorted) {
