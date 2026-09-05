@@ -147,6 +147,7 @@ export interface PlayInfo {
   userImg?: string
   tags?: AnchorTag
   startTime?: string
+  /** 备用线路 master(hls.js 自动选档); 只含与主线互异的真备用 —— 平台返回同链时为空, 线路栏自动隐藏 */
   hlsBackups?: string[]
   /** 本源包在主进程缓存中的生成时刻(ms 时间戳; 切换清晰度/线路不刷新, 手动刷新/重拉才更新) */
   fetchedAt?: number

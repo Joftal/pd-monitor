@@ -302,16 +302,19 @@ async function manualRefresh() {
 
         <!-- ④ 控制条: 清晰度直选 + 线路直选 + 操作 -->
         <div class="shrink-0 flex items-center gap-3 px-3.5 py-2.5 rounded-xl bg-card shadow-card flex-wrap">
-          <span class="text-[11px] text-ink3">{{ t('player.quality') }}</span>
-          <div class="inline-flex bg-fill rounded-lg p-0.5 gap-px" :class="activeLine !== 0 ? 'opacity-50 pointer-events-none' : ''">
-            <button
-              v-for="opt in levelOptions"
-              :key="opt.value"
-              class="px-2.5 py-1 rounded-md text-[12px] transition-colors tabular-nums"
-              :class="quality === opt.value ? 'bg-card text-ink1 font-semibold shadow-card' : 'text-ink2 hover:text-ink1'"
-              @click="switchQuality(opt.value)"
-            >{{ opt.label }}</button>
-          </div>
+          <!-- 清晰度直选: 选项来自房间真实 master 分档; 仅一档(单码率房/master 回退档)时无可切, 整块收起 -->
+          <template v-if="levelOptions.length > 1">
+            <span class="text-[11px] text-ink3">{{ t('player.quality') }}</span>
+            <div class="inline-flex bg-fill rounded-lg p-0.5 gap-px" :class="activeLine !== 0 ? 'opacity-50 pointer-events-none' : ''">
+              <button
+                v-for="opt in levelOptions"
+                :key="opt.value"
+                class="px-2.5 py-1 rounded-md text-[12px] transition-colors tabular-nums"
+                :class="quality === opt.value ? 'bg-card text-ink1 font-semibold shadow-card' : 'text-ink2 hover:text-ink1'"
+                @click="switchQuality(opt.value)"
+              >{{ opt.label }}</button>
+            </div>
+          </template>
           <span v-if="activeLine !== 0" class="text-[11.5px] text-ink3">{{ t('player.lineAuto') }}</span>
           <template v-if="backups.length">
             <span class="w-px h-5 bg-line/70"></span>

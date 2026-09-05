@@ -604,8 +604,11 @@ class PandaApi {
     }
     const backups: string[] = []
     if (!scanned) {
-      if (pl?.hls2?.[0]?.url) backups.push(pl.hls2[0].url)
-      if (pl?.hls3?.[0]?.url) backups.push(pl.hls3[0].url)
+      // 平台现状(2026-09 实勘多房间): hls/hls2/hls3 返回同一 URL, 且 master 令牌一回取即焚 ——
+      // 同链"备用线路"点击必 403 无播放意义, 只保留与主线互异的真备用; 全同则去空(前端线路栏自动收起)
+      for (const u of [pl?.hls2?.[0]?.url, pl?.hls3?.[0]?.url]) {
+        if (u && u !== hls && !backups.includes(u)) backups.push(u)
+      }
     }
     if (vod || scanned) {
       // 校准辅助: 回放源域名若不在流域名注入白名单(live-video.net / cloudfront.net),
