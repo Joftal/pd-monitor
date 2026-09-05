@@ -107,6 +107,16 @@ class Watcher {
       this.errorStreak = 0
       this.status.circuitOpen = false
       this.status.message = ''
+      // 轮次心跳: 每 10 轮落一行摘要 —— 事后可证"轮询在这些小时里活着且看得见全站"
+      // (每轮都写会刷屏: 30s 间隔下一天 2880 行; 抽稀到 ~5 分钟一行, 14 天约 100KB)
+      if (++this.roundCnt % 10 === 0) {
+        logger.info(
+          'watcher',
+          this.status.mode === 'list'
+            ? `第 ${this.roundCnt} 轮 list 全站=${this.status.liveCount} 关注=${this.status.monitored} 在播=${this.status.liveFound} 本轮=${Date.now() - begin}ms`
+            : `第 ${this.roundCnt} 轮 per-anchor 关注=${this.status.monitored} 在播=${this.status.liveFound} 本轮=${Date.now() - begin}ms`
+        )
+      }
     } catch (e) {
       this.noteFailure(e)
     } finally {
@@ -400,9 +410,12 @@ class Watcher {
     return store.listAnchors().some((x) => x.userId === userId)
   }
 
+  private roundCnt = 0
+
   private onLiveStart(a: Anchor): void {
     if (!this.stillMonitored(a.userId)) return
     api.invalidatePlay(a.userId) // 主播(重)开播: 旧源作废
+    logger.info('watcher', `开播: ${a.nick}(@${a.userId}) title"${a.title}" 自录=${a.autoRecord ? '开' : '关'}`)
     const cfg = store.getSettings()
     if (cfg.prefetchStream) this.enqueuePrewarm(a.userId) // 后台预取新源写缓存
     if (a.tags?.type === 'fan') {
@@ -419,6 +432,7 @@ class Watcher {
 
   private onLiveEnd(a: Anchor): void {
     if (!this.stillMonitored(a.userId)) return // 同 onLiveStart 守卫: 已取关不弹下播
+    logger.info('watcher', `下播: ${a.nick}(@${a.userId})`)
     sendToast({ type: 'offline', title: mt('watcher.liveEnd', { nick: a.nick }), body: '' })
   }
 

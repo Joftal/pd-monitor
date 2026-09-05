@@ -45,7 +45,8 @@ export function registerIpc(): void {
 
   ipcMain.handle(CH.authLoginPassword, async (_e, loginId: string, password: string) => {
     const r = await api.login(loginId, password)
-    if (!r.ok) logger.warn('auth', `账号密码登录失败: ${r.message}`)
+    if (r.ok) logger.info('auth', `账号密码登录成功(${loginId})`)
+    else logger.warn('auth', `账号密码登录失败(${loginId}): ${r.message}`)
     pushAccount()
     return r
   })
@@ -54,6 +55,8 @@ export function registerIpc(): void {
     const win = BrowserWindow.fromWebContents(e.sender)
     if (!win) return { ok: false, message: mt('auth.winMissing') }
     const r = await openLoginWindow(win)
+    if (r.ok) logger.info('auth', '网页登录成功')
+    else logger.info('auth', `网页登录未完成: ${r.message}`)
     pushAccount()
     return r
   })
@@ -81,12 +84,14 @@ export function registerIpc(): void {
       return { ok: false, message: mt('auth.importInvalid') }
     }
     await api.importCookies(jar, info)
+    logger.info('auth', `Cookie 导入成功(成人认证=${info.isAdult ? '有' : '无'})`)
     pushAccount()
     return { ok: true, message: info.isAdult ? mt('auth.importOkAdult') : mt('auth.importOkNoAdult') }
   })
 
   ipcMain.handle(CH.authLogout, async () => {
     api.clearCookies()
+    logger.info('auth', '退出登录: Cookie/站点存储已清')
     try {
       await session.fromPartition(SESSION_PARTITION).clearStorageData()
     } catch { /* ignore */ }
@@ -302,6 +307,11 @@ export function registerIpc(): void {
   ipcMain.handle(CH.settingsSet, (_e, patch: Partial<Settings>) => {
     const before = store.getSettings()
     const cfg = store.setSettings(patch)
+    // 变更留痕(排查"参数什么时候被改过"类问题; proxyUrl 可能含凭据, 掩码)
+    const diffs = (Object.keys(patch) as (keyof Settings)[])
+      .filter((k) => patch[k] !== undefined && before[k] !== cfg[k])
+      .map((k) => (k === 'proxyUrl' ? (cfg[k] ? 'proxyUrl=已设置' : 'proxyUrl=已清空') : `${k}=${String(before[k])}→${String(cfg[k])}`))
+    if (diffs.length) logger.info('app', `设置变更: ${diffs.join(', ')}`)
     applyProxy(cfg.proxyUrl)
     setMainLocale(cfg.locale) // 语言变更即时注入主进程 i18n(单向数据流)
     // 只有轮询相关设置的【值真的变了】才即时拉一轮(前端提交的是全量对象, 不能按 key 存在判断)

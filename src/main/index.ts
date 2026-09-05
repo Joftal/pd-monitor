@@ -150,6 +150,7 @@ app.whenReady().then(() => {
 
   // 启动轮询
   watcher.start()
+  logger.info('watcher', `轮询启动(mode=${cfg.watchMode}, 间隔=${cfg.pollIntervalSec}s, gap=${cfg.requestGapMs}ms)`)
   // 源保活泵: 维持已缓存源的会话活性(退出观看后满员房也能凭旧源继续看)
   api.startKeepalive()
   // 重启后源缓存(内存态)为空: 对库态"已关注且在播"的主播补一轮预取 ——
@@ -186,10 +187,12 @@ app.on('before-quit', (e) => {
   if (hasActive && !stoppingForQuit) {
     e.preventDefault()
     stoppingForQuit = true
+    logger.info('app', `退出: ${recorder.list().filter((t) => t.status === 'recording' || t.status === 'remuxing').length} 个录制任务收尾中`)
     void recorder
       .stopAll()
       .catch(() => undefined) // 收尾异常不得卡死退出
       .finally(() => {
+        logger.info('app', '录制收尾完成, 应用退出')
         store.flush()
         app.quit()
       })
@@ -202,6 +205,7 @@ app.on('before-quit', (e) => {
 // (runtime 的 App 事件 'session-end'; electron.d.ts 只把它生成在 AutoUpdater/BluetoothDevice 上,
 //  App 侧缺载 —— 经 EventEmitter 显式声明接入, 见 node_modules/electron/electron.d.ts:2216)
 ;(app as NodeJS.EventEmitter).on('session-end', () => {
+  logger.warn('app', 'OS 关机/注销(session-end), 开始优雅退出')
   app.quit()
 })
 

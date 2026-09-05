@@ -522,6 +522,7 @@ class Recorder {
         err.message = mt('rec.needPw')
         throw err
       }
+      logger.warn('rec', `录制启动失败: ${opt.nick}(@${opt.userId})${opt.auto ? ' [自动]' : ''}: ${String((e as Error).message || e)}`)
       if (opt.auto) sendToast({ type: 'error', title: mt('rec.toastStartFail', { nick: opt.nick }), body: String((e as Error).message || e) })
       throw e
     }

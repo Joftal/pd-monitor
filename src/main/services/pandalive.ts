@@ -572,6 +572,7 @@ class PandaApi {
 
   private enqueueRemint(userId: string): void {
     this.remintTail = this.remintTail.then(async () => {
+      logger.info('api', `保活重铸: @${userId}`)
       await this.getPlayCached(userId).catch(() => undefined)
       const jitter = 1200 * (0.7 + Math.random() * 0.6)
       await sleep(jitter)
@@ -737,6 +738,7 @@ class PandaApi {
 
     const code = j?.errorData?.code
     if (code) {
+      logger.info('api', `拉源受限 @${userId}: ${code}`) // 付费/成人/粉丝门槛: 用户可见也留痕
       if (code === 'needAdult') return { ok: false, error: mt('api.needAdult') }
       if (code === 'needLogin') return { ok: false, error: mt('api.needLogin') }
       if (code === 'needFan') return { ok: false, error: mt('api.needFan') }
@@ -748,6 +750,7 @@ class PandaApi {
     if (j?.result === false) {
       const msg = j.message || ''
       if (/비밀번호|password/i.test(msg)) return { ok: false, needPassword: true, error: mt('api.needPw') }
+      logger.warn('api', `拉源失败 @${userId}: ${msg || '(无 message)'}`)
       return { ok: false, error: msg || mt('api.playFail') }
     }
     const pl = j?.PlayList
@@ -789,6 +792,7 @@ class PandaApi {
     }
     // master 只活 10 分钟: 解析出长效变体地址供播放/录制直接使用
     const variants = await this.fetchVariants(hls)
+    logger.info('api', `拉源成功 @${userId}${vod || scanned ? '[回放]' : ''} 档位=${variants.length}`)
     return {
       ok: true,
       vod: vod || scanned,
