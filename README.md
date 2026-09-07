@@ -30,6 +30,21 @@ npm run typecheck      # 双端类型检查
 
 **发版**：`Actions → Build & Release` 填版本号即可——自动把版本号写回 `package.json` 并提交（唯一版本源）、**三平台并行打包**(Windows NSIS/便携版 · macOS dmg/zip 双架构 · Linux AppImage/deb）并推送 Releases（tag: `v<版本号>`），应用内「检查更新」即读取该 tag。
 
+<details>
+<summary><b>macOS 安装说明（免证书分发）</b></summary>
+
+项目未购买 Apple 开发者证书，mac 产物仅做 ad-hoc 签名（`afterPack` 钩子自动完成）。浏览器下载的安装包自带 Gatekeeper 隔离属性，首次打开若提示 **「已损坏，无法打开」/「无法验证开发者」**，任选其一：
+
+```bash
+# 方式一(推荐): 终端清除隔离属性, 一次永久解决
+xattr -cr "/Applications/PandaLive Monitor.app"
+```
+
+方式二：系统设置 → 隐私与安全性 → 底部安全提示区点「仍要打开」。
+
+> 旧版建议的"右键打开"绕过在 macOS Sequoia (15) 已失效，请用上述方式。若安装后从 dmg 直接拖到"应用程序"外其他目录，同样适用。
+</details>
+
 
 <details>
 <summary><b>代码结构</b></summary>

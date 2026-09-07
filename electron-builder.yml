@@ -3,6 +3,9 @@ productName: PandaLive Monitor
 copyright: Copyright © 2026
 directories:
   output: release
+# mac 产物 ad-hoc 深签名(脚本内自判平台, win/linux 直接跳过):
+# 无任何签名的 .app 被浏览器下载隔离后会被 Gatekeeper 判"已损坏"; ad-hoc 自洽签名消除该判定
+afterPack: scripts/adhoc-sign-mac.js
 files:
   - out/**
   - package.json
@@ -27,7 +30,7 @@ nsis:
   artifactName: '${productName}-Setup-${version}.${ext}'
 portable:
   artifactName: '${productName}-Portable-${version}.${ext}'
-# mac: 免签名分发(CI 已设 CSC_IDENTITY_AUTO_DISCOVERY=false; 首次打开需右键打开, 见 README)
+# mac: 免证书分发(afterPack 钩子做 ad-hoc 签名, 无需 Apple 开发者账号; 首次打开说明见 README)
 mac:
   target:
     - dmg

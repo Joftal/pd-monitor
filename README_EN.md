@@ -29,6 +29,21 @@ npm run typecheck      # type-check (main + renderer)
 
 **Release**: run `Actions → Build & Release` with a version number — it writes the version back into `package.json` (single source of truth), packages **all three platforms in parallel** (Windows NSIS/portable · macOS dmg/zip for both arches · Linux AppImage/deb), and publishes to Releases (tag: `v<version>`); the in-app update check reads that tag.
 
+<details>
+<summary><b>macOS install notes (no paid certificate)</b></summary>
+
+The project has no Apple Developer certificate; mac artifacts are ad-hoc signed only (done automatically by an `afterPack` hook). Downloads carry the Gatekeeper quarantine attribute, so on first launch you may see **"App is damaged"** or **"cannot verify the developer"**. Either fix works:
+
+```bash
+# Option 1 (recommended): clear quarantine once and forever
+xattr -cr "/Applications/PandaLive Monitor.app"
+```
+
+Option 2: System Settings → Privacy & Security → click "Open Anyway" at the bottom.
+
+> Note: the old "right-click → Open" bypass no longer works on macOS Sequoia (15) — use the methods above.
+</details>
+
 
 <details>
 <summary><b>Code structure</b></summary>
