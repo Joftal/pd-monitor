@@ -35,6 +35,12 @@ mac:
   icon: resources/icon.icns
   category: public.app-category.utilities
   artifactName: '${productName}-${version}-${arch}.${ext}'
+  # 菜单栏 template 图仅进 mac 包(win/linux 不需要); @2x 由 createFromPath 自动识别为 Retina 表示
+  extraResources:
+    - from: resources/trayTemplate.png
+      to: trayTemplate.png
+    - from: resources/trayTemplate@2x.png
+      to: trayTemplate@2x.png
 # linux: AppImage(免安装) + deb(带 libsecret 依赖保证 Cookie 加密可用)
 linux:
   target:

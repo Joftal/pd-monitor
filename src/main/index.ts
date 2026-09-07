@@ -100,12 +100,23 @@ function createWindow(): void {
 
 function createTray(): void {
   try {
-    const iconPath = app.isPackaged
-      ? path.join(process.resourcesPath, 'icon.png')
-      : path.join(__dirname, '../../resources/icon.png')
-    const img = nativeImage.createFromPath(iconPath)
-    const icon = img.isEmpty() ? nativeImage.createEmpty() : img.resize({ width: 18, height: 18 })
-    if (process.platform === 'darwin') icon.setTemplateImage(true) // mac 托盘随深浅色自适配
+    const resDir = app.isPackaged ? process.resourcesPath : path.join(__dirname, '../../resources')
+    const loadColored = (): Electron.NativeImage => {
+      const img = nativeImage.createFromPath(path.join(resDir, 'icon.png'))
+      if (img.isEmpty()) logger.warn('app', `托盘图标缺失: ${path.join(resDir, 'icon.png')}`)
+      return img.isEmpty() ? nativeImage.createEmpty() : img.resize({ width: 18, height: 18 })
+    }
+    let icon: Electron.NativeImage
+    if (process.platform === 'darwin') {
+      // mac 菜单栏用专用 template 图(tray-icon-build.mjs 生成, 18pt+@2x): 纯黑剪影+透明底,
+      // 系统按菜单栏深浅自动反色。app 图标整面不透明, 挂 template 后 alpha 剪影就是一整个
+      // 实心方块 —— 菜单栏"纯白方块"的根因, 故不可复用 icon.png 当 template。
+      icon = nativeImage.createFromPath(path.join(resDir, 'trayTemplate.png'))
+      if (icon.isEmpty()) icon = loadColored() // template 缺失兜底: 宁要彩色也不要白块/空托盘
+      else icon.setTemplateImage(true) // 文件名 Template 后缀本会自动生效, 显式声明双保险
+    } else {
+      icon = loadColored()
+    }
     tray = new Tray(icon)
     tray.setToolTip('PandaLive Monitor')
     tray.setContextMenu(
