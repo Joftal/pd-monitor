@@ -1,0 +1,835 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>双平台视觉收敛设计稿 v2 · PandaLive Monitor</title>
+<style>
+  :root {
+    --live: #fb7299; --live-dark: #d94b73; --live-deep: #b83a5c;
+    --page: #f1f2f3; --card: #ffffff; --line: #e3e5e7;
+    --ink1: #18191c; --ink2: #61666d; --ink3: #9499a0;
+    --fill: #f4f5f7; --fillh: #eceef1;
+    --ok: #2fad5f; --warn: #f0a020; --err: #f25d8e;
+    /* SOOP 品牌: 墨底 + 电光黄(平台主视觉) */
+    --soop: #1b1d22; --soop-accent: #ffd400;
+    /* 平台徽标底色: 图片上(深) / 卡面上(浅) 两档, 文字与色点完全一致 */
+    --tag-onimg: rgba(17,19,24,.74);
+    --shadow-card: 0 1px 2px rgba(0,0,0,.05);
+    --shadow-hover: 0 6px 18px rgba(0,0,0,.09);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--page); color: var(--ink1); min-width: 1320px;
+         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', sans-serif;
+         -webkit-font-smoothing: antialiased; }
+  button { font-family: inherit; }
+
+  /* ============ 设计稿外壳: 屏幕切换器 ============ */
+  .switcher { position: sticky; top: 0; z-index: 90; background: rgba(17,19,24,.95); color: #fff;
+              display: flex; align-items: center; gap: 6px; padding: 11px 22px; font-size: 12px; }
+  .switcher .brand { font-weight: 800; letter-spacing: .04em; margin-right: 12px; color: var(--soop-accent); }
+  .sw-btn { background: rgba(255,255,255,.08); color: #d6d9dd; border: none; cursor: pointer;
+            height: 29px; padding: 0 13px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .sw-btn:hover { background: rgba(255,255,255,.16); color: #fff; }
+  .sw-btn.on { background: var(--live); color: #fff; }
+  .switcher .meta { margin-left: auto; color: #8a8f98; font-size: 11.5px; }
+  .screen { display: none; }
+  .screen.on { display: block; }
+  .page { max-width: 1280px; margin: 0 auto; padding: 24px 28px 48px; }
+
+  h1.doc { font-size: 21px; font-weight: 800; letter-spacing: -.01em; }
+  .doc-sub { font-size: 12.5px; color: var(--ink2); margin-top: 6px; line-height: 1.8; }
+  .sec { display: flex; align-items: baseline; gap: 10px; padding: 0 2px 11px; margin-top: 30px; }
+  .sec h2 { font-size: 14px; font-weight: 800; }
+  .sec .d { font-size: 11.5px; color: var(--ink3); margin-left: auto; max-width: 660px; text-align: right; line-height: 1.6; }
+  .note { background: #fffdf0; border: 1px solid #f3e5b8; border-radius: 10px; padding: 11px 15px;
+          font-size: 12px; color: #6b5900; line-height: 1.75; }
+  .note b { color: #4a3d00; }
+  .note.gray { background: var(--card); border-color: var(--line); color: var(--ink2); }
+  .note.gray b { color: var(--ink1); }
+  .note.red { background: #fff5f7; border-color: #f7ccd6; color: #8c2f47; }
+  .note.red b { color: #6d1f33; }
+
+  /* ============ 通用控件 ============ */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: none; cursor: pointer;
+         border-radius: 8px; font-size: 12.5px; font-weight: 600; padding: 7px 16px; transition: all .15s; }
+  .btn:active { transform: scale(.97); }
+  .btn-primary { background: var(--live); color: #fff; box-shadow: 0 2px 8px rgba(251,114,153,.35); }
+  .btn-ghost { background: transparent; color: var(--ink2); border: 1px solid var(--line); font-weight: 500; }
+  .btn-sm { height: 28px; padding: 0 12px; font-size: 12px; border-radius: 7px; }
+
+  /* ---- 平台徽标 PlatTag: 本稿唯一新增基础组件 ----
+     三档尺寸 + 两种承载面, 文字永远在(不做纯色彩编码) */
+  .pt { display: inline-flex; align-items: center; gap: 5px; border-radius: 7px; font-weight: 800;
+        white-space: nowrap; letter-spacing: .01em; }
+  .pt .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .pt.p .dot { background: var(--live); box-shadow: 0 0 0 1.5px rgba(251,114,153,.28); }
+  .pt.s .dot { background: var(--soop-accent); box-shadow: 0 0 0 1.5px rgba(255,212,0,.3); }
+  /* 承载面 1: 图片上 → 墨底白字 */
+  .pt.onimg { background: var(--tag-onimg); color: #fff; -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+  /* 承载面 2: 卡面/列表上 → 浅底墨字 */
+  .pt.onsurf { background: var(--fill); color: var(--ink1); border: 1px solid var(--line); }
+  .pt.onsurf.p { color: var(--live-deep); }
+  .pt.onsurf.s { color: #23262d; }
+  .pt.lg { height: 24px; padding: 0 9px; font-size: 11.5px; }
+  .pt.md { height: 21px; padding: 0 7px; font-size: 11px; }
+  .pt.sm { height: 18px; padding: 0 6px; font-size: 10.5px; border-radius: 6px; gap: 4px; }
+  .pt.sm .dot { width: 5px; height: 5px; }
+
+  /* ---- 旧徽标(现状复刻, 用于对比) ---- */
+  .old { display: inline-flex; align-items: center; border-radius: 4px; font-size: 11px; font-weight: 700; padding: 3px 8px; }
+  .old.onimg-p { background: rgba(255,255,255,.85); color: var(--live); }
+  .old.onimg-s { background: rgba(0,0,0,.7); color: #e8ff3a; }
+  .old.surf-p { background: var(--fill); color: var(--live); padding: 0 6px; height: 18px; font-size: 10px; border-radius: 4px; }
+  .old.surf-s { background: rgba(0,0,0,.7); color: #e8ff3a; padding: 0 6px; height: 18px; font-size: 10px; border-radius: 4px; }
+  .old.rec-p { background: var(--fill); color: var(--live); padding: 0 8px; height: 22px; font-size: 11px; border-radius: 7px; }
+  .old.rec-s { background: rgba(0,0,0,.7); color: #e8ff3a; padding: 0 8px; height: 22px; font-size: 11px; border-radius: 7px; }
+
+  /* ---- 平台筛选 PlatFilter ---- */
+  .pf { display: inline-flex; align-items: center; gap: 4px; height: 27px; padding: 0 11px; border-radius: 999px;
+        font-size: 12px; border: 1px solid var(--line); background: var(--card); color: var(--ink2); cursor: pointer; }
+  .pf .n { font-size: 11px; opacity: .65; }
+  .pf.on { background: rgba(251,114,153,.1); border-color: var(--live); color: var(--live-deep); font-weight: 700; }
+  .pf.ghost { border-color: transparent; background: transparent; }
+  .pf.ghost.on { background: rgba(251,114,153,.1); }
+
+  /* ============ 应用外框 ============ */
+  .app { background: var(--card); border-bottom: 1px solid var(--line); padding: 0 20px; height: 64px;
+         display: flex; align-items: center; gap: 12px; }
+  .wordmark { line-height: 1.15; flex: none; }
+  .wordmark .w1 { font-size: 16px; font-weight: 700; letter-spacing: .01em; }
+  .wordmark .w2 { font-size: 10px; color: var(--ink3); letter-spacing: .2em; margin-top: -1px; font-weight: 600; }
+  .navtab { padding: 0 16px; font-size: 14px; color: var(--ink2); display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .navtab.on { color: var(--ink1); font-weight: 700; box-shadow: inset 0 -2px 0 var(--live); }
+  .navtab .cnt { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: rgba(251,114,153,.15);
+                 color: var(--live); font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+  .navtab .cnt.red { background: rgba(239,68,68,.1); color: #ef4444; }
+  .searchbox { flex: 1; display: flex; justify-content: center; }
+  .searchbox input { width: 100%; max-width: 420px; height: 40px; border-radius: 999px; border: 2px solid transparent;
+                     background: var(--page); padding: 0 40px 0 16px; font-size: 13px; color: var(--ink1); outline: none; font-family: inherit; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 999px;
+          background: rgba(251,114,153,.1); color: var(--live); font-size: 12px; font-weight: 700; }
+  .pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--live); display: block; }
+  .av { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 800;
+        color: #fff; background: linear-gradient(135deg, var(--live), #d879d0); box-shadow: 0 0 0 2px rgba(251,114,153,.3); position: relative; }
+  .av.s { background: #0f1115; color: var(--soop-accent); }
+  .av em { position: absolute; right: -1px; bottom: -1px; width: 11px; height: 11px; border-radius: 50%; background: #2fad5f; box-shadow: 0 0 0 2px #fff; font-style: normal; }
+  .wctl { display: flex; align-items: center; gap: 2px; color: var(--ink3); font-size: 13px; }
+  .wctl span { width: 30px; height: 26px; display: grid; place-items: center; border-radius: 6px; }
+
+  /* ============ 页面骨架 ============ */
+  .body { background: var(--page); padding: 20px 26px 26px; }
+  .ph { display: flex; align-items: flex-start; gap: 12px; }
+  .ph h3 { font-size: 17px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
+  .ph .sub { font-size: 12.5px; color: var(--ink3); margin-top: 3px; }
+  .ph .right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .tabs { display: flex; align-items: center; gap: 16px; margin-top: 14px; }
+  .utab { font-size: 13px; padding-bottom: 4px; border-bottom: 2px solid transparent; color: var(--ink2); display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .utab.on { color: var(--live); font-weight: 700; border-color: var(--live); }
+  .utab i { width: 8px; height: 8px; border-radius: 50%; display: block; }
+  .utab .n { font-size: 11px; color: var(--ink3); }
+  .frow { display: flex; align-items: center; gap: 8px; margin-top: 13px; font-size: 12px; color: var(--ink3); }
+
+  /* ============ 直播卡片 ============ */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(238px, 1fr)); gap: 22px 20px; margin-top: 18px; }
+  .lc { background: var(--card); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow-card); }
+  .thumb { position: relative; aspect-ratio: 16/9; background: linear-gradient(135deg, #d7dbe2, #eef0f4); overflow: hidden; }
+  .thumb.dark { background: linear-gradient(135deg, #2a2d34, #43474f); }
+  .thumb .g { position: absolute; inset: 0; display: grid; place-items: center; font-size: 26px; font-weight: 900; color: rgba(24,25,28,.13); letter-spacing: .06em; }
+  .thumb.dark .g { color: rgba(255,255,255,.16); }
+  .badges { position: absolute; top: 8px; left: 8px; display: flex; gap: 6px; align-items: center; }
+  .b-live { display: inline-flex; align-items: center; gap: 5px; background: var(--live); color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px; }
+  .b-live i { width: 6px; height: 6px; border-radius: 50%; background: #fff; display: block; }
+  .b-off { background: rgba(0,0,0,.45); color: rgba(255,255,255,.85); font-size: 11px; padding: 3px 8px; border-radius: 4px; }
+  .b-rec { display: inline-flex; align-items: center; gap: 5px; background: rgba(0,0,0,.6); color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px; }
+  .b-rec i { width: 6px; height: 6px; border-radius: 50%; background: #ef4444; display: block; }
+  .b-ready { display: inline-flex; align-items: center; gap: 4px; background: var(--ok); color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px; }
+  .b-19 { position: absolute; top: 8px; right: 8px; background: rgba(239,68,68,.9); color: #fff; font-size: 11px; font-weight: 700; padding: 3px 6px; border-radius: 4px; }
+  .lc-body { padding: 10px 12px 12px; }
+  .lc-title { font-size: 13.5px; font-weight: 600; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lc-host { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+  .lc-host .ava { width: 20px; height: 20px; border-radius: 50%; background: linear-gradient(135deg, #cfd4dc, #eef0f4); flex: none; }
+  .lc-host .nick { font-size: 12px; color: var(--ink1); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lc-host .uid { font-size: 11.5px; color: var(--ink3); margin-left: auto; flex: none; }
+  .lc-stats { display: flex; align-items: center; gap: 12px; margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--line);
+              font-size: 11.5px; color: var(--ink3); }
+  .lc-stats .dur { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .lc-stats .kv { display: inline-flex; align-items: center; gap: 4px; }
+  .lc-stats .kv svg { width: 14px; height: 14px; opacity: .8; }
+
+  /* 离线密集行 */
+  .ogrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; margin-top: 16px; }
+  .orow { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow-card); }
+  .orow .ava { width: 36px; height: 36px; border-radius: 50%; background: linear-gradient(135deg, #cfd4dc, #eef0f4); flex: none; filter: grayscale(.4); }
+  .orow .m { min-width: 0; flex: 1; }
+  .orow .n1 { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .orow .n2 { font-size: 11px; color: var(--ink3); display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+  .sw { width: 30px; height: 17px; border-radius: 999px; background: var(--fillh); position: relative; flex: none; }
+  .sw::after { content: ''; position: absolute; left: 2px; top: 2px; width: 13px; height: 13px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+  .sw.on { background: var(--live); }
+  .sw.on::after { left: 15px; }
+
+  /* ============ 对比栏 ============ */
+  .cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
+  .cmp > div > .cap { font-size: 11.5px; font-weight: 800; letter-spacing: .04em; margin-bottom: 8px; display: flex; align-items: center; gap: 7px; }
+  .cap .tagold { background: rgba(97,102,109,.12); color: var(--ink2); border-radius: 5px; padding: 2px 7px; font-size: 10.5px; }
+  .cap .tagnew { background: rgba(47,173,95,.13); color: #1e8a48; border-radius: 5px; padding: 2px 7px; font-size: 10.5px; }
+  .frame { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--card); box-shadow: var(--shadow-card); }
+  .frame .app { height: 52px; padding: 0 14px; gap: 8px; }
+  .frame .navtab { font-size: 12.5px; padding: 0 10px; }
+  .frame .wordmark .w1 { font-size: 14px; }
+  .frame .wordmark .w2 { font-size: 9px; }
+  .frame .searchbox input { height: 32px; font-size: 12px; }
+  .frame .pill { height: 26px; font-size: 11px; }
+  .frame .av { width: 26px; height: 26px; font-size: 10px; }
+  .frame .body { padding: 14px 16px 18px; }
+  .frame .grid { grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 14px 12px; }
+  .frame .lc-title { font-size: 12px; }
+  .frame .ogrid { grid-template-columns: 1fr 1fr; }
+
+  /* ============ 表格 / 清单 ============ */
+  table.t { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--card); border-radius: 12px; overflow: hidden;
+            box-shadow: var(--shadow-card); font-size: 12px; }
+  table.t th { text-align: left; font-size: 11px; letter-spacing: .04em; color: var(--ink3); font-weight: 700;
+               padding: 10px 14px; background: var(--fill); border-bottom: 1px solid var(--line); }
+  table.t td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; line-height: 1.65; color: var(--ink2); }
+  table.t tr:last-child td { border-bottom: none; }
+  table.t td.k { color: var(--ink1); font-weight: 600; width: 210px; }
+  table.t td.f { font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: var(--ink3); width: 300px; }
+  .v { display: inline-block; border-radius: 5px; padding: 1px 7px; font-size: 10.5px; font-weight: 800; }
+  .v.del { background: rgba(239,68,68,.1); color: #c53030; }
+  .v.uni { background: rgba(251,114,153,.12); color: var(--live-deep); }
+  .v.keep { background: rgba(97,102,109,.1); color: var(--ink2); }
+  .v.new { background: rgba(47,173,95,.13); color: #1e8a48; }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; background: var(--fill); padding: 1px 5px; border-radius: 4px; color: var(--live-deep); }
+  .cards2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .panel { background: var(--card); border-radius: 14px; box-shadow: var(--shadow-card); padding: 18px 20px; }
+  .panel h4 { font-size: 13px; font-weight: 800; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+  .panel p { font-size: 12px; color: var(--ink2); line-height: 1.8; }
+  .swatch { display: flex; gap: 10px; flex-wrap: wrap; }
+  .sw-item { width: 132px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .sw-item .c { height: 46px; }
+  .sw-item .l { padding: 7px 9px; font-size: 10.5px; color: var(--ink2); line-height: 1.5; font-family: ui-monospace, Consolas, monospace; }
+  .ol { margin-left: 18px; font-size: 12.5px; color: var(--ink2); line-height: 1.95; }
+  .ol li { margin-bottom: 4px; }
+  .ol b { color: var(--ink1); }
+  .kbd { font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; background: var(--card); color: var(--ink2); }
+</style>
+</head>
+<body>
+
+<div class="switcher">
+  <span class="brand">DUAL-PLATFORM UI v2</span>
+  <button class="sw-btn on" data-s="s1">① 诊断与原则</button>
+  <button class="sw-btn" data-s="s2">② 徽标系统</button>
+  <button class="sw-btn" data-s="s3">③ 直播大厅</button>
+  <button class="sw-btn" data-s="s4">④ 已关注墙</button>
+  <button class="sw-btn" data-s="s5">⑤ 录制 · 视频库</button>
+  <button class="sw-btn" data-s="s6">⑥ 账号 · 设置</button>
+  <button class="sw-btn" data-s="s7">⑦ 落地清单</button>
+  <span class="meta">依据 2026-09-29 实机界面与当前组件源码绘制 · 可读优先</span>
+</div>
+
+<!-- ============================================================ ① 诊断 ============================================================ -->
+<section class="screen on" id="s1">
+  <div class="page">
+    <h1 class="doc">双平台视觉收敛 · 现状诊断</h1>
+    <p class="doc-sub">
+      杂乱感的来源不是配色，而是<b>同一信息在一屏内被重复表达、且每次表达的重量都不一样</b>。平台身份目前有 10 处出口、4 套底色、3 种字号；
+      其中 5 处在"整屏只有一个平台"的场景里仍然每屏重复一次。本稿只做一件事：把平台身份收敛成<b>一个组件、一条规则</b>，其余全部让给可读性。
+    </p>
+
+    <div class="sec"><h2>1. 平台身份的 10 个出口（源码逐处核对）</h2><span class="d">"现状样式"列直接摘自组件 class，未做美化</span></div>
+    <table class="t">
+      <tr><th style="width:210px">位置</th><th style="width:300px">现状样式</th><th>问题</th><th style="width:96px">处置</th></tr>
+      <tr>
+        <td class="k">LiveCard 缩略图左上<br><span style="font-size:11px;color:var(--ink3);font-weight:400">大厅 / 已关注 / 播放页共用</span></td>
+        <td class="f">潘达 <code>bg-white/85 text-live</code><br>SOOP <code>bg-black/70 text-[#e8ff3a]</code></td>
+        <td>两平台重量差一个量级：白底粉字像"水印"，墨底黄字像"贴纸"。混排时视线先被 SOOP 抓走，扫读节奏被打断。</td>
+        <td><span class="v uni">统一</span></td>
+      </tr>
+      <tr>
+        <td class="k">MonitorView 离线行 @ID 后</td>
+        <td class="f"><code>px-1.5 rounded text-[10px] font-bold</code><br>潘达 <code>bg-fill text-live</code> / SOOP <code>bg-black/70</code></td>
+        <td>第 2 套底色 + 第 2 种字号（10px）。SOOP 那枚在白色卡面上是深灰块，比头像还重。</td>
+        <td><span class="v uni">统一</span></td>
+      </tr>
+      <tr>
+        <td class="k">RecordingsView 进行中卡头</td>
+        <td class="f"><code>h-[22px] px-2 rounded-[7px] text-[11px] font-bold</code><br>潘达 <code>bg-fill text-live</code> / SOOP <code>bg-black/70</code></td>
+        <td>第 3 套底色。与视频库、离线行同义不同形。</td>
+        <td><span class="v uni">统一</span></td>
+      </tr>
+      <tr>
+        <td class="k">LibraryView 分组头 + 明细行</td>
+        <td class="f">同离线行（<code>bg-fill text-live</code> / <code>bg-black/70</code>），且 <code>v-if="g.plat"</code> 与 <code>v-if="!g.plat"</code> 两处各写一遍</td>
+        <td>分组视图里平台已经进了目录名，明细行再挂一枚 → 同一屏同一信息两层。</td>
+        <td><span class="v del">去重</span></td>
+      </tr>
+      <tr>
+        <td class="k">MonitorView 平台筛选 chip</td>
+        <td class="f"><code>px-2.5 py-[3px] rounded-full text-[12px] border</code> + 计数</td>
+        <td>基准形态，保留。</td>
+        <td><span class="v uni">提为组件</span></td>
+      </tr>
+      <tr>
+        <td class="k">RecordingsView 平台筛选 chip</td>
+        <td class="f"><code>px-2.5 py-1 rounded-full text-[12px]</code> 无边框，选中 <code>bg-live/10</code></td>
+        <td>与监控墙 chip 差一条边框、差 2px 高度 → 切 tab 时同一控件变形，用户会怀疑自己换了页面。</td>
+        <td><span class="v uni">统一</span></td>
+      </tr>
+      <tr>
+        <td class="k">LibraryView 平台筛选 chip</td>
+        <td class="f">同录制页（无边框版）</td>
+        <td>同上，第三份复制粘贴。</td>
+        <td><span class="v uni">统一</span></td>
+      </tr>
+      <tr>
+        <td class="k">AccountView 平台分段</td>
+        <td class="f"><code>px-? py-? rounded border</code> 选中 <code>bg-live/10 border-live</code></td>
+        <td>第 4 种平台选择器形态（chip / 无边框 chip / 分段 / 弹窗分段）。</td>
+        <td><span class="v uni">统一</span></td>
+      </tr>
+      <tr>
+        <td class="k">MonitorView 关注弹窗平台分段</td>
+        <td class="f"><code>px-3 py-1 rounded-full text-[12.5px] border</code> + <code>bg-fill</code></td>
+        <td>第 5 种。同一份"选平台"语义在应用里有 5 个长相。</td>
+        <td><span class="v uni">统一</span></td>
+      </tr>
+      <tr>
+        <td class="k">TopNav 双头像 / 搜索 placeholder / 设置页长句</td>
+        <td class="f"><code>bg-[#0f1115] text-[#e8ff3a]</code> vs 渐变粉；<code>搜索 PandaLive 主播 / 标题</code>；<code>检测模式(仅 PandaLive)</code></td>
+        <td>头像组无文字标注，只有靠 tooltip 才知道哪枚是谁；搜索框在 SOOP 下永远搜不到东西；"仅 PandaLive"用长句解释平台边界。</td>
+        <td><span class="v new">改造</span></td>
+      </tr>
+    </table>
+
+    <div class="sec"><h2>2. 六条原则（本稿全部可验证）</h2><span class="d">P3 原案"卡片左侧色轨"已按可读优先撤下，理由见下</span></div>
+    <div class="cards2">
+      <div class="panel">
+        <h4>P1 · 一个身份只有一个出口</h4>
+        <p>同一屏内平台信息出现次数 ≤ 1。筛选器已限定平台时（<code>platFilter !== 'all'</code>），卡片上的徽标是纯噪音，直接不渲染。</p>
+      </div>
+      <div class="panel">
+        <h4>P2 · 徽标 = 文字 + 色点，永不只有颜色</h4>
+        <p>识别由 <b>SOOP / PandaLive 文字</b>承担，色点只是余光强化。色觉障碍、截图灰度打印、深色主题下都不失效。<b>这也是撤掉"色轨"的原因</b>：3px 竖条是无文字编码，一旦作为唯一区分就违反本条。</p>
+      </div>
+      <div class="panel">
+        <h4>P3 · 形状随承载面，不随平台</h4>
+        <p>图片上 = 墨底白字，卡面上 = 浅底墨字。两档只差承载面底色，文字/圆角/字号完全一致。<b>不再为 SOOP 单独造一套深色贴纸</b>。</p>
+      </div>
+      <div class="panel">
+        <h4>P4 · 一个控件一个长相</h4>
+        <p>"选平台"在监控墙 / 录制 / 视频库 / 账号 / 弹窗里必须是同一个 <code>PlatFilter</code>，同高度同边框同选中态。</p>
+      </div>
+      <div class="panel">
+        <h4>P5 · 平台边界用徽标说，不用长句说</h4>
+        <p>"检测模式(仅 PandaLive)" → <code>检测模式</code> + PandaLive 小徽标；说明句里"SOOP 恒为逐频道探针"这类补充保留，但只在 tooltip / 次级文案，不进标题。</p>
+      </div>
+      <div class="panel">
+        <h4>P6 · 大厅是单平台页，就别装作是双平台页</h4>
+        <p>大厅只聚合 PandaLive（本期决策），却给 241 张卡各挂一枚 PandaLive 徽标 —— 这是当前最大的一处重复。改：页头挂一枚，卡片不挂。</p>
+      </div>
+    </div>
+
+    <div class="sec"><h2>3. 可读优先的红线（本稿不越界的地方）</h2></div>
+    <ul class="ol">
+      <li><b>不缩小正文字号。</b>标题 13.5px / 昵称 12px / 元信息 11.5px 一律不动，只减重复元素，不压信息密度。</li>
+      <li><b>不把"SOOP"缩成图标。</b>曾用过 <code>S</code> 单字母方案，实测在 11px 下与 <code>5</code>、<code>s</code> 难分，且失去搜索可读性 —— 撤下，只保留在顶栏头像（那里有 tooltip 且是账号语义，不是数据语义）。</li>
+      <li><b>不靠颜色区分在播/离线。</b>状态继续由文字徽标（直播中 / 已下播）承担。</li>
+      <li><b>SOOP 卡片不补假数据。</b>无单频道人数接口（实测），统计列继续整列不出现，而不是显示 0 —— 0 会被读成"没人看"。</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============================================================ ② 徽标系统 ============================================================ -->
+<section class="screen" id="s2">
+  <div class="page">
+    <h1 class="doc">PlatTag · 唯一平台徽标组件</h1>
+    <p class="doc-sub">一个组件、两个承载面变体、三档尺寸。全应用 10 个出口收敛到它，样式差异只由"贴在图片上还是贴在卡面上"决定。</p>
+
+    <div class="sec"><h2>1. 两档承载面 × 三档尺寸</h2><span class="d">实际渲染时由调用点传 <code>surface="onimg|onsurf"</code> 与 <code>size</code></span></div>
+    <div class="cmp">
+      <div>
+        <div class="cap"><span class="tagold">现状</span> 同一平台 4 种重量</div>
+        <div class="frame" style="padding:16px;display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;gap:8px;align-items:center"><span class="old onimg-p">PandaLive</span><span class="old onimg-s">SOOP</span><span style="font-size:11px;color:var(--ink3)">缩略图（LiveCard）</span></div>
+          <div style="display:flex;gap:8px;align-items:center"><span class="old surf-p">PandaLive</span><span class="old surf-s">SOOP</span><span style="font-size:11px;color:var(--ink3)">离线行（MonitorView）</span></div>
+          <div style="display:flex;gap:8px;align-items:center"><span class="old rec-p">PandaLive</span><span class="old rec-s">SOOP</span><span style="font-size:11px;color:var(--ink3)">录制卡头（RecordingsView）</span></div>
+          <div style="display:flex;gap:8px;align-items:center"><span class="old surf-p">PandaLive</span><span class="old surf-s">SOOP</span><span style="font-size:11px;color:var(--ink3)">视频库（LibraryView，另写一遍）</span></div>
+        </div>
+      </div>
+      <div>
+        <div class="cap"><span class="tagnew">改后</span> 一套形，两档底</div>
+        <div class="frame" style="padding:16px;display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;gap:8px;align-items:center;background:linear-gradient(135deg,#c9ced7,#e9ecf1);padding:8px;border-radius:8px">
+            <span class="pt md onimg p"><span class="dot"></span>PandaLive</span>
+            <span class="pt md onimg s"><span class="dot"></span>SOOP</span>
+            <span style="font-size:11px;color:#5a5f68">onimg（图片上）</span>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center"><span class="pt md onsurf p"><span class="dot"></span>PandaLive</span><span class="pt md onsurf s"><span class="dot"></span>SOOP</span><span style="font-size:11px;color:var(--ink3)">onsurf · md（列表/卡面）</span></div>
+          <div style="display:flex;gap:8px;align-items:center"><span class="pt lg onsurf p"><span class="dot"></span>PandaLive</span><span class="pt lg onsurf s"><span class="dot"></span>SOOP</span><span style="font-size:11px;color:var(--ink3)">onsurf · lg（页头/卡头）</span></div>
+          <div style="display:flex;gap:8px;align-items:center"><span class="pt sm onsurf p"><span class="dot"></span>PandaLive</span><span class="pt sm onsurf s"><span class="dot"></span>SOOP</span><span style="font-size:11px;color:var(--ink3)">onsurf · sm（设置项行内）</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec"><h2>2. 为什么"墨底白字 + 色点"而不是"品牌色底 + 白字"</h2></div>
+    <div class="cards2">
+      <div class="panel">
+        <h4>对比度实测</h4>
+        <p>白字压 <code>#fb7299</code> 只有约 <b>2.9:1</b>，11px 粗体在 1080p 上偏糊；粉字压白约 <b>3.0:1</b>，同样在临界。<br>
+        白字压 <code>rgba(17,19,24,.74)</code> 约 <b>13:1</b>，墨字压 <code>#f4f5f7</code> 约 <b>16:1</b> —— 两档都远超正文要求。<br>
+        <b>结论：底色选深/浅中性，平台色只留给 6px 圆点</b>，可读性优先于品牌色铺陈。</p>
+      </div>
+      <div class="panel">
+        <h4>深色主题下的行为</h4>
+        <p><code>onimg</code> 档不变（本来就压在图片上）。<code>onsurf</code> 档底色走 <code>--fill</code> 变量，自动变成 <code>#262629</code>，文字走 <code>--ink1</code> 自动变浅 —— 组件不需要写 <code>dark:</code> 分支，这是它比现状 4 套硬编码色值更稳的地方。</p>
+      </div>
+    </div>
+
+    <div class="sec"><h2>3. 组件签名（落地时照此实现）</h2></div>
+    <div class="panel" style="font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:2;color:var(--ink1)">
+      // src/renderer/src/components/PlatTag.vue<br>
+      props: { platform: Platform; size?: 'sm'|'md'|'lg'; surface?: 'onimg'|'onsurf' }<br>
+      template: &lt;span class="pt [size] [surface] [p|s]"&gt;&lt;i class="dot"/&gt;{{ platform === 'soop' ? 'SOOP' : 'PandaLive' }}&lt;/span&gt;<br><br>
+      // src/renderer/src/components/PlatFilter.vue<br>
+      props: { modelValue: 'all'|Platform; counts?: Record&lt;string, number&gt;; showAll?: boolean }<br>
+      emits: 'update:modelValue' &nbsp;·&nbsp; 内部复用 PlatTag 的色点，保证 chip 与徽标同源
+    </div>
+    <div class="note" style="margin-top:16px"><b>为什么色点也进 PlatTag：</b>筛选 chip 的选中态目前用纯粉色（<code>bg-live/10 border-live</code>）表达，选 "SOOP" 时也是粉底 —— 严格说这已经是"用潘达的颜色代表 SOOP"。改后 chip 内嵌同一枚色点，选中态只加粗不改色，语义不再串线。</div>
+  </div>
+</section>
+
+<!-- ============================================================ ③ 大厅 ============================================================ -->
+<section class="screen" id="s3">
+  <div class="page">
+    <h1 class="doc">③ 直播大厅 · 单平台页去掉满屏徽标</h1>
+    <p class="doc-sub">
+      左：2026-09-29 实机截图复刻（241 个直播间、每页 20 个，每卡一枚白底粉字 PandaLive）。右：改后。<br>
+      <b>大厅是 PandaLive 专有能力（本期决策），所以平台身份属于页头，不属于卡片。</b>
+    </p>
+
+    <div class="sec"><h2>整页对比</h2><span class="d">卡片信息层级、字号、栅格宽度一字未改，只摘掉重复徽标</span></div>
+    <div class="cmp">
+      <!-- 现状 -->
+      <div>
+        <div class="cap"><span class="tagold">现状</span> 每卡一枚，20 枚/页</div>
+        <div class="frame">
+          <div class="app">
+            <div class="wordmark"><div class="w1">PandaLive</div><div class="w2">MONITOR</div></div>
+            <div class="navtab on">直播大厅</div><div class="navtab">已关注</div><div class="navtab">录制管理</div><div class="navtab">视频库</div>
+            <div class="searchbox"><input value="搜索 PandaLive 主播 / 标题" /></div>
+            <div class="pill"><i></i>241 直播中</div>
+            <div class="av">潘<em></em></div><div class="av s">S<em></em></div>
+          </div>
+          <div class="body">
+            <div class="ph"><h3>直播大厅 <span style="font-size:12px;color:var(--live);font-weight:600">241 直播中</span></h3></div>
+            <div class="frow"><span style="color:var(--live);font-weight:700">人气排序</span><span>粉丝量</span><span>最新开播</span><span>只看已关注</span><span>仅看19+</span><span>仅看粉丝房</span></div>
+            <div class="grid">
+              <div class="lc"><div class="thumb"><div class="g">PANDA</div><div class="badges"><span class="b-live"><i></i>直播中</span><span class="old onimg-p">PandaLive</span></div><span class="b-19">19+</span></div>
+                <div class="lc-body"><div class="lc-title">존재만으로도 빛나는 하루</div><div class="lc-host"><span class="ava"></span><span class="nick">노을</span><span class="uid">@demo_kr01</span></div>
+                <div class="lc-stats"><span class="kv">620</span><span class="kv">1,355</span><span class="kv">3,812</span><span class="dur">3小时21分</span></div></div></div>
+              <div class="lc"><div class="thumb dark"><div class="g">BJ</div><div class="badges"><span class="b-live"><i></i>直播中</span><span class="old onimg-p">PandaLive</span></div></div>
+                <div class="lc-body"><div class="lc-title">연출하는 최강의 실력자 달토끼</div><div class="lc-host"><span class="ava"></span><span class="nick">달토끼</span><span class="uid">@demo_kr02</span></div>
+                <div class="lc-stats"><span class="kv">547</span><span class="kv">0</span><span class="kv">1,375</span><span class="dur">1小时49分</span></div></div></div>
+              <div class="lc"><div class="thumb"><div class="g">FROZE</div><div class="badges"><span class="b-live"><i></i>直播中</span><span class="old onimg-p">PandaLive</span></div></div>
+                <div class="lc-body"><div class="lc-title">[구름] 비오는 날의 단란한 자취생</div><div class="lc-host"><span class="ava"></span><span class="nick">구름</span><span class="uid">@demo_kr03</span></div>
+                <div class="lc-stats"><span class="kv">138</span><span class="kv">2,197</span><span class="kv">37</span><span class="dur">1小时48分</span></div></div></div>
+              <div class="lc"><div class="thumb dark"><div class="g">LV</div><div class="badges"><span class="b-live"><i></i>直播中</span><span class="old onimg-p">PandaLive</span></div></div>
+                <div class="lc-body"><div class="lc-title">정성스러운 먹방 타임</div><div class="lc-host"><span class="ava"></span><span class="nick">먹신</span><span class="uid">@muk</span></div>
+                <div class="lc-stats"><span class="kv">180</span><span class="kv">471</span><span class="kv">4,435</span><span class="dur">1小时48分</span></div></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- 改后 -->
+      <div>
+        <div class="cap"><span class="tagnew">改后</span> 页头一枚，卡片零枚</div>
+        <div class="frame">
+          <div class="app">
+            <div class="wordmark"><div class="w1">PandaLive</div><div class="w2">MONITOR</div></div>
+            <div class="navtab on">直播大厅</div><div class="navtab">已关注</div><div class="navtab">录制管理</div><div class="navtab">视频库</div>
+            <div class="searchbox"><input value="搜索大厅主播 / 标题" /></div>
+            <div class="pill"><i></i>241 直播中</div>
+            <div class="av">潘<em></em></div><div class="av s">S<em></em></div>
+          </div>
+          <div class="body">
+            <div class="ph"><h3>直播大厅 <span style="font-size:12px;color:var(--live);font-weight:600">241 直播中</span> <span class="pt md onsurf p"><span class="dot"></span>PandaLive</span></h3>
+              <div class="right"><span style="font-size:11.5px;color:var(--ink3)">SOOP 房间请在「已关注」粘贴地址添加</span></div></div>
+            <div class="frow"><span style="color:var(--live);font-weight:700">人气排序</span><span>粉丝量</span><span>最新开播</span><span>只看已关注</span><span>仅看19+</span><span>仅看粉丝房</span></div>
+            <div class="grid">
+              <div class="lc"><div class="thumb"><div class="g">PANDA</div><div class="badges"><span class="b-live"><i></i>直播中</span></div><span class="b-19">19+</span></div>
+                <div class="lc-body"><div class="lc-title">존재만으로도 빛나는 하루</div><div class="lc-host"><span class="ava"></span><span class="nick">노을</span><span class="uid">@demo_kr01</span></div>
+                <div class="lc-stats"><span class="kv">620</span><span class="kv">1,355</span><span class="kv">3,812</span><span class="dur">3小时21分</span></div></div></div>
+              <div class="lc"><div class="thumb dark"><div class="g">BJ</div><div class="badges"><span class="b-live"><i></i>直播中</span></div></div>
+                <div class="lc-body"><div class="lc-title">연출하는 최강의 실력자 달토끼</div><div class="lc-host"><span class="ava"></span><span class="nick">달토끼</span><span class="uid">@demo_kr02</span></div>
+                <div class="lc-stats"><span class="kv">547</span><span class="kv">0</span><span class="kv">1,375</span><span class="dur">1小时49分</span></div></div></div>
+              <div class="lc"><div class="thumb"><div class="g">FROZE</div><div class="badges"><span class="b-live"><i></i>直播中</span></div></div>
+                <div class="lc-body"><div class="lc-title">[구름] 비오는 날의 단란한 자취생</div><div class="lc-host"><span class="ava"></span><span class="nick">구름</span><span class="uid">@demo_kr03</span></div>
+                <div class="lc-stats"><span class="kv">138</span><span class="kv">2,197</span><span class="kv">37</span><span class="dur">1小时48分</span></div></div></div>
+              <div class="lc"><div class="thumb dark"><div class="g">LV</div><div class="badges"><span class="b-live"><i></i>直播中</span></div></div>
+                <div class="lc-body"><div class="lc-title">정성스러운 먹방 타임</div><div class="lc-host"><span class="ava"></span><span class="nick">먹신</span><span class="uid">@muk</span></div>
+                <div class="lc-stats"><span class="kv">180</span><span class="kv">471</span><span class="kv">4,435</span><span class="dur">1小时48分</span></div></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec"><h2>为什么大厅的徽标可以整列删掉</h2></div>
+    <ul class="ol">
+      <li>大厅数据源写死 <code>platform: 'pandalive'</code>（ExploreCard 第 21 行），<b>结构上不可能出现 SOOP 卡</b> —— 徽标信息量为 0。</li>
+      <li>删掉后缩略图左上角只剩「直播中 / REC / 源就绪」，这三个才是用户扫卡时真正要比较的维度。</li>
+      <li>页头那枚 <code>PandaLive</code> 徽标 + 右侧「SOOP 房间请在已关注粘贴地址」把"这个 tab 是谁的"说清楚，同时补上了当前缺失的<b>跨 tab 指引</b>（新用户找不到 SOOP 入口）。</li>
+      <li>搜索 placeholder 由「搜索 PandaLive 主播 / 标题」改「搜索大厅主播 / 标题」：搜索本来就只作用于大厅（<code>keyword</code> 会强制跳 explore），"PandaLive" 三字在这里是误导 —— 用户会以为它能搜 SOOP。</li>
+    </ul>
+    <div class="note red" style="margin-top:16px"><b>唯一需要小心的连带改动：</b>LiveCard 是 大厅 / 已关注 / 播放页 共用组件。徽标必须做成 <code>showPlatform</code> 开关（默认 true，大厅传 false），不能直接删模板 —— 否则已关注墙失去唯一的常驻平台标记。</div>
+  </div>
+</section>
+
+<!-- ============================================================ ④ 已关注 ============================================================ -->
+<section class="screen" id="s4">
+  <div class="page">
+    <h1 class="doc">④ 已关注墙 · 徽标随筛选态显隐</h1>
+    <p class="doc-sub">这里是两平台真正混排的地方，徽标必须留；但"筛选已经限定平台"时它是重复信息，随 <code>platFilter</code> 收起。</p>
+
+    <div class="sec"><h2>状态 A：筛选 = 全部（徽标在场，用 onimg 档）</h2></div>
+    <div class="frame">
+      <div class="app">
+        <div class="wordmark"><div class="w1">PandaLive</div><div class="w2">MONITOR</div></div>
+        <div class="navtab">直播大厅</div><div class="navtab on">已关注 <span class="cnt">37</span></div><div class="navtab">录制管理</div><div class="navtab">视频库</div>
+        <div class="searchbox"><input placeholder="搜索大厅主播 / 标题" /></div>
+        <div class="pill"><i></i>9 直播中</div><div class="av">潘<em></em></div><div class="av s">S<em></em></div>
+      </div>
+      <div class="body">
+        <div class="ph"><h3>已关注主播</h3><div class="sub" style="margin-left:10px">共 37 位关注 · 9 位直播中</div>
+          <div class="right"><input style="height:30px;width:150px;border-radius:8px;border:1px solid var(--line);padding:0 10px;font-size:12px;background:#fff" placeholder="搜索已关注"/><button class="btn btn-primary btn-sm">+ 关注主播</button></div></div>
+        <div class="tabs">
+          <div class="utab on"><i style="background:var(--live)"></i>直播中 <span class="n">9</span></div>
+          <div class="utab"><i style="background:var(--ink3)"></i>已下播 <span class="n">28</span></div>
+        </div>
+        <div class="frow"><span>平台</span>
+          <button class="pf on">全部 <span class="n">9</span></button>
+          <button class="pf"><span class="pt sm onsurf p" style="height:15px;padding:0 4px"><span class="dot"></span></span>PandaLive <span class="n">6</span></button>
+          <button class="pf"><span class="pt sm onsurf s" style="height:15px;padding:0 4px"><span class="dot"></span></span>SOOP <span class="n">3</span></button>
+        </div>
+        <div class="grid">
+          <div class="lc"><div class="thumb"><div class="g">PANDA</div><div class="badges"><span class="b-live"><i></i>直播中</span><span class="pt md onimg p"><span class="dot"></span>PandaLive</span></div></div>
+            <div class="lc-body"><div class="lc-title">오늘도 게임 한 판</div><div class="lc-host"><span class="ava"></span><span class="nick">노을</span><span class="uid">@demo_kr01</span></div>
+            <div class="lc-stats"><span class="kv">620</span><span class="kv">1,355</span><span class="kv">3,812</span><span class="dur">3小时21分</span></div></div></div>
+          <div class="lc"><div class="thumb dark"><div class="g">SOOP</div><div class="badges"><span class="b-live"><i></i>直播中</span><span class="pt md onimg s"><span class="dot"></span>SOOP</span></div></div>
+            <div class="lc-body"><div class="lc-title">랭크 게임 중입니다</div><div class="lc-host"><span class="ava"></span><span class="nick">demo_kr04</span><span class="uid">@demo_kr04</span></div>
+            <div class="lc-stats"><span class="dur">0小时47分</span></div></div></div>
+          <div class="lc"><div class="thumb"><div class="g">FROZE</div><div class="badges"><span class="b-live"><i></i>直播中</span><span class="b-ready">⚡源就绪</span><span class="pt md onimg p"><span class="dot"></span>PandaLive</span></div></div>
+            <div class="lc-body"><div class="lc-title">[구름] 비오는 날 자취생</div><div class="lc-host"><span class="ava"></span><span class="nick">구름</span><span class="uid">@demo_kr03</span></div>
+            <div class="lc-stats"><span class="kv">138</span><span class="kv">2,197</span><span class="kv">37</span><span class="dur">1小时48分</span></div></div></div>
+          <div class="lc"><div class="thumb dark"><div class="g">S</div><div class="badges"><span class="b-live"><i></i>直播中</span><span class="b-rec"><i></i>REC</span><span class="pt md onimg s"><span class="dot"></span>SOOP</span></div><span class="b-19">19+</span></div>
+            <div class="lc-body"><div class="lc-title">19+ 방송 테스트 중</div><div class="lc-host"><span class="ava"></span><span class="nick">감자</span><span class="uid">@demo_kr05</span></div>
+            <div class="lc-stats"><span class="dur">0小时12分</span></div></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec"><h2>状态 B：筛选 = SOOP（徽标收起，平台由筛选器表达）</h2><span class="d">同屏只剩一个平台时，每卡一枚徽标 = 大厅那个问题的翻版</span></div>
+    <div class="cmp">
+      <div>
+        <div class="cap"><span class="tagold">现状</span> 筛选后仍每卡挂一枚</div>
+        <div class="frame"><div class="body">
+          <div class="frow" style="margin-top:0"><span>平台</span><button class="pf">全部</button><button class="pf">PandaLive <span class="n">6</span></button><button class="pf on">SOOP <span class="n">3</span></button></div>
+          <div class="grid">
+            <div class="lc"><div class="thumb dark"><div class="g">SOOP</div><div class="badges"><span class="b-live"><i></i>直播中</span><span class="old onimg-s">SOOP</span></div></div>
+              <div class="lc-body"><div class="lc-title">랭크 게임 중입니다</div><div class="lc-host"><span class="ava"></span><span class="nick">demo_kr04</span><span class="uid">@demo_kr04</span></div><div class="lc-stats"><span class="dur">0小时47分</span></div></div></div>
+            <div class="lc"><div class="thumb dark"><div class="g">S</div><div class="badges"><span class="b-live"><i></i>直播中</span><span class="old onimg-s">SOOP</span></div><span class="b-19">19+</span></div>
+              <div class="lc-body"><div class="lc-title">19+ 방송 테스트 중</div><div class="lc-host"><span class="ava"></span><span class="nick">감자</span><span class="uid">@demo_kr05</span></div><div class="lc-stats"><span class="dur">0小时12分</span></div></div></div>
+          </div>
+        </div></div>
+      </div>
+      <div>
+        <div class="cap"><span class="tagnew">改后</span> 页头回声 + 卡片干净</div>
+        <div class="frame"><div class="body">
+          <div class="frow" style="margin-top:0"><span>平台</span><button class="pf">全部</button><button class="pf">PandaLive <span class="n">6</span></button><button class="pf on"><span class="pt sm onsurf s" style="height:15px;padding:0 4px;border:none;background:transparent"><span class="dot"></span></span>SOOP <span class="n">3</span></button>
+            <span style="margin-left:auto;font-size:11.5px;color:var(--ink3)">当前仅显示 SOOP · <span style="color:var(--live)">点击全部恢复混排</span></span></div>
+          <div class="grid">
+            <div class="lc"><div class="thumb dark"><div class="g">SOOP</div><div class="badges"><span class="b-live"><i></i>直播中</span></div></div>
+              <div class="lc-body"><div class="lc-title">랭크 게임 중입니다</div><div class="lc-host"><span class="ava"></span><span class="nick">demo_kr04</span><span class="uid">@demo_kr04</span></div><div class="lc-stats"><span class="dur">0小时47分</span></div></div></div>
+            <div class="lc"><div class="thumb dark"><div class="g">S</div><div class="badges"><span class="b-live"><i></i>直播中</span></div><span class="b-19">19+</span></div>
+              <div class="lc-body"><div class="lc-title">19+ 방송 테스트 중</div><div class="lc-host"><span class="ava"></span><span class="nick">감자</span><span class="uid">@demo_kr05</span></div><div class="lc-stats"><span class="dur">0小时12分</span></div></div></div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+    <div class="note gray" style="margin-top:16px"><b>可读优先的取舍：</b>状态 B 完全去掉徽标，是靠"筛选器 + 页头回声文字"两层说明平台，而不是靠颜色。若担心误读，可退一步只在卡片 <b>@ID 行</b>保留 <code>sm/onimg</code> 短徽标 —— 但不要再回到缩略图左上角，那里是状态徽标的地盘。</div>
+
+    <div class="sec"><h2>离线行：徽标从"@ID 后面的深灰块"改为行尾轻徽标</h2></div>
+    <div class="cmp">
+      <div>
+        <div class="cap"><span class="tagold">现状</span></div>
+        <div class="frame"><div class="body" style="padding:14px"><div class="ogrid" style="margin-top:0">
+          <div class="orow"><span class="ava"></span><div class="m"><div class="n1">demo_kr04</div><div class="n2">@demo_kr04 <span class="old surf-s">SOOP</span></div></div><span class="sw"></span></div>
+          <div class="orow"><span class="ava"></span><div class="m"><div class="n1">노을</div><div class="n2">@demo_kr01 <span class="old surf-p">PandaLive</span></div></div><span class="sw on"></span></div>
+        </div></div></div>
+      </div>
+      <div>
+        <div class="cap"><span class="tagnew">改后</span> 徽标与 ID 同行但不再压深色块</div>
+        <div class="frame"><div class="body" style="padding:14px"><div class="ogrid" style="margin-top:0">
+          <div class="orow"><span class="ava"></span><div class="m"><div class="n1">demo_kr04</div><div class="n2">@demo_kr04 · <span style="color:var(--ink2)">SOOP</span></div></div><span class="pt sm onsurf s"><span class="dot"></span>SOOP</span><span class="sw"></span></div>
+          <div class="orow"><span class="ava"></span><div class="m"><div class="n1">노을</div><div class="n2">@demo_kr01 · <span style="color:var(--ink2)">PandaLive</span></div></div><span class="pt sm onsurf p"><span class="dot"></span>PandaLive</span><span class="sw on"></span></div>
+        </div></div></div>
+      </div>
+    </div>
+    <p style="font-size:12px;color:var(--ink2);margin-top:10px;line-height:1.8">离线行是密度最高的视图，深色 SOOP 块在这里最刺眼。改后徽标移到行尾、与"自动录制"开关同列，形成一条稳定的右边缘；<b>@ID 行同时用纯文字重复一次平台</b>，这样即使徽标被截断（窄窗口），信息也不丢 —— 这是可读优先，不是极简优先。</p>
+  </div>
+</section>
+
+<!-- ============================================================ ⑤ 录制 / 视频库 ============================================================ -->
+<section class="screen" id="s5">
+  <div class="page">
+    <h1 class="doc">⑤ 录制管理 · 视频库</h1>
+    <p class="doc-sub">这两页的平台筛选是本轮刚加的，形态与监控墙不一致（无边框 / 有边框两套），且视频库在分组视图里把平台说了两遍。</p>
+
+    <div class="sec"><h2>录制管理 · 进行中</h2><span class="d">概览数字保持全局口径（不随筛选缩小），只有列表随筛选</span></div>
+    <div class="cmp">
+      <div>
+        <div class="cap"><span class="tagold">现状</span> chip 无边框，徽标第 3 套底色</div>
+        <div class="frame"><div class="body" style="padding:16px">
+          <div class="ph"><h3 style="font-size:15px">录制管理</h3><div class="sub" style="margin-top:6px">进行中 2 · 已写字节 1.4 GB</div></div>
+          <div class="frow"><button class="pf ghost on">全部</button><button class="pf ghost">PandaLive</button><button class="pf ghost">SOOP</button></div>
+          <div style="margin-top:14px;background:var(--card);border-radius:14px;box-shadow:var(--shadow-card);padding:16px 18px">
+            <div style="display:flex;align-items:center;gap:14px">
+              <div style="width:120px;height:68px;border-radius:9px;background:linear-gradient(135deg,#2a2d34,#43474f);flex:none"></div>
+              <div style="min-width:0;flex:1">
+                <div style="display:flex;align-items:center;gap:8px"><span class="old rec-s">SOOP</span><span style="font-size:13.5px;font-weight:700">demo_kr04</span></div>
+                <div style="font-size:11.5px;color:var(--ink3);margin-top:6px">@demo_kr04 · 00:47:12 · 3,200 kbps</div>
+              </div>
+              <div style="font-size:11.5px;color:var(--ink3)">0.6 GB</div>
+            </div>
+          </div>
+          <div style="margin-top:10px;background:var(--card);border-radius:14px;box-shadow:var(--shadow-card);padding:16px 18px">
+            <div style="display:flex;align-items:center;gap:14px">
+              <div style="width:120px;height:68px;border-radius:9px;background:linear-gradient(135deg,#d7dbe2,#eef0f4);flex:none"></div>
+              <div style="min-width:0;flex:1">
+                <div style="display:flex;align-items:center;gap:8px"><span class="old rec-p">PandaLive</span><span style="font-size:13.5px;font-weight:700">노을</span></div>
+                <div style="font-size:11.5px;color:var(--ink3);margin-top:6px">@demo_kr01 · 03:21:04 · 4,000 kbps</div>
+              </div>
+              <div style="font-size:11.5px;color:var(--ink3)">0.8 GB</div>
+            </div>
+          </div>
+        </div></div>
+      </div>
+      <div>
+        <div class="cap"><span class="tagnew">改后</span> chip 与监控墙同源，徽标走 PlatTag</div>
+        <div class="frame"><div class="body" style="padding:16px">
+          <div class="ph"><h3 style="font-size:15px">录制管理</h3><div class="sub" style="margin-top:6px">进行中 2 · 已写字节 1.4 GB</div></div>
+          <div class="frow"><button class="pf on">全部 <span class="n">2</span></button><button class="pf">PandaLive <span class="n">1</span></button><button class="pf">SOOP <span class="n">1</span></button></div>
+          <div style="margin-top:14px;background:var(--card);border-radius:14px;box-shadow:var(--shadow-card);padding:16px 18px">
+            <div style="display:flex;align-items:center;gap:14px">
+              <div style="width:120px;height:68px;border-radius:9px;background:linear-gradient(135deg,#2a2d34,#43474f);flex:none;position:relative"><span class="pt sm onimg s" style="position:absolute;left:6px;top:6px"><span class="dot"></span>SOOP</span></div>
+              <div style="min-width:0;flex:1">
+                <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13.5px;font-weight:700">demo_kr04</span><span style="font-size:11.5px;color:var(--ink3)">@demo_kr04</span></div>
+                <div style="font-size:11.5px;color:var(--ink3);margin-top:6px">00:47:12 · 3,200 kbps · soop/demo_kr04(demo_kr04)/</div>
+              </div>
+              <div style="font-size:11.5px;color:var(--ink3)">0.6 GB</div>
+            </div>
+          </div>
+          <div style="margin-top:10px;background:var(--card);border-radius:14px;box-shadow:var(--shadow-card);padding:16px 18px">
+            <div style="display:flex;align-items:center;gap:14px">
+              <div style="width:120px;height:68px;border-radius:9px;background:linear-gradient(135deg,#d7dbe2,#eef0f4);flex:none;position:relative"><span class="pt sm onimg p" style="position:absolute;left:6px;top:6px"><span class="dot"></span>PandaLive</span></div>
+              <div style="min-width:0;flex:1">
+                <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13.5px;font-weight:700">노을</span><span style="font-size:11.5px;color:var(--ink3)">@demo_kr01</span></div>
+                <div style="font-size:11.5px;color:var(--ink3);margin-top:6px">03:21:04 · 4,000 kbps · pandalive/노을(demo_kr01)/</div>
+              </div>
+              <div style="font-size:11.5px;color:var(--ink3)">0.8 GB</div>
+            </div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+    <div class="note gray" style="margin-top:14px"><b>录制页的两条专属理由：</b>① 两平台主播可能同名，卡面只有昵称会录错人，所以徽标不能删，只能统一；② 落盘目录本身带平台段（<code>保存目录/平台/主播名(ID)/</code>），把它显示在元信息行里，比再挂一枚徽标更有解释力 —— 于是徽标从"卡头"移到"封面左上"，卡头留给昵称。</div>
+
+    <div class="sec"><h2>视频库 · 分组视图去重</h2><span class="d">现状：分组头有 <code>g.plat</code> 徽标，明细行又有 <code>!g.plat</code> 徽标 —— 两套 v-if 拼起来正好"永远只有一处显示"，但读代码的人要推一遍才敢改</span></div>
+    <div class="cmp">
+      <div>
+        <div class="cap"><span class="tagold">现状</span> 分组头有 / 明细行无（靠 v-if 互斥）</div>
+        <div class="frame"><div class="body" style="padding:16px">
+          <div class="frow" style="margin-top:0"><span>分组视图</span></div>
+          <div style="margin-top:10px;background:var(--card);border-radius:12px;box-shadow:var(--shadow-card);padding:12px 16px">
+            <div style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700"><span class="old surf-s">SOOP</span> demo_kr04 <span style="font-size:11px;color:var(--ink3);font-weight:400">3 个文件</span></div>
+            <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+              <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink2)"><span style="width:6px;height:6px;border-radius:50%;background:var(--line)"></span>2026-09-28 21:04 · 1.2 GB · 00:47:12</div>
+              <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink2)"><span style="width:6px;height:6px;border-radius:50%;background:var(--line)"></span>2026-09-27 20:11 · 0.9 GB · 00:31:40</div>
+            </div>
+          </div>
+        </div></div>
+      </div>
+      <div>
+        <div class="cap"><span class="tagnew">改后</span> 分组头 PlatTag；明细行只在"不分组"时出现</div>
+        <div class="frame"><div class="body" style="padding:16px">
+          <div class="frow" style="margin-top:0"><span>分组视图</span></div>
+          <div style="margin-top:10px;background:var(--card);border-radius:12px;box-shadow:var(--shadow-card);padding:12px 16px">
+            <div style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700"><span class="pt sm onsurf s"><span class="dot"></span>SOOP</span> demo_kr04 <span style="font-size:11px;color:var(--ink3);font-weight:400">@demo_kr04 · 3 个文件</span></div>
+            <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+              <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink2)"><span style="width:6px;height:6px;border-radius:50%;background:var(--line)"></span>2026-09-28 21:04 · 1.2 GB · 00:47:12</div>
+              <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink2)"><span style="width:6px;height:6px;border-radius:50%;background:var(--line)"></span>2026-09-27 20:11 · 0.9 GB · 00:31:40</div>
+            </div>
+          </div>
+          <div style="margin-top:10px;background:var(--card);border-radius:12px;box-shadow:var(--shadow-card);padding:12px 16px">
+            <div style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700"><span class="pt sm onsurf p"><span class="dot"></span>PandaLive</span> 노을 <span style="font-size:11px;color:var(--ink3);font-weight:400">@demo_kr01 · 5 个文件</span></div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+    <p style="font-size:12px;color:var(--ink2);margin-top:10px;line-height:1.8">实现上把 <code>v-if="g.plat"</code> / <code>v-if="!g.plat"</code> 两处合一：<b>分组头恒挂徽标，明细行恒不挂</b>；不分组时列表行自己就是"明细"，由 <code>PlatTag sm</code> 承担。这样组件里只有一条渲染路径，不再需要推理互斥条件。</p>
+  </div>
+</section>
+
+<!-- ============================================================ ⑥ 账号 / 设置 ============================================================ -->
+<section class="screen" id="s6">
+  <div class="page">
+    <h1 class="doc">⑥ 账号页 · 设置页 · 顶栏</h1>
+    <p class="doc-sub">这三处的任务不是"加区分"，而是"把平台边界说短"。</p>
+
+    <div class="sec"><h2>顶栏：双头像加常驻短标</h2><span class="d">现状两枚圆形头像，只有 hover tooltip 能区分是谁 —— 而 tooltip 在触屏与截图里都不存在</span></div>
+    <div class="cmp">
+      <div>
+        <div class="cap"><span class="tagold">现状</span></div>
+        <div class="frame"><div class="app" style="height:56px">
+          <div class="wordmark"><div class="w1">PandaLive</div><div class="w2">MONITOR</div></div>
+          <div class="navtab on">直播大厅</div><div class="navtab">已关注</div>
+          <div class="searchbox"><input placeholder="搜索 PandaLive 主播 / 标题"/></div>
+          <div class="pill"><i></i>241 直播中</div>
+          <div style="display:flex;align-items:center;gap:2px"><div class="av">潘<em></em></div><div class="av s">S<em></em></div><span style="font-size:13px;font-weight:500;margin-left:4px">已登录</span></div>
+        </div></div>
+        <p style="font-size:11.5px;color:var(--ink3);margin-top:8px">"已登录"是合并口径：两平台都真登录才绿。用户看不出 SOOP 是不是只靠 Cookie 撑着。</p>
+      </div>
+      <div>
+        <div class="cap"><span class="tagnew">改后</span></div>
+        <div class="frame"><div class="app" style="height:56px">
+          <div class="wordmark"><div class="w1">PandaLive</div><div class="w2">MONITOR</div></div>
+          <div class="navtab on">直播大厅</div><div class="navtab">已关注</div>
+          <div class="searchbox"><input placeholder="搜索大厅主播 / 标题"/></div>
+          <div class="pill"><i></i>241 直播中</div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="display:flex;align-items:center;gap:5px"><div class="av">潘<em></em></div><span style="font-size:11px;color:var(--ink2)">已登录</span></div>
+            <div style="width:1px;height:18px;background:var(--line)"></div>
+            <div style="display:flex;align-items:center;gap:5px"><div class="av s">S<em style="background:#f0a020"></em></div><span style="font-size:11px;color:var(--ink2)">未校验</span></div>
+          </div>
+        </div></div>
+        <p style="font-size:11.5px;color:var(--ink3);margin-top:8px">每枚头像自带状态文字，两套会话独立可辨。琥珀点 = 有 Cookie 但未过官方校验（<code>held</code>），绿点 = <code>realLogin</code> —— 沿用现有判定，只是把结论从 tooltip 提到面上。</p>
+      </div>
+    </div>
+    <div class="note gray" style="margin-top:14px"><b>品牌名不在本稿擅自改。</b>顶栏与设置页仍写 "PandaLive Monitor"，但它现在管两个平台，名字已经名不副实。三个候选（<span class="kbd">继续用 PandaLive Monitor</span> / <span class="kbd">PD Monitor</span> / <span class="kbd">Live Monitor</span>）需要你拍板，涉及 package.json 的 <code>name/productName</code>、窗口标题、README 与安装包显示名，属于单独一次改动。</div>
+
+    <div class="sec"><h2>账号页：第 4 种平台选择器收进 PlatFilter</h2></div>
+    <div class="cmp">
+      <div>
+        <div class="cap"><span class="tagold">现状</span> 带边框大分段</div>
+        <div class="frame"><div class="body" style="padding:16px">
+          <div style="display:flex;gap:6px">
+            <div style="height:34px;padding:0 18px;border-radius:10px;border:1px solid var(--live);background:rgba(251,114,153,.1);color:var(--live-deep);font-weight:700;font-size:12.5px;display:flex;align-items:center">PandaLive</div>
+            <div style="height:34px;padding:0 18px;border-radius:10px;border:1px solid var(--line);background:#fff;color:var(--ink2);font-size:12.5px;display:flex;align-items:center">SOOP</div>
+          </div>
+        </div></div>
+      </div>
+      <div>
+        <div class="cap"><span class="tagnew">改后</span> 同一 chip，只是没有"全部"项</div>
+        <div class="frame"><div class="body" style="padding:16px">
+          <div style="display:flex;gap:6px;align-items:center">
+            <button class="pf on"><span class="pt sm onsurf p" style="height:15px;padding:0 4px;border:none;background:transparent"><span class="dot"></span></span>PandaLive</button>
+            <button class="pf"><span class="pt sm onsurf s" style="height:15px;padding:0 4px"><span class="dot"></span></span>SOOP</button>
+            <span style="margin-left:auto;font-size:11.5px;color:var(--ink3)">两套登录态互不影响</span>
+          </div>
+        </div></div>
+      </div>
+    </div>
+
+    <div class="sec"><h2>设置页：把"(仅 PandaLive)"从标题里拿掉</h2></div>
+    <div class="cmp">
+      <div>
+        <div class="cap"><span class="tagold">现状</span></div>
+        <div class="frame"><div class="body" style="padding:18px;display:flex;flex-direction:column;gap:16px">
+          <div><div style="font-size:13px;font-weight:700">检测模式(仅 PandaLive)</div><div style="font-size:11.5px;color:var(--ink3);margin-top:4px;line-height:1.7">列表模式同时驱动直播大厅; 逐个模式兼容特殊场景。SOOP 恒为逐频道播放页探针, 不受此项影响</div></div>
+          <div><div style="font-size:13px;font-weight:700">直播源保活(仅 PandaLive)</div><div style="font-size:11.5px;color:var(--ink3);margin-top:4px;line-height:1.7">心跳养会话, 退出观看后满员房也能凭旧源继续看。SOOP 无保活泵: 上游清单判死即收尸, 下次播放重铸</div></div>
+        </div></div>
+      </div>
+      <div>
+        <div class="cap"><span class="tagnew">改后</span> 标题干净，边界交给徽标</div>
+        <div class="frame"><div class="body" style="padding:18px;display:flex;flex-direction:column;gap:16px">
+          <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px;font-weight:700">检测模式</span><span class="pt sm onsurf p"><span class="dot"></span>PandaLive</span></div>
+          <div style="font-size:11.5px;color:var(--ink3);margin-top:-10px;line-height:1.7">列表模式同时驱动直播大厅；逐个模式兼容特殊场景</div>
+          <div style="display:flex;align-items:center;gap:8px"><span style="font-size:13px;font-weight:700">直播源保活</span><span class="pt sm onsurf p"><span class="dot"></span>PandaLive</span></div>
+          <div style="font-size:11.5px;color:var(--ink3);margin-top:-10px;line-height:1.7">心跳养会话，退出观看后满员房也能凭旧源继续看；SOOP 源按需重铸，无保活泵</div>
+        </div></div>
+      </div>
+    </div>
+    <p style="font-size:12px;color:var(--ink2);margin-top:10px;line-height:1.8">收益：标题从 15 字降到 4 字 + 一枚徽标，扫设置列表时左边缘对齐；"仅 X" 的括注在两种语言里长度差异很大（英文 <code>(PandaLive only)</code> 会把标题撑成两行），徽标宽度固定，不会撑破布局。说明句仍保留平台事实 —— 删掉括注不等于删掉信息。</p>
+
+    <div class="sec"><h2>关注弹窗：第 5 种选择器 + 示例地址块</h2></div>
+    <div class="frame"><div class="body" style="padding:18px;max-width:520px">
+      <div style="font-size:13.5px;font-weight:800;margin-bottom:12px">关注主播</div>
+      <div style="display:flex;gap:6px;margin-bottom:12px"><button class="pf on">自动识别</button><button class="pf">PandaLive</button><button class="pf">SOOP</button></div>
+      <div style="font-size:12.5px;color:var(--ink2);line-height:1.9">粘贴房间地址或主播 ID，例如<br><code>https://www.pandalive.co.kr/play/demo_kr06</code> 或 <code>demo_kr06</code></div>
+      <input style="margin-top:10px;width:100%;height:40px;border-radius:10px;border:1px solid var(--line);padding:0 12px;font-size:13px;background:#fff" placeholder="房间地址 / 主播 ID" />
+      <div style="margin-top:8px;font-size:11.5px;color:var(--ink3)">识别结果：<span class="pt sm onsurf s"><span class="dot"></span>SOOP</span> @demo_kr04</div>
+    </div></div>
+    <p style="font-size:12px;color:var(--ink2);margin-top:10px;line-height:1.8">"自动识别"是唯一必须留在弹窗里的形态（它不是平台，是解析策略），所以 <code>PlatFilter</code> 需要支持 <code>showAll</code> 之外的 <code>extraOptions</code>；识别结果行从现在的纯文字 <code>已识别为 SOOP · @demo_kr04</code> 换成内嵌徽标，与卡片同源。</p>
+  </div>
+</section>
+
+<!-- ============================================================ ⑦ 落地 ============================================================ -->
+<section class="screen" id="s7">
+  <div class="page">
+    <h1 class="doc">⑦ 落地清单</h1>
+    <p class="doc-sub">三批，每批可独立验收、独立回滚。全部为渲染层改动，<b>不动主进程、不动 db.json 结构、不动轮询与取流链路</b>。</p>
+
+    <div class="sec"><h2>批次 A · 组件与 token（零视觉风险）</h2></div>
+    <table class="t">
+      <tr><th style="width:250px">文件</th><th>动作</th></tr>
+      <tr><td class="k">新建 components/PlatTag.vue</td><td>props <code>platform / size / surface</code>；模板内不写 dark: 分支，颜色全走 CSS 变量</td></tr>
+      <tr><td class="k">新建 components/PlatFilter.vue</td><td>统一 chip；<code>counts</code> 可选；<code>showAll</code>、<code>extraOptions</code></td></tr>
+      <tr><td class="k">styles.css</td><td>补 <code>--plat-panda / --plat-soop / --tag-onimg</code> 三个变量（深色主题下 <code>--tag-onimg</code> 提到 .82 保证与卡面拉开）</td></tr>
+      <tr><td class="k">LiveCard.vue</td><td>徽标换 PlatTag，新增 <code>showPlatform</code>（默认 true）</td></tr>
+      <tr><td class="k">MonitorView / RecordingsView / LibraryView / AccountView</td><td>把 5 处手写 chip 换成 PlatFilter（<b>只换控件，不换状态逻辑</b>）</td></tr>
+    </table>
+
+    <div class="sec"><h2>批次 B · 去重（有交互变化，需你确认状态 B）</h2></div>
+    <ul class="ol">
+      <li><b>B1 大厅不挂徽标：</b><code>ExploreCard</code> 传 <code>:show-platform="false"</code>，<code>ExploreView</code> 页头挂一枚 + 右侧 SOOP 指引文案（新增 i18n key ×2 语言）。</li>
+      <li><b>B2 已关注随筛选隐藏：</b><code>AnchorCard</code> 传 <code>:show-platform="platFilter === 'all'"</code>；离线行同理。<b>这是本稿唯一的行为变化点，若你判断"宁可一直显示"，B2 可单独砍掉，批次 A 不受影响。</b></li>
+      <li><b>B3 视频库单一渲染路径：</b>删 <code>v-if="!g.plat"</code> 那处明细行徽标，分组头恒挂；不分组视图保留行内 <code>sm</code>。</li>
+      <li><b>B4 顶栏双头像自带状态文字：</b>合并口径 <code>loginSummary</code> 降为 tooltip 或删除（两枚各自说明后它已冗余）。</li>
+    </ul>
+
+    <div class="sec"><h2>批次 C · 文案与品牌</h2></div>
+    <ul class="ol">
+      <li><b>C1</b> 搜索 placeholder：<code>nav.searchPh</code> 「搜索 PandaLive 主播 / 标题」→「搜索大厅主播 / 标题」（zh/en 各一处）。</li>
+      <li><b>C2</b> 设置项标题去括注：<code>settings.watchMode</code> / <code>settings.keepalive</code> 去掉「(仅 PandaLive)」，改由 PlatTag 表达；说明句里的事实描述保留。</li>
+      <li><b>C3</b> 品牌名（<b>需你拍板，不在本批默认执行</b>）：顶栏 wordmark、<code>SettingsView:575</code>、<code>package.json</code> productName、README 首行。</li>
+    </ul>
+
+    <div class="sec"><h2>验收口径</h2></div>
+    <table class="t">
+      <tr><th style="width:250px">检查</th><th>标准</th></tr>
+      <tr><td class="k">同一屏平台信息次数</td><td>大厅 = 1（页头）；已关注筛选=全部时每卡 1 枚且无其他出口；筛选=单平台时 = 1（筛选器）</td></tr>
+      <tr><td class="k">灰度可读性</td><td>把屏幕转灰度后，仍能仅凭文字分辨平台（PlatTag 文字不得被任何图形替代）</td></tr>
+      <tr><td class="k">深色主题</td><td>两档承载面在 <code>.dark</code> 下均不与卡片同化；无需组件内 dark: 分支</td></tr>
+      <tr><td class="k">字号</td><td>正文/标题/元信息三档字号与改动前逐项一致，只允许减少元素数量</td></tr>
+      <tr><td class="k">回归</td><td><code>npm run typecheck</code> + <code>npm run build</code> 绿；<b>主进程零 diff</b>（用 <code>git diff --stat src/main</code> 自证）</td></tr>
+    </table>
+
+    <div class="note" style="margin-top:20px"><b>需要你确认的 3 件事：</b>① 批次 B2「筛选后隐藏徽标」要不要做（唯一的行为变化）；② 顶栏双头像是否自带状态文字（B4）；③ 品牌名是否本期处理（C3）。其余按本稿执行即可。</div>
+  </div>
+</section>
+
+<script>
+  const btns = document.querySelectorAll('.sw-btn')
+  btns.forEach((b) => b.addEventListener('click', () => {
+    btns.forEach((x) => x.classList.remove('on'))
+    b.classList.add('on')
+    document.querySelectorAll('.screen').forEach((s) => s.classList.remove('on'))
+    document.getElementById(b.dataset.s).classList.add('on')
+    window.scrollTo(0, 0)
+  }))
+</script>
+</body>
+</html>

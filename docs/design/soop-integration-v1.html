@@ -1,0 +1,845 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SOOP 双平台集成设计稿 · PandaLive Monitor</title>
+<style>
+  :root {
+    --live: #fb7299; --live-dark: #f0567f; --live-deep: #d94b73;
+    --page: #f1f2f3; --card: #ffffff; --line: #e3e5e7;
+    --ink1: #18191c; --ink2: #61666d; --ink3: #9499a0;
+    --fill: #f4f5f7; --fillh: #eceef1;
+    --ok: #2fad5f; --warn: #f0a020; --err: #f25d8e;
+    /* SOOP 品牌: 深色 + 电光黄(平台主视觉常用黑黄) */
+    --soop: #1b1d22; --soop-accent: #ffd400; --soop-ink: #6b7280;
+    --shadow-card: 0 1px 2px rgba(0,0,0,.05);
+    --shadow-hover: 0 6px 18px rgba(0,0,0,.09);
+    --shadow-glow: 0 0 0 1px rgba(251,114,153,.3), 0 6px 20px rgba(251,114,153,.14);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--page); color: var(--ink1); min-width: 1280px; /* 桌面稿: 窄窗口下横向滚动, 不做响应式折行 */
+         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei UI', 'PingFang SC', sans-serif;
+         -webkit-font-smoothing: antialiased; }
+  button { font-family: inherit; }
+
+  /* ---------- 通用语言 ---------- */
+  .chip { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 7px;
+          font-size: 11px; font-weight: 600; gap: 5px; white-space: nowrap; }
+  .chip-brand { background: rgba(251,114,153,.12); color: var(--live-dark); }
+  .chip-soop { background: #1b1d22; color: #ffd400; }
+  .chip-soop-ghost { background: rgba(27,29,34,.06); color: var(--soop-ink); border: 1px solid rgba(27,29,34,.14); }
+  .chip-ok { background: rgba(47,173,95,.12); color: #1e8a48; }
+  .chip-warn { background: rgba(240,160,32,.14); color: #a86b06; }
+  .chip-gray { background: rgba(97,102,109,.1); color: var(--ink2); }
+
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: none; cursor: pointer;
+         border-radius: 8px; font-size: 12.5px; font-weight: 600; padding: 7px 16px; transition: all .15s; }
+  .btn:active { transform: scale(.97); }
+  .btn-primary { background: var(--live); color: #fff; box-shadow: 0 2px 8px rgba(251,114,153,.35); }
+  .btn-primary:hover { background: var(--live-dark); }
+  .btn-ghost { background: transparent; color: var(--ink2); border: 1px solid var(--line); font-weight: 500; }
+  .btn-ghost:hover { color: var(--ink1); border-color: #c9cdd3; }
+  .btn-dark { background: var(--soop); color: var(--soop-accent); }
+  .btn-dark:hover { background: #262930; }
+  .btn-sm { height: 28px; padding: 0 12px; font-size: 12px; border-radius: 7px; }
+
+  .card { background: var(--card); border-radius: 14px; box-shadow: var(--shadow-card); }
+  .page { max-width: 1240px; margin: 0 auto; padding: 22px 28px 40px; }
+  .sec-label { display: flex; align-items: baseline; gap: 10px; padding: 0 4px 10px; margin-top: 26px; }
+  .sec-label h2 { font-size: 13.5px; font-weight: 700; }
+  .sec-label .d { font-size: 11px; color: var(--ink3); margin-left: auto; max-width: 620px; text-align: right; }
+
+  /* ---------- 屏幕切换器(仅设计稿导航用) ---------- */
+  .switcher { position: sticky; top: 0; z-index: 60; background: rgba(24,25,28,.94); color: #fff;
+              display: flex; align-items: center; gap: 6px; padding: 10px 20px; font-size: 12px; }
+  .switcher .brand { font-weight: 800; letter-spacing: .04em; margin-right: 10px; color: var(--soop-accent); }
+  .sw-btn { background: rgba(255,255,255,.08); color: #d6d9dd; border: none; cursor: pointer;
+            height: 28px; padding: 0 12px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .sw-btn:hover { background: rgba(255,255,255,.16); color: #fff; }
+  .sw-btn.on { background: var(--live); color: #fff; }
+  .screen { display: none; }
+  .screen.on { display: block; }
+  .note { background: #fffdf0; border: 1px solid #f3e5b8; border-radius: 10px; padding: 10px 14px;
+          font-size: 12px; color: #6b5900; line-height: 1.7; }
+  .note b { color: #4a3d00; }
+
+  /* ---------- 应用外框: 顶栏 ---------- */
+  .app { background: var(--card); border-bottom: 1px solid var(--line); padding: 0 20px; height: 64px;
+         display: flex; align-items: center; gap: 12px; }
+  .wordmark { line-height: 1.15; flex: none; }
+  .wordmark .a { font-size: 16px; font-weight: 800; letter-spacing: .02em; }
+  .wordmark .b { font-size: 10px; color: var(--ink3); letter-spacing: .2em; margin-top: -2px; font-weight: 600; }
+  .tabs { display: flex; align-items: center; gap: 4px; margin-left: 12px; }
+  .tab { background: none; border: none; cursor: pointer; height: 64px; padding: 0 16px; font-size: 14px;
+         color: var(--ink2); font-weight: 500; display: flex; align-items: center; gap: 6px;
+         border-bottom: 2px solid transparent; }
+  .tab:hover { color: var(--ink1); }
+  .tab.on { color: var(--ink1); font-weight: 700; border-bottom-color: var(--live); }
+  .pill { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; font-size: 11px; font-weight: 800;
+          display: inline-flex; align-items: center; justify-content: center; }
+  .pill-live { background: rgba(251,114,153,.15); color: var(--live); }
+  .pill-dual { background: var(--fill); color: var(--ink2); font-weight: 700; }
+  .search { flex: 1; display: flex; justify-content: center; }
+  .search div { width: 100%; max-width: 420px; height: 40px; border-radius: 999px; background: var(--fill);
+                display: flex; align-items: center; padding: 0 16px; color: var(--ink3); font-size: 13px; }
+  .statuspill { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px;
+                border-radius: 999px; background: rgba(251,114,153,.1); color: var(--live); font-size: 12px; font-weight: 700; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .dot-live { background: var(--live); animation: breathe 1.6s ease-in-out infinite; }
+  .dot-ok { background: var(--ok); }
+  .dot-off { background: var(--ink3); }
+  .dot-soop { background: var(--soop-accent); }
+  @keyframes breathe { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+  /* 账号双身份入口 */
+  .acc { display: flex; align-items: center; gap: 6px; flex: none; }
+  .acc .av { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-size: 12px;
+            font-weight: 800; color: #fff; }
+  .av-pl { background: linear-gradient(135deg, var(--live), #c96ad6); box-shadow: 0 0 0 2px rgba(251,114,153,.25); }
+  .av-so { background: linear-gradient(135deg, #2b2e35, #14161a); box-shadow: 0 0 0 2px rgba(27,29,34,.18); color: var(--soop-accent); }
+
+  /* ---------- 监控页头 / 筛选 ---------- */
+  .mhead { display: flex; align-items: center; gap: 12px; padding: 20px 28px 0; max-width: 1240px; margin: 0 auto; }
+  .mhead h1 { font-size: 20px; font-weight: 800; letter-spacing: -.02em; }
+  .mhead .count { font-size: 13px; color: var(--ink3); }
+  .mhead .sp { flex: 1; }
+  .filterrow { display: flex; align-items: center; gap: 14px; padding: 14px 28px 0; max-width: 1240px; margin: 0 auto;
+               border-bottom: 1px solid var(--line); }
+  .fgroup { display: flex; align-items: center; gap: 2px; }
+  .f-item { background: none; border: none; cursor: pointer; height: 40px; padding: 0 12px; font-size: 13px;
+            color: var(--ink2); display: flex; align-items: center; gap: 6px; border-bottom: 2px solid transparent; }
+  .f-item:hover { color: var(--ink1); }
+  .f-item.on { color: var(--ink1); font-weight: 700; border-bottom-color: var(--live); }
+  .f-item .n { font-size: 11px; color: var(--ink3); font-weight: 700; }
+  .flabel { font-size: 11px; color: var(--ink3); font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+            margin-right: 2px; }
+  .divider { width: 1px; height: 20px; background: var(--line); margin: 0 4px; }
+
+  /* ---------- 卡片墙 ---------- */
+  .wall { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 20px 20px;
+          padding: 20px 28px 8px; max-width: 1240px; margin: 0 auto; }
+  .tile { background: var(--card); border-radius: 12px; box-shadow: var(--shadow-card); overflow: hidden;
+          position: relative; transition: all .18s; }
+  .tile.ishot { box-shadow: var(--shadow-glow); }
+  .tile:hover { box-shadow: var(--shadow-hover); transform: translateY(-2px); }
+  .thumb { aspect-ratio: 16/9; background: linear-gradient(135deg, #dfe3e8, #cdd3da); position: relative; display:grid; place-items:center; }
+  .thumb.dark { background: linear-gradient(135deg, #3a3f47, #22262d); }
+  .thumb .idle { font-size: 26px; font-weight: 800; color: #fff; opacity: .85; letter-spacing: .04em; }
+  .badges { position: absolute; top: 8px; left: 8px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; max-width: 78%; }
+  .b { height: 20px; padding: 0 7px; border-radius: 5px; font-size: 11px; font-weight: 800; display: inline-flex;
+       align-items: center; gap: 4px; }
+  .b-live { background: var(--live); color: #fff; }
+  .b-off { background: rgba(0,0,0,.45); color: #fff; font-weight: 600; }
+  .b-rec { background: rgba(0,0,0,.6); color: #fff; }
+  .b-cache { background: var(--ok); color: #fff; }
+  .b-plat-p { background: rgba(255,255,255,.92); color: var(--live-dark); }
+  .b-plat-s { background: var(--soop); color: var(--soop-accent); }
+  .b-adult { position: absolute; top: 8px; right: 8px; background: rgba(229,62,62,.9); color: #fff; }
+  .body { padding: 10px 12px 11px; }
+  .t1 { font-size: 13.5px; font-weight: 600; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .t1 .pre { font-weight: 700; }
+  .pre-pwd { color: #0284c7; } .pre-vod { color: var(--warn); } .pre-fan { color: #7c3aed; }
+  .t2 { display: flex; align-items: center; gap: 7px; margin-top: 8px; }
+  .ava { width: 20px; height: 20px; border-radius: 50%; flex: none; display: grid; place-items: center;
+         font-size: 10px; font-weight: 800; color: #fff; }
+  .nick { font-size: 12.5px; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .uid { margin-left: auto; font-size: 11px; color: var(--ink3); font-family: ui-monospace, Menlo, Consolas, monospace; flex:none; }
+  .t3 { display: flex; align-items: center; gap: 10px; margin-top: 9px; padding-top: 9px;
+        border-top: 1px solid rgba(227,229,231,.7); font-size: 11.5px; color: var(--ink2); }
+  .t3 .num { font-variant-numeric: tabular-nums; }
+  .t3 .right { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--ink3); }
+  .more { background: none; border: none; cursor: pointer; color: var(--ink3); padding: 2px 4px; border-radius: 5px; margin-left:auto; }
+  .more:hover { background: var(--fill); color: var(--ink1); }
+
+  /* ---------- 未开播行 ---------- */
+  .rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px 12px; padding: 18px 28px;
+          max-width: 1240px; margin: 0 auto; }
+  .row { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 11px 15px;
+         display: flex; align-items: center; gap: 10px; }
+  .row .ava { width: 36px; height: 36px; border-radius: 10px; font-size: 13px; filter: grayscale(1); }
+  .row .info { min-width: 0; }
+  .row .nm { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .row .id { font-size: 11px; color: var(--ink3); margin-top: 2px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+
+  /* ---------- 播放器 ---------- */
+  .player-wrap { max-width: 1240px; margin: 0 auto; padding: 18px 28px; display: grid; grid-template-columns: 1fr 300px; gap: 14px; }
+  .stage { background: #0d0f12; border-radius: 16px; aspect-ratio: 16/9; position: relative; display: grid; place-items: center; color: #fff; }
+  .stage .hint { font-size: 12px; color: #7d8591; }
+  .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .back { width: 30px; height: 30px; border-radius: 50%; border: none; background: var(--card); cursor: pointer;
+          box-shadow: var(--shadow-card); color: var(--ink2); font-size: 15px; }
+  .segbar { background: var(--fill); border-radius: 10px; padding: 3px; display: inline-flex; gap: 3px; }
+  .seg { border: none; background: none; cursor: pointer; height: 28px; padding: 0 13px; border-radius: 7px;
+         font-size: 12.5px; color: var(--ink2); font-weight: 600; }
+  .seg.on { background: var(--card); color: var(--ink1); box-shadow: var(--shadow-card); }
+  .aside { display: flex; flex-direction: column; gap: 12px; }
+  .kv { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 7px 0;
+        border-top: 1px solid rgba(227,229,231,.5); font-size: 12px; }
+  .kv:first-of-type { border-top: none; }
+  .kv .k { color: var(--ink3); } .kv .v { color: var(--ink1); font-weight: 600; text-align: right; }
+  .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; color: var(--ink2);
+          background: var(--fill); border-radius: 7px; padding: 7px 9px; word-break: break-all; line-height: 1.5; }
+  .aside-card { padding: 13px 15px; }
+  .aside-card h3 { font-size: 12px; font-weight: 800; color: var(--ink2); margin-bottom: 9px; }
+
+  /* ---------- 账号页 ---------- */
+  .narrow { max-width: 980px; margin: 0 auto; padding: 22px 28px 40px; }
+  .banner { display: flex; align-items: center; gap: 14px; padding: 16px 18px; margin-top: 14px; }
+  .banner .ico { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; font-size: 16px; font-weight: 800; flex: none; }
+  .b-title { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 700; }
+  .b-desc { font-size: 12px; color: var(--ink3); margin-top: 3px; line-height: 1.6; }
+  .b-right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
+  .methods { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .method { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+  .method .m-title { display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 700; }
+  .method ul { list-style: none; display: flex; flex-direction: column; gap: 5px; }
+  .method li { font-size: 12px; color: var(--ink2); display: flex; gap: 7px; align-items: flex-start; }
+  .method li::before { content: '✓'; color: var(--ok); font-weight: 800; }
+  .steps { display: flex; flex-direction: column; gap: 9px; }
+  .step { display: flex; gap: 9px; font-size: 12px; color: var(--ink2); line-height: 1.55; }
+  .step .no { width: 18px; height: 18px; border-radius: 50%; background: rgba(251,114,153,.12); color: var(--live-dark);
+              font-size: 11px; font-weight: 800; display: grid; place-items: center; flex: none; margin-top: 1px; }
+  .step.dark .no { background: rgba(27,29,34,.08); color: var(--soop-ink); }
+  code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; background: var(--fill);
+         padding: 1px 5px; border-radius: 4px; color: var(--ink1); }
+  textarea { width: 100%; border: 1px solid var(--line); border-radius: 9px; background: var(--fill); padding: 10px 12px;
+             font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; color: var(--ink1); resize: none; }
+
+  /* ---------- 弹窗 ---------- */
+  .mask { position: fixed; inset: 0; background: rgba(24,25,28,.4); display: none; place-items: center; z-index: 70; }
+  .mask.on { display: grid; }
+  .modal { width: 480px; background: var(--card); border-radius: 14px; box-shadow: 0 18px 50px rgba(0,0,0,.2); padding: 20px 22px; }
+  .modal h3 { font-size: 15px; font-weight: 800; }
+  .modal .help { font-size: 12px; color: var(--ink3); line-height: 1.8; margin: 10px 0 12px; }
+  .input { width: 100%; height: 40px; border: 1px solid var(--line); border-radius: 9px; background: var(--fill);
+           padding: 0 13px; font-size: 13px; color: var(--ink1); }
+  .input:focus { outline: 2px solid rgba(251,114,153,.4); outline-offset: 1px; background: var(--card); }
+  .detect { margin-top: 10px; display: flex; align-items: center; gap: 9px; padding: 10px 12px; border-radius: 10px;
+            background: var(--fill); font-size: 12px; color: var(--ink2); }
+  .modal .foot { display: flex; justify-content: flex-end; gap: 9px; margin-top: 16px; }
+
+  /* ---------- 对比区 ---------- */
+  .vs { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .vs-card { padding: 16px; }
+  .vs-card h4 { font-size: 13px; font-weight: 800; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .vs-card .tagline { font-size: 11.5px; color: var(--ink3); margin-bottom: 12px; }
+  .mini { border: 1px dashed var(--line); border-radius: 10px; padding: 10px; background: var(--fill); font-size: 11px; color: var(--ink2); }
+  .mini-wall { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; }
+  .mini-cell { aspect-ratio: 16/10; border-radius: 6px; background: #fff; box-shadow: var(--shadow-card);
+               display: grid; place-items: center; font-size: 10px; color: var(--ink3); }
+  .q { display: flex; gap: 10px; padding: 11px 0; border-top: 1px solid var(--line); font-size: 12.5px; line-height: 1.7; }
+  .q:first-child { border-top: none; }
+  .q .n { width: 22px; height: 22px; border-radius: 50%; background: var(--ink1); color: #fff; font-size: 11px;
+          font-weight: 800; display: grid; place-items: center; flex: none; margin-top: 1px; }
+  .q .t b { color: var(--ink1); } .q .t { color: var(--ink2); }
+</style>
+</head>
+<body>
+
+<div class="switcher">
+  <span class="brand">SOOP 集成设计稿</span>
+  <button class="sw-btn on" data-go="s-monitor" onclick="go('s-monitor',this)">① 主播监控墙</button>
+  <button class="sw-btn" data-go="s-add" onclick="go('s-add',this)">② 添加房间</button>
+  <button class="sw-btn" data-go="s-player" onclick="go('s-player',this)">③ 观看 / 录制</button>
+  <button class="sw-btn" data-go="s-account" onclick="go('s-account',this)">④ 账号 · 双平台</button>
+  <button class="sw-btn" data-go="s-library" onclick="go('s-library',this)">⑤ 录制 / 视频库</button>
+  <button class="sw-btn" data-go="s-decisions" onclick="go('s-decisions',this)">⑥ 布局对比 · 待你定</button>
+</div>
+
+<!-- ============ ① 主播监控墙 ============ -->
+<section class="screen on" id="s-monitor">
+  <div class="app">
+    <div class="wordmark"><div class="a">PandaLive</div><div class="b">MONITOR</div></div>
+    <div class="tabs">
+      <button class="tab">大厅</button>
+      <button class="tab on">监控 <span class="pill pill-live">5</span></button>
+      <button class="tab">录制中 <span class="pill pill-dual">2</span></button>
+      <button class="tab">视频库</button>
+    </div>
+    <div class="search"><div>搜索主播 / 房间</div></div>
+    <div class="statuspill"><span class="dot dot-live"></span> 轮询正常 · 6s</div>
+    <div class="acc">
+      <div class="av av-pl" title="PandaLive 已登录">潘</div>
+      <div class="av av-so" title="SOOP 未登录（匿名）">S</div>
+    </div>
+    <button class="btn btn-ghost btn-sm">设置</button>
+  </div>
+
+  <div class="mhead">
+    <h1>主播监控</h1>
+    <span class="count">9 个关注 · 5 个在播</span>
+    <span class="sp"></span>
+    <button class="btn btn-ghost btn-sm">＋ 关注主播</button>
+  </div>
+
+  <div class="filterrow">
+    <span class="flabel">状态</span>
+    <div class="fgroup">
+      <button class="f-item on"><span class="dot dot-live"></span> 在播 <span class="n">5</span></button>
+      <button class="f-item"><span class="dot dot-off"></span> 未开播 <span class="n">4</span></button>
+    </div>
+    <div class="divider"></div>
+    <span class="flabel">平台</span>
+    <div class="fgroup">
+      <button class="f-item on">全部 <span class="n">5</span></button>
+      <button class="f-item">PandaLive <span class="n">3</span></button>
+      <button class="f-item">SOOP <span class="n">2</span></button>
+    </div>
+  </div>
+
+  <div class="wall" id="wall">
+    <!-- PandaLive 在播 -->
+    <article class="tile ishot">
+      <div class="thumb">
+        <div class="badges">
+          <span class="b b-live"><span class="dot dot-live" style="background:#fff"></span>LIVE</span>
+          <span class="b b-rec"><span class="dot" style="background:#ff4d4d"></span>REC</span>
+          <span class="b b-plat-p">PandaLive</span>
+        </div>
+        <span class="b b-adult" style="position:absolute;top:8px;right:8px">19+</span>
+      </div>
+      <div class="body">
+        <div class="t1">【直播】深夜电台 第十一期 ·  Listener 来信</div>
+        <div class="t2">
+          <span class="ava" style="background:#fb7299">Z</span>
+          <span class="nick">demo_kr06</span>
+          <span class="uid">@demo_kr06</span>
+        </div>
+        <div class="t3"><span>♥ 1,204</span><span>👁 3,880</span><span class="right">02:14:07</span></div>
+      </div>
+    </article>
+
+    <!-- SOOP 在播 + 已缓存 -->
+    <article class="tile ishot">
+      <div class="thumb dark">
+        <div class="badges">
+          <span class="b b-live"><span class="dot dot-live" style="background:#fff"></span>LIVE</span>
+          <span class="b b-cache">已缓存</span>
+          <span class="b b-plat-s">SOOP</span>
+        </div>
+      </div>
+      <div class="body">
+        <div class="t1">[본선] 롤Rank 게임</div>
+        <div class="t2">
+          <span class="ava" style="background:#1b1d22;color:#ffd400">둘</span>
+          <span class="nick">비둘기</span>
+          <span class="uid">demo_kr04</span>
+        </div>
+        <div class="t3"><span>👁 7,512</span><span class="chip-soop-ghost" style="height:18px;padding:0 7px;border-radius:5px;font-size:10px;font-weight:700;display:inline-flex;align-items:center;color:var(--soop-ink)">高清 1080</span><span class="right">01:03:22</span></div>
+      </div>
+    </article>
+
+    <!-- PandaLive 在播 -->
+    <article class="tile">
+      <div class="thumb"><div class="badges"><span class="b b-live"><span class="dot dot-live" style="background:#fff"></span>LIVE</span><span class="b b-plat-p">PandaLive</span></div></div>
+      <div class="body">
+        <div class="t1"><span class="pre pre-fan">[粉丝房]</span>吉他的下午</div>
+        <div class="t2"><span class="ava" style="background:#7c3aed">M</span><span class="nick">demo_kr07</span><span class="uid">@demo_kr07</span></div>
+        <div class="t3"><span>♥ 320</span><span>👁 412</span><span class="right">00:41:19</span></div>
+      </div>
+    </article>
+
+    <!-- SOOP 在播 · 需登录态（关键差异态） -->
+    <article class="tile">
+      <div class="thumb dark"><div class="idle">19+</div>
+        <div class="badges"><span class="b b-live"><span class="dot dot-live" style="background:#fff"></span>LIVE</span><span class="b b-plat-s">SOOP</span></div>
+        <span class="b b-adult" style="position:absolute;top:8px;right:8px">19+</span>
+      </div>
+      <div class="body">
+        <div class="t1"><span class="pre" style="color:var(--warn)">[需登录]</span>成人认证频道直播</div>
+        <div class="t2"><span class="ava" style="background:#1b1d22;color:#ffd400">星</span><span class="nick">스타BJ</span><span class="uid">starbj19</span></div>
+        <div class="t3"><span style="color:var(--warn)">⚠ 无法取流</span><button class="btn btn-dark btn-sm" style="margin-left:auto;height:24px;padding:0 10px;font-size:11px">登录 SOOP</button></div>
+      </div>
+    </article>
+
+    <!-- PandaLive 在播 -->
+    <article class="tile">
+      <div class="thumb"><div class="badges"><span class="b b-live"><span class="dot dot-live" style="background:#fff"></span>LIVE</span><span class="b b-plat-p">PandaLive</span></div></div>
+      <div class="body">
+        <div class="t1"><span class="pre pre-pwd">[密码]</span>仅会员可见房间</div>
+        <div class="t2"><span class="ava" style="background:#0284c7">P</span><span class="nick">private_show</span><span class="uid">@private_show</span></div>
+        <div class="t3"><span>♥ 88</span><span>👁 120</span><span class="right">00:12:03</span></div>
+      </div>
+    </article>
+  </div>
+
+  <div class="rows">
+    <div class="row">
+      <span class="ava" style="background:#fb7299">L</span>
+      <div class="info"><div class="nm">demo_kr08 <span class="chip chip-brand">PandaLive</span></div><div class="id">@demo_kr08</div></div>
+      <span class="chip chip-gray" style="margin-left:auto">未开播</span>
+    </div>
+    <div class="row">
+      <span class="ava" style="background:#1b1d22;color:#ffd400">김</span>
+      <div class="info"><div class="nm">김예시 <span class="chip chip-soop">SOOP</span></div><div class="id">@demo_kr09 · play.sooplive.com/demo_kr09</div></div>
+      <span class="chip chip-warn" style="margin-left:auto">下播 ·null</span>
+    </div>
+    <div class="row">
+      <span class="ava" style="background:#1b1d22;color:#ffd400">둘</span>
+      <div class="info"><div class="nm">비둘기(示例备份号) <span class="chip chip-soop">SOOP</span></div><div class="id">@demo_kr04</div></div>
+      <span class="chip chip-gray" style="margin-left:auto">未开播</span>
+    </div>
+    <div class="row">
+      <span class="ava" style="background:#7c3aed">R</span>
+      <div class="info"><div class="nm">radio_juke <span class="chip chip-brand">PandaLive</span></div><div class="id">@radio_juke</div></div>
+      <span class="chip chip-gray" style="margin-left:auto">未开播</span>
+    </div>
+  </div>
+
+  <div style="max-width:1240px;margin:0 auto;padding:0 28px">
+    <div class="note">
+      <b>这一屏的设计意图</b>：两平台合并在<b>同一面墙</b>（方案 A）。理由是"监控"关心的是<b>谁开播了</b>，不是<b>在哪个平台</b>——分平台切墙会把"开播"这个唯一重要信号拆成两次查看。<br>
+      · 卡片沿用现有 <code>LiveCard</code> 全部结构，只新增左上角<b>平台徽标</b>（PandaLive=浅底品牌粉，SOOP=黑底电光黄，两者在深色缩略图上都不糊）。<br>
+      · 右下角 <code>@uid</code> 位置：PandaLive 显示登录名，SOOP 显示<b>频道 ID</b>（sooplive 的主键是 channel 而非数字 idx）。<br>
+      · SOOP 独有状态「<b>需登录</b>」直接进在播墙并带一个一键登录按钮，而不是静默显示成"未开播"——这是 bililive-go 里 <code>RESULT=-6</code>/匿名降级会产生的真实态，藏起来会让人误判主播没播。<br>
+      · 顶栏右侧<b>两个头像</b>分别代表两个平台的登录态（粉=潘已登录，黑黄=SOOP 未登录/匿名），点任一进账号页对应 tab。
+    </div>
+  </div>
+</section>
+
+<!-- ============ ② 添加房间 ============ -->
+<section class="screen" id="s-add">
+  <div class="app">
+    <div class="wordmark"><div class="a">PandaLive</div><div class="b">MONITOR</div></div>
+    <div class="tabs"><button class="tab">大厅</button><button class="tab on">监控</button><button class="tab">录制中</button><button class="tab">视频库</button></div>
+    <div class="search"><div>搜索主播 / 房间</div></div>
+    <div class="statuspill"><span class="dot dot-live"></span> 轮询正常 · 6s</div>
+    <div class="acc"><div class="av av-pl">潘</div><div class="av av-so">S</div></div>
+  </div>
+  <div style="padding:40px 28px;filter:blur(1px);opacity:.5">
+    <h1 style="font-size:20px;font-weight:800">主播监控</h1>
+  </div>
+
+  <div class="mask on" style="position:relative;inset:auto;background:none;max-width:1240px;margin:0 auto;padding:0 28px 60px">
+    <div class="modal" style="width:520px">
+      <h3>关注主播</h3>
+      <div class="segbar" style="margin-top:12px">
+        <button class="seg on" id="q-pl" onclick="setPl('pl')">PandaLive</button>
+        <button class="seg" id="q-so" onclick="setPl('so')">SOOP</button>
+        <button class="seg" id="q-au" onclick="setPl('au')">自动识别</button>
+      </div>
+
+      <!-- PandaLive 态 -->
+      <div id="pl-body">
+        <div class="help">粘贴房间地址或登录名，例如
+          <span style="color:var(--live);font-family:ui-monospace,Menlo,monospace">https://www.pandalive.co.kr/play/demo_kr06</span> 或直接 <span style="color:var(--live)">demo_kr06</span></div>
+        <input class="input" value="demo_kr06" />
+        <div class="detect"><span class="dot dot-ok"></span> 识别为 PandaLive · demo_kr06 · 当前未开播</div>
+      </div>
+
+      <!-- SOOP 态 -->
+      <div id="so-body" style="display:none">
+        <div class="help">粘贴 SOOP 房间地址，例如
+          <span style="color:var(--soop-accent);background:#1b1d22;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace">https://play.sooplive.com/demo_kr04/297384679</span>
+          （场次号 <code>297384679</code> 可以省略，程序每次监控时从页面重新解析）</div>
+        <input class="input" value="https://play.sooplive.com/demo_kr04" />
+        <div class="detect"><span class="dot dot-so" style="background:var(--soop-accent)"></span> 识别为 SOOP · 频道 <code>demo_kr04</code> · 在播 · 高清 1080</div>
+        <div style="margin-top:10px;display:flex;gap:8px;align-items:flex-start;background:var(--fill);border-radius:10px;padding:10px 12px">
+          <span class="chip chip-warn" style="flex:none">提示</span>
+          <span style="font-size:11.5px;color:var(--ink2);line-height:1.6">
+            SOOP 未登录时<b>只能看到部分房间</b>，19+ 与限区房间会取不到流。建议在「账号」页先登录 SOOP。<br>
+            <b>直播密码房暂不支持</b>：该房间若设了开播密码，本版本只能监控到开播事件，无法观看与录制。
+          </span>
+        </div>
+      </div>
+
+      <!-- 自动识别态 -->
+      <div id="au-body" style="display:none">
+        <div class="help">程序按域名判定平台；只填 ID 时默认 PandaLive，可在「设置 → 监控 → 添加默认平台」改。</div>
+        <input class="input" placeholder="粘贴任意房间地址" />
+        <div class="detect" style="color:var(--ink3)">粘贴后自动识别平台并校验房间是否存在</div>
+      </div>
+
+      <div class="foot">
+        <button class="btn btn-ghost">取消</button>
+        <button class="btn btn-primary" style="width:88px">关注</button>
+      </div>
+    </div>
+  </div>
+
+  <div style="max-width:980px;margin:0 auto;padding:0 28px 60px">
+    <div class="note">
+      可点上方 <b>PandaLive / SOOP / 自动识别</b> 三个分段试交互。<br>
+      <b>为什么要"自动识别"做默认</b>：用户复制地址就完了，让他们先选平台是多余一步；分段只用于"只填 ID"的快捷路径和识别失败时的兜底。<br>
+      <b>SOOP 输入框的容错</b>：<code>/channel/bno</code> 与 <code>/channel</code> 两种形态都要能吃下（对应 bililive-go 的 <code>parseChannelAndBroadNoStateFromURL</code>），并识别 <code>/channel/null</code> = 已下播，而不是报错。
+    </div>
+  </div>
+</section>
+
+<!-- ============ ③ 观看 / 录制 ============ -->
+<section class="screen" id="s-player">
+  <div class="app">
+    <div class="wordmark"><div class="a">PandaLive</div><div class="b">MONITOR</div></div>
+    <div class="tabs"><button class="tab">大厅</button><button class="tab on">监控 <span class="pill pill-live">5</span></button><button class="tab">录制中 <span class="pill pill-dual">2</span></button><button class="tab">视频库</button></div>
+    <div class="search"><div>搜索主播 / 房间</div></div>
+    <div class="statuspill"><span class="dot dot-live"></span> 轮询正常 · 6s</div>
+    <div class="acc"><div class="av av-pl">潘</div><div class="av av-so">S</div></div>
+  </div>
+
+  <div class="player-wrap">
+    <div>
+      <div class="toolbar">
+        <button class="back">‹</button>
+        <span class="chip chip-soop">SOOP</span>
+        <span style="font-size:13px;color:var(--ink2)">在播 · 已连 01:03:22</span>
+        <span style="margin-left:auto" class="chip chip-ok">取流正常</span>
+      </div>
+
+      <div class="stage">
+        <div style="text-align:center">
+          <div style="font-size:15px;font-weight:700;margin-bottom:6px">[본선] 롤Rank 게임</div>
+          <div class="hint">HLS · 高清 1080 · aid 由本地代理注入</div>
+        </div>
+        <div class="badges" style="position:absolute;top:12px;left:12px">
+          <span class="b b-live"><span class="dot dot-live" style="background:#fff"></span>LIVE</span>
+          <span class="b b-rec"><span class="dot" style="background:#ff4d4d"></span>REC</span>
+        </div>
+        <span style="position:absolute;bottom:12px;right:14px;background:rgba(0,0,0,.5);color:#fff;height:22px;padding:0 8px;border-radius:5px;font-size:11px;display:flex;align-items:center">👁 7,512</span>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:12px;margin-top:12px;flex-wrap:wrap">
+        <span class="flabel">清晰度</span>
+        <div class="segbar">
+          <button class="seg on">高清 1080</button><button class="seg">HD 720</button><button class="seg">SD 480</button><button class="seg">自动</button>
+        </div>
+        <div class="divider"></div>
+        <button class="btn btn-ghost btn-sm">刷新源</button>
+        <button class="btn btn-ghost btn-sm">♥ 已关注</button>
+        <button class="btn btn-primary btn-sm" style="background:var(--err)">■ 停止录制</button>
+      </div>
+
+      <div style="margin-top:12px;font-size:11.5px;color:var(--ink3);line-height:1.7">
+        「自动」这一档在 SOOP 上会被程序<b>跳过</b>（<code>auto</code> 无独立 aid，取不到可录地址），只在 PandaLive 上生效——UI 保留但置灰加 tooltip 说明，避免用户选了之后静默失败。
+      </div>
+    </div>
+
+    <div class="aside">
+      <div class="card aside-card">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="ava" style="width:42px;height:42px;border-radius:12px;background:#1b1d22;color:#ffd400;font-size:15px">둘</span>
+          <div style="min-width:0">
+            <div style="font-size:14px;font-weight:700">비둘기</div>
+            <div style="font-size:11px;color:var(--ink3);font-family:ui-monospace,Menlo,monospace">play.sooplive.com/demo_kr04</div>
+          </div>
+        </div>
+        <div style="margin-top:12px">
+          <div class="kv"><span class="k">平台</span><span class="v">SOOP</span></div>
+          <div class="kv"><span class="k">开播时间</span><span class="v">14:02</span></div>
+          <div class="kv"><span class="k">录制状态</span><span class="v" style="color:var(--err)">● 进行中</span></div>
+          <div class="kv"><span class="k">当前文件</span><span class="v">164.2 MB</span></div>
+        </div>
+      </div>
+
+      <div class="card aside-card">
+        <h3>播放源</h3>
+        <div class="mono">https://pcws01-soophls.net/api/.../playlist.m3u8?aid=••••</div>
+        <div style="margin-top:10px">
+          <div class="kv"><span class="k">调度节点 RMD</span><span class="v">pcws01…soophls.net</span></div>
+          <div class="kv"><span class="k">CDN</span><span class="v">gs_cdn</span></div>
+          <div class="kv"><span class="k">场次号 bno</span><span class="v">297384679</span></div>
+          <div class="kv"><span class="k">登录态</span><span class="v" style="color:var(--ok)">已登录 k&nbsp;r&nbsp;•••</span></div>
+          <div class="kv"><span class="k">HLS 过滤代理</span><span class="v" style="color:var(--ok)">已启用</span></div>
+          <div class="kv"><span class="k">获取时间</span><span class="v">14:05:11 · 41s 前</span></div>
+        </div>
+        <button class="btn btn-ghost btn-sm" style="width:100%;margin-top:10px">复制链接</button>
+      </div>
+
+      <div class="card aside-card" style="background:rgba(251,114,153,.05)">
+        <h3 style="color:var(--live-dark)">录制提示</h3>
+        <div style="font-size:11.5px;color:var(--ink2);line-height:1.75">
+          SOOP 的分片地址带 <b>preloading 预载段</b>，直接喂 ffmpeg 会断流。程序已在本地起了一层 HLS 代理自动剔除，
+          所以「播放源」显示的是 <code>127.0.0.1</code> 代理地址，<b>复制到外部播放器会失效</b>。
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="max-width:1240px;margin:0 auto;padding:0 28px 50px">
+    <div class="note">
+      播放器页<b>不重做</b>，只加三处：顶部平台徽标、右侧「播放源」卡片换成 SOOP 语义（RMD/CDN/bno/aid/代理状态），清晰度分段。<br>
+      右侧源卡片把 SOOP 专有字段摊开，是为了出问题时（403 / 地区限制 / 登录失效）你能一眼看出卡在哪一步——bililive-go 的取流是 5 步链，失败点很分散。<br>
+      <b>待你定</b>：要不要在源卡片显示 <code>aid</code> 明文（默认打码，debug 模式全显）。
+    </div>
+  </div>
+</section>
+
+<!-- ============ ④ 账号 · 双平台 ============ -->
+<section class="screen" id="s-account">
+  <div class="app">
+    <div class="wordmark"><div class="a">PandaLive</div><div class="b">MONITOR</div></div>
+    <div class="tabs"><button class="tab">大厅</button><button class="tab">监控</button><button class="tab">录制中</button><button class="tab">视频库</button></div>
+    <div class="search"><div>搜索主播 / 房间</div></div>
+    <div class="statuspill"><span class="dot dot-live"></span> 轮询正常 · 6s</div>
+    <div class="acc"><div class="av av-pl">潘</div><div class="av av-so">S</div></div>
+  </div>
+
+  <div class="narrow">
+    <div class="sec-label" style="margin-top:8px">
+      <h2 style="font-size:20px;font-weight:800">账号</h2>
+      <span class="d">两套互相独立的登录态：Cookie 分域存储，任一平台失效不影响另一平台</span>
+    </div>
+
+    <div class="segbar" style="margin-bottom:4px">
+      <button class="seg">PandaLive</button>
+      <button class="seg on">SOOP</button>
+    </div>
+
+    <div class="card banner">
+      <div class="ico" style="background:#1b1d22;color:var(--soop-accent)">S</div>
+      <div>
+        <div class="b-title"><span class="dot dot-off"></span> SOOP 未登录 · 匿名模式
+          <span class="chip chip-gray">部分房间受限</span>
+        </div>
+        <div class="b-desc">可观看普通公开房间；19+ / 限区 / 密码房无法取流。Cookie 域 <code>.sooplive.com</code>（play / login / live / afevent2 四个子域合并）。</div>
+      </div>
+      <div class="b-right"><button class="btn btn-dark">退出</button></div>
+    </div>
+
+    <div class="sec-label"><h2>登录方式</h2><span class="d">推荐方式一：走网页登录，与 PandaLive 同一套窗口机制</span></div>
+    <div class="methods">
+      <div class="card method">
+        <div class="m-title"><span class="ico" style="width:30px;height:30px;border-radius:9px;background:var(--fill);display:grid;place-items:center;font-size:13px">🌐</span>
+          网页登录 <span class="chip chip-brand">推荐</span></div>
+        <ul>
+          <li>弹出独立登录窗，走完 SOOP 官方登录流程</li>
+          <li>自动收割 4 个子域 Cookie 并合并落盘</li>
+          <li>登录态失效时程序会自动重登，无需手动</li>
+        </ul>
+        <button class="btn btn-primary" style="width:112px;margin-top:auto">打开登录窗</button>
+      </div>
+
+      <div class="card method">
+        <div class="m-title"><span class="ico" style="width:30px;height:30px;border-radius:9px;background:var(--fill);display:grid;place-items:center;font-size:13px">📋</span>
+          手动导入 Cookie</div>
+        <div class="steps" style="margin-top:2px">
+          <div class="step dark"><span class="no">1</span><span>浏览器登录 <code>sooplive.com</code>，按 <code>F12</code> 打开控制台</span></div>
+          <div class="step dark"><span class="no">2</span><span>输入 <code>document.cookie</code> 并复制全部结果</span></div>
+          <div class="step dark"><span class="no">3</span><span>粘贴到下方，程序会校验并保存</span></div>
+        </div>
+        <textarea rows="3" placeholder="nowLogin=Y; domain=.sooplive.com; ..."></textarea>
+        <div style="display:flex;align-items:center;gap:9px">
+          <button class="btn btn-primary" style="width:104px">导入并校验</button>
+          <span style="font-size:11px;color:var(--ink3)">校验走 <code>get_private_info.php</code>，看 <code>LOGIN_ID</code></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec-label"><h2>账号密码自动重登（可选）</h2><span class="d">Cookie 过期后无需人工干预</span></div>
+    <div class="card" style="padding:16px 18px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><div style="font-size:11px;color:var(--ink3);margin-bottom:5px">SOOP 账号</div><input class="input" placeholder="登录 ID" /></div>
+        <div><div style="font-size:11px;color:var(--ink3);margin-bottom:5px">密码</div><input class="input" type="password" value="••••••••" /></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:12px">
+        <button class="btn btn-ghost btn-sm">保存</button>
+        <span class="chip chip-ok">凭据本机加密存储</span>
+        <span style="font-size:11px;color:var(--ink3);margin-left:auto">日志与配置导出中密码一律脱敏</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="max-width:980px;margin:0 auto;padding:0 28px 50px">
+    <div class="note">
+      账号页只加<b>一个平台分段</b>，其余沿用现有 v2 布局。理由：两平台 Cookie 完全独立，混排在一个页面里会让"当前这块状态属于谁"变得含糊。<br>
+      <b>已定</b>：SOOP <b>保留</b>「账号密码自动重登」。这与 PandaLive（已移除账密直登）故意不一致——SOOP 的 Cookie 失效面更宽（19+ / 限区 / 匿名降级），无人值守录制需要自愈能力。
+    </div>
+  </div>
+</section>
+
+<!-- ============ ⑤ 录制 / 视频库 ============ -->
+<section class="screen" id="s-library">
+  <div class="app">
+    <div class="wordmark"><div class="a">PandaLive</div><div class="b">MONITOR</div></div>
+    <div class="tabs"><button class="tab">大厅</button><button class="tab">监控 <span class="pill pill-live">5</span></button><button class="tab on">录制中 <span class="pill pill-dual">2</span></button><button class="tab">视频库</button></div>
+    <div class="search"><div>搜索主播 / 房间</div></div>
+    <div class="statuspill"><span class="dot dot-live"></span> 轮询正常 · 6s</div>
+    <div class="acc"><div class="av av-pl">潘</div><div class="av av-so">S</div></div>
+  </div>
+
+  <div class="narrow" style="max-width:1240px">
+    <div class="sec-label" style="margin-top:8px">
+      <h2 style="font-size:20px;font-weight:800">录制中</h2>
+      <span class="d">2 个任务 · 1.4 GB · 磁盘余 82 GB</span>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="card" style="padding:16px 18px;display:flex;align-items:center;gap:14px">
+        <div style="width:56px;height:56px;border-radius:12px;background:#1b1d22;color:var(--soop-accent);display:grid;place-items:center;font-size:18px;font-weight:800;position:relative;flex:none">
+          둘<span class="dot" style="position:absolute;top:5px;right:5px;width:7px;height:7px;background:var(--soop-accent);animation:breathe 1.6s infinite"></span>
+        </div>
+        <div style="min-width:0;flex:1">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:14px;font-weight:700">비둘기</span>
+            <span class="chip chip-soop">SOOP</span><span class="chip chip-warn">自动</span>
+          </div>
+          <div style="font-size:11px;color:var(--ink3);margin-top:4px;font-family:ui-monospace,Menlo,monospace">
+            Videos/SOOP/비둘기/2026-09-28_1402_롤Rank.ts
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;margin-top:8px;font-size:11px;color:var(--ink2)">
+            <span>取流</span>→<span>录制</span>→<b style="color:var(--ink1)">停止</b>→<span>remux</span>→<span>合并</span>
+            <span class="dot" style="width:6px;height:6px;background:var(--live);animation:breathe 1.6s infinite"></span>
+          </div>
+        </div>
+        <div style="display:flex;gap:26px;flex:none;text-align:right">
+          <div><div style="font-size:22px;font-weight:800;font-variant-numeric:tabular-nums">01:03:22</div><div style="font-size:10px;color:var(--ink3)">时长</div></div>
+          <div><div style="font-size:22px;font-weight:800;font-variant-numeric:tabular-nums">164.2</div><div style="font-size:10px;color:var(--ink3)">MB</div></div>
+          <div><div style="font-size:22px;font-weight:800;font-variant-numeric:tabular-nums">3.1</div><div style="font-size:10px;color:var(--ink3)">Mbps</div></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;flex:none">
+          <button class="btn btn-ghost btn-sm" style="width:88px">进房</button>
+          <button class="btn btn-ghost btn-sm" style="width:88px;color:var(--err)">停止</button>
+          <button class="btn btn-ghost btn-sm" style="width:88px">打开目录</button>
+        </div>
+      </div>
+
+      <div class="card" style="padding:16px 18px;display:flex;align-items:center;gap:14px;opacity:.96">
+        <div style="width:56px;height:56px;border-radius:12px;background:rgba(251,114,153,.1);color:var(--live-dark);display:grid;place-items:center;font-size:18px;font-weight:800;flex:none">Z</div>
+        <div style="min-width:0;flex:1">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:14px;font-weight:700">demo_kr06</span>
+            <span class="chip chip-brand">PandaLive</span><span class="chip chip-gray">手动</span>
+          </div>
+          <div style="font-size:11px;color:var(--ink3);margin-top:4px;font-family:ui-monospace,Menlo,monospace">
+            Videos/PandaLive/demo_kr06/2026-09-28_1348_深夜电台.ts
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;margin-top:8px;font-size:11px;color:var(--ink2)">
+            <span>取流</span>→<b style="color:var(--ink1)">录制</b>→<span>停止</span>→<span>remux</span>→<span>合并</span>
+            <span class="dot" style="width:6px;height:6px;background:var(--live);animation:breathe 1.6s infinite"></span>
+          </div>
+        </div>
+        <div style="display:flex;gap:26px;flex:none;text-align:right">
+          <div><div style="font-size:22px;font-weight:800;font-variant-numeric:tabular-nums">02:14:07</div><div style="font-size:10px;color:var(--ink3)">时长</div></div>
+          <div><div style="font-size:22px;font-weight:800;font-variant-numeric:tabular-nums">612.4</div><div style="font-size:10px;color:var(--ink3)">MB</div></div>
+          <div><div style="font-size:22px;font-weight:800;font-variant-numeric:tabular-nums">4.2</div><div style="font-size:10px;color:var(--ink3)">Mbps</div></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;flex:none">
+          <button class="btn btn-ghost btn-sm" style="width:88px">进房</button>
+          <button class="btn btn-ghost btn-sm" style="width:88px;color:var(--err)">停止</button>
+          <button class="btn btn-ghost btn-sm" style="width:88px">打开目录</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec-label"><h2>视频库</h2><span class="d">同一套库，平台只是又一个筛选 / 分组维度</span></div>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+      <span class="chip chip-soop" style="height:26px;padding:0 12px;cursor:pointer">SOOP 42</span>
+      <span class="chip chip-brand" style="height:26px;padding:0 12px;cursor:pointer;background:rgba(251,114,153,.06);color:var(--ink2)">PandaLive 118</span>
+      <div class="divider"></div>
+      <span style="font-size:11px;color:var(--ink3)">分组</span>
+      <div class="segbar"><button class="seg on">按日期</button><button class="seg">按主播</button><button class="seg">按平台</button></div>
+    </div>
+
+    <div style="font-size:12px;font-weight:800;color:var(--ink2);margin-bottom:10px">2026-09-28 <span style="color:var(--ink3);font-weight:600">· 4 个文件</span></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:16px">
+      <div class="card" style="overflow:hidden">
+        <div style="aspect-ratio:16/9;background:linear-gradient(135deg,#3a3f47,#22262d);position:relative">
+          <span class="b b-plat-s" style="position:absolute;top:8px;left:8px">SOOP</span>
+          <span class="b" style="position:absolute;top:8px;right:8px;background:var(--ok);color:#fff">已完成</span>
+          <span class="b" style="position:absolute;bottom:8px;left:8px;background:rgba(0,0,0,.55);color:#fff">01:58:40</span>
+        </div>
+        <div style="padding:9px 11px">
+          <div class="t1">롤Rank 게임 본선</div>
+          <div style="font-size:11px;color:var(--ink3);margin-top:3px">비둘기 · 01:58:40 · 2.4 GB</div>
+        </div>
+      </div>
+      <div class="card" style="overflow:hidden">
+        <div style="aspect-ratio:16/9;background:linear-gradient(135deg,#dfe3e8,#cdd3da);position:relative">
+          <span class="b b-plat-p" style="position:absolute;top:8px;left:8px;background:rgba(255,255,255,.92);color:var(--live-dark)">PandaLive</span>
+          <span class="b" style="position:absolute;top:8px;right:8px;background:var(--warn);color:#fff">remux 中</span>
+          <span class="b" style="position:absolute;bottom:8px;left:8px;background:rgba(0,0,0,.55);color:#fff">02:14:07</span>
+        </div>
+        <div style="padding:9px 11px">
+          <div class="t1">深夜电台 第十一期</div>
+          <div style="font-size:11px;color:var(--ink3);margin-top:3px">demo_kr06 · 02:14:07 · 612 MB</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="max-width:1240px;margin:0 auto;padding:18px 28px 50px">
+    <div class="note">
+      录制/库只改两处：<b>平台徽标</b> + <b>按平台分组</b>。产物目录建议 <code>Videos/&lt;平台&gt;/&lt;主播&gt;/</code> 分叉（上面示例即如此），
+      这样两平台的文件天然隔离、删除与统计都简单。<b>待你定</b>：是否接受目录结构变更（会影响已有 PandaLive 文件的迁移）。
+    </div>
+  </div>
+</section>
+
+<!-- ============ ⑥ 布局对比 + 待决问题 ============ -->
+<section class="screen" id="s-decisions">
+  <div class="narrow" style="max-width:1080px">
+    <div class="sec-label" style="margin-top:20px">
+      <h2 style="font-size:20px;font-weight:800">核心分歧：两平台的资源怎么同屏</h2>
+      <span class="d">已定方案 A，上面 5 屏即按 A 出稿</span>
+    </div>
+
+    <div class="vs">
+      <div class="card vs-card" style="box-shadow:var(--shadow-glow)">
+        <h4><span class="chip chip-brand">A</span> 统一墙 + 平台筛选 <span class="chip chip-ok" style="margin-left:auto">已选</span></h4>
+        <div class="tagline">状态 tab 下再加一行平台 chip，两平台的卡混排</div>
+        <div class="mini">
+          在播 | 未开播 &nbsp;&nbsp;<b>全部 · PandaLive · SOOP</b>
+          <div class="mini-wall">
+            <div class="mini-cell">P 🎬</div><div class="mini-cell">S 🎬</div><div class="mini-cell">P 🎬</div><div class="mini-cell">S ⚠</div>
+          </div>
+        </div>
+        <ul style="list-style:none;margin-top:12px;display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--ink2);line-height:1.6">
+          <li>✓ 一眼看完"谁开播了"，不用切两屏</li>
+          <li>✓ 与现有监控页改动最小（加一行 chip）</li>
+          <li>✓ 通知/Telegram 本来就是统一列表，天然对齐</li>
+          <li>✗ 平台差异态（SOOP 需登录）会混进墙里</li>
+        </ul>
+      </div>
+
+      <div class="card vs-card">
+        <h4><span class="chip chip-soop">B</span> 平台分区 / 分页 <span class="chip chip-gray" style="margin-left:auto">未选</span></h4>
+        <div class="tagline">监控页上半 PandaLive、下半 SOOP，各带标题；或顶栏两个独立入口</div>
+        <div class="mini">
+          <b>— PandaLive —</b>
+          <div class="mini-wall"><div class="mini-cell">🎬</div><div class="mini-cell">🎬</div><div class="mini-cell">🎬</div><div class="mini-cell">＋</div></div>
+          <div style="height:8px"></div>
+          <b>— SOOP —</b>
+          <div class="mini-wall"><div class="mini-cell">🎬</div><div class="mini-cell">⚠</div><div class="mini-cell">🎬</div><div class="mini-cell">＋</div></div>
+        </div>
+        <ul style="list-style:none;margin-top:12px;display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--ink2);line-height:1.6">
+          <li>✓ 平台状态彼此隔离，视觉更整齐</li>
+          <li>✗ 在播信号被拆成两块，滚动才能看全</li>
+          <li>✗ 两区数量悬殊时（3 vs 2）大片留白</li>
+          <li>✗ 加第三个平台时每屏更长</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="sec-label"><h2>已定稿的 4 项决策</h2><span class="d">2026-09-28 确认</span></div>
+    <div class="card" style="padding:6px 18px">
+      <div class="q"><span class="n">1</span><span class="t"><b>SOOP 不要"大厅"，本期只做手粘添加。</b> 「大厅」tab 保持 PandaLive 专属，顶栏搜索也只对 PandaLive 有效；SOOP 主播通过第 ② 屏的地址粘贴添加。搜索/发现另开一期（bililive-go 无发现类接口，需另找 SOOP 检索端点并实测风控）。</span></div>
+      <div class="q"><span class="n">2</span><span class="t"><b>取流走 TS 移植，不引入 bililive-go 子进程。</b> 把 <code>player_live_api.php</code>（type=live / type=aid）、<code>broad_stream_assign.html</code> 调度、HLS preloading 过滤代理这几段逻辑用 TS 在主进程重写，与 PandaLive 完全同构。<br>所以本稿<b>不需要</b>"来源=bililive-go"之类的暴露，第 ③ 屏的画法即为最终形态。移植时的对位关系：<code>fetchPageMeta → fetchChannelInfo → fetchAid → fetchViewURL → appendQuery</code>，以及 <code>resolvePageBroadNo</code> 的离线三态（页面 <code>nBroadNo=null</code> / 落到 <code>/channel/null</code> = 明确下播，不回退；仅页面缺字段才回退用路径 bno）。</span></div>
+      <div class="q"><span class="n">3</span><span class="t"><b>SOOP 保留"账密自动重登"，第 ④ 屏该区块照做。</b> 与 PandaLive（已移除账密直登）行为不一致是有意为之：SOOP 的 Cookie 失效面更宽（19+ / 限区 / 匿名降级），无人值守录制必须能自愈。凭据沿用现有加密存储，日志与导出脱敏。</span></div>
+      <div class="q"><span class="n">4</span><span class="t"><b>数据模型主键改为 <code>platform + userId</code> 复合键。</b> 现在 <code>Anchor</code>（<code>src/shared/types.ts:10</code>）只以 <code>userId</code> 为键、全模型无 platform 字段，判重（<code>ipc.ts:114</code>）、<code>isFollowing</code>、录制任务查找全是单键，必须一并改造 + 迁移历史数据。房间地址与请求头也不能再硬编码 PandaLive：目前散在 <code>AnchorCard.vue:58</code>、<code>MonitorView.vue:207</code>、<code>tgFormat.ts:18</code> 三处，要收敛成 <code>roomUrl(platform, id)</code> + <code>parseRoomInput()</code>。SOOP 的"userId"是频道名（如 <code>demo_kr04</code>），卡片右上位显示它没问题。</span></div>
+    </div>
+
+    <div class="sec-label"><h2>实现顺序</h2></div>
+    <div class="card" style="padding:16px 18px;font-size:12.5px;color:var(--ink2);line-height:1.9">
+      ① 类型与主键改造（<code>shared/types.ts</code> + store 判重 + 历史数据迁移）→ ② <code>LiveCard</code> 平台徽标 + MonitorView 平台筛选行 + 地址收敛（<code>roomUrl</code> / <code>parseRoomInput</code>）→ ③ SOOP 取流 TS 移植（含 HLS 过滤代理）→ ④ SOOP 登录窗 / Cookie 分域 + 账密自动重登 → ⑤ 录制目录 <code>Videos/&lt;平台&gt;/&lt;主播&gt;/</code> 与视频库平台维度 → ⑥ 监控轮询与通知接入 SOOP（复用 watcher，注意别把 PandaLive 的限速队列串台）。
+    </div>
+  </div>
+</section>
+
+<script>
+function go(id, btn) {
+  document.querySelectorAll('.screen').forEach(function (s) { s.classList.remove('on'); });
+  document.getElementById(id).classList.add('on');
+  document.querySelectorAll('.sw-btn').forEach(function (b) { b.classList.remove('on'); });
+  btn.classList.add('on');
+  window.scrollTo(0, 0);
+}
+function setPl(p) {
+  var map = { pl: 'pl-body', so: 'so-body', au: 'au-body' };
+  ['pl', 'so', 'au'].forEach(function (k) {
+    document.getElementById(map[k]).style.display = (k === p ? 'block' : 'none');
+    document.getElementById('q-' + k).classList.toggle('on', k === p);
+  });
+}
+</script>
+</body>
+</html>
