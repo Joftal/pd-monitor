@@ -703,7 +703,7 @@ class PandaApi {
     this.keepaliveBusy = true
     try {
       // 关注表按复合键索引(playCache 本身是裸 userId, 出口处补 'pandalive'):
-      // 直接用裸 userId 建表会让同号的 SOOP 关注覆盖潘达关注, 保活判定读到别人的 isLive
+      // 直接用裸 userId 建表会让同号的 SOOP 关注覆盖 Panda 关注, 保活判定读到别人的 isLive
       const anchors = new Map(store.listAnchors().map((a) => [roomKey(a.platform, a.userId), a]))
       // 快照防漂移: tick 期间缓存可能增删
       const queue = [...this.playCache.entries()].filter(([userId, pack]) => {

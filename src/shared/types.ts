@@ -199,7 +199,7 @@ export interface AccountState {
 }
 
 /** SOOP 账号态: 与 PandaLive 完全独立的两套登录态, 字段按 SOOP 接口能给的信息来
- *  (潘达以数字 idx 标识账号, SOOP 只有 LOGIN_ID/LOGIN_NICK; 且 SOOP 支持账密自动重登) */
+ *  (Panda 以数字 idx 标识账号, SOOP 只有 LOGIN_ID/LOGIN_NICK; 且 SOOP 支持账密自动重登) */
 export interface SoopAccountState {
   /** 会话罐里是否已有 .sooplive.com Cookie(匿名站点 Cookie 也算, 故只用于"有没有种过") */
   hasCookies: boolean

@@ -244,19 +244,19 @@
       <tr><th style="width:210px">位置</th><th style="width:300px">现状样式</th><th>问题</th><th style="width:96px">处置</th></tr>
       <tr>
         <td class="k">LiveCard 缩略图左上<br><span style="font-size:11px;color:var(--ink3);font-weight:400">大厅 / 已关注 / 播放页共用</span></td>
-        <td class="f">潘达 <code>bg-white/85 text-live</code><br>SOOP <code>bg-black/70 text-[#e8ff3a]</code></td>
+        <td class="f">Panda <code>bg-white/85 text-live</code><br>SOOP <code>bg-black/70 text-[#e8ff3a]</code></td>
         <td>两平台重量差一个量级：白底粉字像"水印"，墨底黄字像"贴纸"。混排时视线先被 SOOP 抓走，扫读节奏被打断。</td>
         <td><span class="v uni">统一</span></td>
       </tr>
       <tr>
         <td class="k">MonitorView 离线行 @ID 后</td>
-        <td class="f"><code>px-1.5 rounded text-[10px] font-bold</code><br>潘达 <code>bg-fill text-live</code> / SOOP <code>bg-black/70</code></td>
+        <td class="f"><code>px-1.5 rounded text-[10px] font-bold</code><br>Panda <code>bg-fill text-live</code> / SOOP <code>bg-black/70</code></td>
         <td>第 2 套底色 + 第 2 种字号（10px）。SOOP 那枚在白色卡面上是深灰块，比头像还重。</td>
         <td><span class="v uni">统一</span></td>
       </tr>
       <tr>
         <td class="k">RecordingsView 进行中卡头</td>
-        <td class="f"><code>h-[22px] px-2 rounded-[7px] text-[11px] font-bold</code><br>潘达 <code>bg-fill text-live</code> / SOOP <code>bg-black/70</code></td>
+        <td class="f"><code>h-[22px] px-2 rounded-[7px] text-[11px] font-bold</code><br>Panda <code>bg-fill text-live</code> / SOOP <code>bg-black/70</code></td>
         <td>第 3 套底色。与视频库、离线行同义不同形。</td>
         <td><span class="v uni">统一</span></td>
       </tr>
@@ -397,7 +397,7 @@
       props: { modelValue: 'all'|Platform; counts?: Record&lt;string, number&gt;; showAll?: boolean }<br>
       emits: 'update:modelValue' &nbsp;·&nbsp; 内部复用 PlatTag 的色点，保证 chip 与徽标同源
     </div>
-    <div class="note" style="margin-top:16px"><b>为什么色点也进 PlatTag：</b>筛选 chip 的选中态目前用纯粉色（<code>bg-live/10 border-live</code>）表达，选 "SOOP" 时也是粉底 —— 严格说这已经是"用潘达的颜色代表 SOOP"。改后 chip 内嵌同一枚色点，选中态只加粗不改色，语义不再串线。</div>
+    <div class="note" style="margin-top:16px"><b>为什么色点也进 PlatTag：</b>筛选 chip 的选中态目前用纯粉色（<code>bg-live/10 border-live</code>）表达，选 "SOOP" 时也是粉底 —— 严格说这已经是"用 Panda 的颜色代表 SOOP"。改后 chip 内嵌同一枚色点，选中态只加粗不改色，语义不再串线。</div>
   </div>
 </section>
 
@@ -421,7 +421,7 @@
             <div class="navtab on">直播大厅</div><div class="navtab">已关注</div><div class="navtab">录制管理</div><div class="navtab">视频库</div>
             <div class="searchbox"><input value="搜索 PandaLive 主播 / 标题" /></div>
             <div class="pill"><i></i>241 直播中</div>
-            <div class="av">潘<em></em></div><div class="av s">S<em></em></div>
+            <div class="av">P<em></em></div><div class="av s">S<em></em></div>
           </div>
           <div class="body">
             <div class="ph"><h3>直播大厅 <span style="font-size:12px;color:var(--live);font-weight:600">241 直播中</span></h3></div>
@@ -452,7 +452,7 @@
             <div class="navtab on">直播大厅</div><div class="navtab">已关注</div><div class="navtab">录制管理</div><div class="navtab">视频库</div>
             <div class="searchbox"><input value="搜索大厅主播 / 标题" /></div>
             <div class="pill"><i></i>241 直播中</div>
-            <div class="av">潘<em></em></div><div class="av s">S<em></em></div>
+            <div class="av">P<em></em></div><div class="av s">S<em></em></div>
           </div>
           <div class="body">
             <div class="ph"><h3>直播大厅 <span style="font-size:12px;color:var(--live);font-weight:600">241 直播中</span> <span class="pt md onsurf p"><span class="dot"></span>PandaLive</span></h3>
@@ -500,7 +500,7 @@
         <div class="wordmark"><div class="w1">PandaLive</div><div class="w2">MONITOR</div></div>
         <div class="navtab">直播大厅</div><div class="navtab on">已关注 <span class="cnt">37</span></div><div class="navtab">录制管理</div><div class="navtab">视频库</div>
         <div class="searchbox"><input placeholder="搜索大厅主播 / 标题" /></div>
-        <div class="pill"><i></i>9 直播中</div><div class="av">潘<em></em></div><div class="av s">S<em></em></div>
+        <div class="pill"><i></i>9 直播中</div><div class="av">P<em></em></div><div class="av s">S<em></em></div>
       </div>
       <div class="body">
         <div class="ph"><h3>已关注主播</h3><div class="sub" style="margin-left:10px">共 37 位关注 · 9 位直播中</div>
@@ -698,7 +698,7 @@
           <div class="navtab on">直播大厅</div><div class="navtab">已关注</div>
           <div class="searchbox"><input placeholder="搜索 PandaLive 主播 / 标题"/></div>
           <div class="pill"><i></i>241 直播中</div>
-          <div style="display:flex;align-items:center;gap:2px"><div class="av">潘<em></em></div><div class="av s">S<em></em></div><span style="font-size:13px;font-weight:500;margin-left:4px">已登录</span></div>
+          <div style="display:flex;align-items:center;gap:2px"><div class="av">P<em></em></div><div class="av s">S<em></em></div><span style="font-size:13px;font-weight:500;margin-left:4px">已登录</span></div>
         </div></div>
         <p style="font-size:11.5px;color:var(--ink3);margin-top:8px">"已登录"是合并口径：两平台都真登录才绿。用户看不出 SOOP 是不是只靠 Cookie 撑着。</p>
       </div>
@@ -710,7 +710,7 @@
           <div class="searchbox"><input placeholder="搜索大厅主播 / 标题"/></div>
           <div class="pill"><i></i>241 直播中</div>
           <div style="display:flex;align-items:center;gap:10px">
-            <div style="display:flex;align-items:center;gap:5px"><div class="av">潘<em></em></div><span style="font-size:11px;color:var(--ink2)">已登录</span></div>
+            <div style="display:flex;align-items:center;gap:5px"><div class="av">P<em></em></div><span style="font-size:11px;color:var(--ink2)">已登录</span></div>
             <div style="width:1px;height:18px;background:var(--line)"></div>
             <div style="display:flex;align-items:center;gap:5px"><div class="av s">S<em style="background:#f0a020"></em></div><span style="font-size:11px;color:var(--ink2)">未校验</span></div>
           </div>

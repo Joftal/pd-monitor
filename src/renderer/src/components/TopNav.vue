@@ -33,7 +33,7 @@ const watcherState = computed(() => {
   const interval = store.settings?.pollIntervalSec ?? '?'
   const cost = w.roundMs < 1000 ? `${w.roundMs} ${t('common.ms')}` : `${(w.roundMs / 1000).toFixed(1)} ${t('common.sec')}`
   const heartbeat = t('nav.wTip', { sec: interval, cost })
-  // message 非空但没熔断 = 轮询在跑、某一侧已经瞎掉(SOOP 整轮全灭 / 潘达冷却): 绿点呼吸就是骗人
+  // message 非空但没熔断 = 轮询在跑、某一侧已经瞎掉(SOOP 整轮全灭 / Panda 冷却): 绿点呼吸就是骗人
   if (w.message) return { cls: 'bg-amber-400', text: t('nav.wWarn'), tip: `${w.message} · ${heartbeat}`, tone: 'warn' }
   return { cls: 'bg-live', text: t('nav.liveN', { n: w.liveCount }), tip: heartbeat, tone: 'ok' }
 })
@@ -55,7 +55,7 @@ const avatars = computed(() => {
   return [
     {
       key: 'pandalive' as const,
-      short: '潘',
+      short: 'P',
       live: !!p?.realLogin,
       held: !!p?.loggedIn,
       stateText: p?.realLogin ? t('nav.loggedIn') : p?.loggedIn ? t('nav.unverified') : t('nav.notLoggedIn'),

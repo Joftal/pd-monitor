@@ -37,10 +37,10 @@ class Watcher {
   private roundInFlight = false
   private sessionDeadStreak = 0
   private discovery: DiscoveryItem[] = []
-  /** 在播数分平台记: 潘达冷却/熔断的那几轮不复查潘达, 只能沿用上次已知值, 不能被 SOOP 覆盖成 0 */
+  /** 在播数分平台记: Panda 冷却/熔断的那几轮不复查 Panda, 只能沿用上次已知值, 不能被 SOOP 覆盖成 0 */
   private pandaLiveFound = 0
   private soopLiveFound = 0
-  /** 上次真发 SOOP 探针的时刻: 潘达冷却期轮次会压到 30s, 用它把 SOOP 的速率钉回用户配的间隔 */
+  /** 上次真发 SOOP 探针的时刻: Panda 冷却期轮次会压到 30s, 用它把 SOOP 的速率钉回用户配的间隔 */
   private lastSoopRoundAt = 0
   /** SOOP 连续"整轮全灭"轮数: 单轮失败可能是抖动, 连续两轮说明改版/风控/断网, 必须让用户看见 */
   private soopFailStreak = 0
@@ -109,10 +109,10 @@ class Watcher {
       const soopAnchors = all.filter((a) => a.platform === 'soop')
       this.status.monitored = all.length
 
-      // 冷却只退避 pandalive: SOOP 是另一套域名与会话, 潘达被风控无权连坐停掉 SOOP 监控
+      // 冷却只退避 pandalive: SOOP 是另一套域名与会话, Panda 被风控无权连坐停掉 SOOP 监控
       // (注意: 此分支的 schedule/push 由 finally 统一兜底, 不写重复调用)
       const cooling = Date.now() < this.cooldownUntil
-      // 潘达这一轮的异常先攒着: 抛出去会跳过下面的 SOOP 探针(连坐), 熔断语义延后到 SOOP 跑完再交外层
+      // Panda 这一轮的异常先攒着: 抛出去会跳过下面的 SOOP 探针(连坐), 熔断语义延后到 SOOP 跑完再交外层
       let pandaErr: unknown = null
       if (cooling) {
         const remain = Math.ceil((this.cooldownUntil - Date.now()) / 1000)
@@ -140,7 +140,7 @@ class Watcher {
 
       // SOOP 走逐频道播放页探针: 关注数少时一人一发即够(实测全站列表接口 main_broad_list_api.php
       // 匿名可用, 但要覆盖小主播得翻满 43 页, 每轮 2.7MB 不划算 —— 大厅/搜索另开一期时再接它)
-      // 冷却期轮次被压到 30s(为早点探潘达恢复), SOOP 不跟着加速: 仍按用户配的间隔到期才发
+      // 冷却期轮次被压到 30s(为早点探 Panda 恢复), SOOP 不跟着加速: 仍按用户配的间隔到期才发
       if (!soopAnchors.length) {
         this.soopLiveFound = 0
         this.soopFailStreak = 0
@@ -149,8 +149,8 @@ class Watcher {
         this.soopLiveFound = await this.roundSoop(soopAnchors, cfg.requestGapMs)
       }
       this.status.liveFound = this.pandaLiveFound + this.soopLiveFound
-      // SOOP 探针永不抛错(防潘达连坐), 所以它瞎了必须由这里出声: 顶栏绿点照常跳、卡片保留旧状态,
-      // 用户读到的却是"一切正常"。潘达侧健康时 message 是空串, 冷却/熔断期的文案归潘达所有, 不抢
+      // SOOP 探针永不抛错(防 Panda 连坐), 所以它瞎了必须由这里出声: 顶栏绿点照常跳、卡片保留旧状态,
+      // 用户读到的却是"一切正常"。Panda 侧健康时 message 是空串, 冷却/熔断期的文案归 Panda 所有, 不抢
       if (!cooling && this.soopFailStreak >= 2 && !this.status.message) {
         this.status.message = mt('watcher.soopDown', { n: soopAnchors.length, r: this.soopFailStreak })
       }
@@ -222,7 +222,7 @@ class Watcher {
     }
   }
 
-  /** list 模式: 拉全站列表, 本地匹配; 全量列表同时作为大厅数据源。返回潘达侧在播数 */
+  /** list 模式: 拉全站列表, 本地匹配; 全量列表同时作为大厅数据源。返回 Panda 侧在播数 */
   private async roundByList(anchors: Anchor[]): Promise<number> {
     const liveMap = new Map<string, LiveItem>()
     let page = 0
@@ -372,7 +372,7 @@ class Watcher {
     return 0
   }
 
-  /** per-anchor 模式: 逐个 member/bj。返回潘达侧在播数 */
+  /** per-anchor 模式: 逐个 member/bj。返回 Panda 侧在播数 */
   private async roundByBj(anchors: Anchor[]): Promise<number> {
     let liveFound = 0
     for (const a of anchors) {
@@ -393,8 +393,8 @@ class Watcher {
 
   /** SOOP 逐频道轮询: 播放页一发即可判在播/下播(实测页面内嵌 nBroadNo, 无需登录态)
    *  - 三态必分: 有场次号=在播 / 页面明确 null=下播 / 两者皆无(风控页或改版)=状态未知 → 本轮不动它,
-   *    绝不把"没读到"写成"已下播", 也不把异常拖成全局熔断(单平台故障无权停掉潘达轮询)
-   *  - 节流: 与潘达共用 requestGapMs, 逐发之间睡一个 gap(带抖动), 避免整点齐发撞风控 */
+   *    绝不把"没读到"写成"已下播", 也不把异常拖成全局熔断(单平台故障无权停掉 Panda 轮询)
+   *  - 节流: 与 Panda 共用 requestGapMs, 逐发之间睡一个 gap(带抖动), 避免整点齐发撞风控 */
   private async roundSoop(anchors: Anchor[], gapMs: number): Promise<number> {
     const now = Date.now()
     let found = 0

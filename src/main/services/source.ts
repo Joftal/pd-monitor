@@ -23,7 +23,7 @@ export function sourceFor(platform: Platform): RoomSource {
 
 /** 取流结果里的主播元数据回写关注记录 —— 只对 SOOP 生效:
  *  SOOP 的开播时刻(BTIME 反推)和密码房标记只有 CHANNEL 接口给, 轮询侧只读播放页, 拿不到;
- *  潘达这两个值每轮都由列表/bj 的平台原值维护, 再回写一份等于两套真值打架, 故不碰。
+ *  Panda 这两个值每轮都由列表/bj 的平台原值维护, 再回写一份等于两套真值打架, 故不碰。
  *  仅在值确有变化时写(每次写都会触发落盘)。 */
 export function applyPlayMeta(platform: Platform, userId: string, r: PlayResult): void {
   if (platform !== 'soop' || !r.ok) return

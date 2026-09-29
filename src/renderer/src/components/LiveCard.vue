@@ -45,7 +45,7 @@ const { t, locale } = useI18n()
 const m = computed(() => props.model)
 const isZh = computed(() => locale.value === 'zh-CN')
 const liveDuration = computed(() => (m.value.isLive ? fmtLiveDuration(m.value.startTime, t) : ''))
-/** 观众/赞/粉丝三项只有潘达列表接口给; SOOP 无单频道数据接口(实测), 拿 0 上图会被读成"没人看", 不如整列不出现 */
+/** 观众/赞/粉丝三项只有 Panda 列表接口给; SOOP 无单频道数据接口(实测), 拿 0 上图会被读成"没人看", 不如整列不出现 */
 const hasStats = computed(() => m.value.platform !== 'soop')
 
 function watchLive(): void {

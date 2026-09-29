@@ -38,7 +38,7 @@ const credPass = ref('')
 const credLoading = ref(false)
 
 const isSoop = computed(() => plat.value === 'soop')
-/** 当前平台的登录态(潘达看 sessKey + login_info, SOOP 看会话罐 + LOGIN_ID) */
+/** 当前平台的登录态(Panda 看 sessKey + login_info, SOOP 看会话罐 + LOGIN_ID) */
 const acc = computed(() => {
   const a = store.accounts
   if (!a) return null
@@ -301,7 +301,7 @@ async function clearCredentials() {
         </div>
       </section>
 
-      <!-- 方式 C: 账密自动重登(SOOP 专有, 与潘达"只留网页登录/Cookie"的取向刻意不同) -->
+      <!-- 方式 C: 账密自动重登(SOOP 专有, 与 Panda"只留网页登录/Cookie"的取向刻意不同) -->
       <section v-if="isSoop" class="bg-card rounded-[14px] shadow-card px-[18px] py-4 mt-3.5">
         <div class="flex items-center gap-2.5">
           <span class="w-[30px] h-[30px] rounded-[9px] grid place-items-center text-ink2 bg-[#9499a0]/10 shrink-0">

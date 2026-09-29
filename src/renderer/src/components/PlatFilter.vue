@@ -70,7 +70,7 @@ function platColor(v: Opt): string {
   border-color: rgb(var(--c-ink3));
   color: rgb(var(--c-ink1));
 }
-/* 选中态只加粗+中性底, 不改成潘达粉: 选中 "SOOP" 时用潘达的身份色表达"当前项",
+/* 选中态只加粗+中性底, 不改成 Panda 粉: 选中 "SOOP" 时用 Panda 的身份色表达"当前项",
    等于用 A 平台的颜色代表 B 平台(设计稿第②屏的判定)。平台身份只由色点承担。 */
 .pf.is-on {
   background: rgb(var(--c-fillh));

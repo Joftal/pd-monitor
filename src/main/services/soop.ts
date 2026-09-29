@@ -650,7 +650,7 @@ class SoopApi {
   }
 
   /** 上游清单判死(403/404)→ 找出是哪个房间的源并收尸。
-   *  连续两次才收(与潘达保活同规约): 单次可能是 CDN 抖动, 误杀好源的代价是白重铸一轮五步链。
+   *  连续两次才收(与 Panda 保活同规约): 单次可能是 CDN 抖动, 误杀好源的代价是白重铸一轮五步链。
    *  缓存条目本来就极少(只在播且被点开的房间), 直接扫比再维护一张 上游→房间 表划算 */
   private deadStreak = new Map<string, number>()
   private onUpstreamDead(target: string, status: number): void {

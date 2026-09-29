@@ -46,7 +46,7 @@ function matchPlat(a: { platform: Platform }): boolean {
 }
 
 // 在播排序: 开播时刻新→旧, 拿不到开播时刻的沉底, 同一时刻再按人数。
-// 不能只按人数排: 人数只有潘达列表接口给, SOOP 侧无单频道人数接口(实测)恒为 0,
+// 不能只按人数排: 人数只有 Panda 列表接口给, SOOP 侧无单频道人数接口(实测)恒为 0,
 // 纯人数排序会把刚开播的 SOOP 房永久钉在墙尾, 用户不看平台筛选就以为没开播。
 // startTime 是 "YYYY-MM-DD HH:MM:SS"(KST 钟面), 字典序即时间序, 直接反着比
 const liveList = computed(() =>
@@ -146,7 +146,7 @@ async function setAuto(platform: Platform, userId: string, v: boolean) {
         <n-button size="medium" type="primary" round @click="openAdd">{{ t('monitor.addBtn') }}</n-button>
       </div>
 
-      <!-- 轮询异常提示(潘达冷却/熔断, 或 SOOP 整轮全灭): 状态徽标只有一枚圆点, 这里给可读正文 -->
+      <!-- 轮询异常提示(Panda 冷却/熔断, 或 SOOP 整轮全灭): 状态徽标只有一枚圆点, 这里给可读正文 -->
       <div
         v-if="store.watcher?.message"
         class="mt-2.5 flex items-center gap-1.5 text-[12px]"

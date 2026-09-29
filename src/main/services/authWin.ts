@@ -13,16 +13,16 @@ import { Platform } from '../../shared/types'
 //   - 主触发: session cookie 变化事件(防抖 1.2s) + 页面导航完成事件
 //   - 兜底: 每 15s 一次慢速校验(防事件丢失)
 //   - 校验通过才关窗落地; 验证中不往磁盘写任何东西
-// 两平台差异全收在 LoginWindowSpec 里: 潘达要把 cookie 摘进 vault, SOOP 的会话罐本身就是存储
+// 两平台差异全收在 LoginWindowSpec 里: Panda 要把 cookie 摘进 vault, SOOP 的会话罐本身就是存储
 // ==================================================================
 
 interface LoginWindowSpec {
   partition: string
   startUrl: string
   title: string
-  /** 站点自己的 cookie 域(潘达 .pandalive.co.kr / SOOP .sooplive.com) */
+  /** 站点自己的 cookie 域(Panda .pandalive.co.kr / SOOP .sooplive.com) */
   cookieDomain: string
-  /** 落地需要的最低凭证(潘达缺 sessKey 直接不验; SOOP 匿名也回一堆站点 cookie, 不能拿它们当登录凭证) */
+  /** 落地需要的最低凭证(Panda 缺 sessKey 直接不验; SOOP 匿名也回一堆站点 cookie, 不能拿它们当登录凭证) */
   hasCredential: (jar: CookieJar) => boolean
   /** 一次登录态探测: 返回 login=true 时窗口即刻关闭 */
   probe: (ses: Session) => Promise<{ login: boolean; message: string }>
