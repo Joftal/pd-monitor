@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
-import type { AccountState, Anchor, DiscoveryItem, RecHistoryItem, RecTask, Settings, WatcherStatus } from '@shared/types'
+import type { AccountStates, Anchor, DiscoveryItem, Platform, RecHistoryItem, RecTask, Settings, WatcherStatus } from '@shared/types'
+import { roomKey } from '@shared/types'
 import { api } from '@/api'
 
 // ============ 提示音(WebAudio, 免资源文件) ============
@@ -30,7 +31,8 @@ interface State {
   history: RecHistoryItem[]
   settings: Settings | null
   watcher: WatcherStatus | null
-  account: AccountState | null
+  /** 两套登录态一次给全: 顶栏双头像与账号页共用同一份事实源 */
+  accounts: AccountStates | null
   searchKeyword: string
   /** 大厅筛选/排序/分页/滚动状态(视图切换不重置; 生命周期内存态, 重启回默认) */
   exploreFilter: {
@@ -42,7 +44,7 @@ interface State {
     /** 列表滚动位置(px) */
     scrollTop: number
   }
-  /** 已获取有效直播源的主播 userId 集(主进程播放源缓存的快照推送; 卡片「秒开」徽标依据) */
+  /** 已获取有效直播源的房间主键集(主进程播放源缓存的快照推送; 卡片「秒开」徽标依据) */
   srcCache: string[]
 }
 
@@ -54,7 +56,7 @@ export const useAppStore = defineStore('app', {
     history: [],
     settings: null,
     watcher: null,
-    account: null,
+    accounts: null,
     searchKeyword: '',
     exploreFilter: { sortBy: 'viewers', onlyFollowed: false, onlyAdult: false, onlyFan: false, page: 1, scrollTop: 0 },
     srcCache: []
@@ -63,15 +65,16 @@ export const useAppStore = defineStore('app', {
     liveAnchors: (s) => s.anchors.filter((a) => a.isLive),
     offlineAnchors: (s) => s.anchors.filter((a) => !a.isLive),
     activeRecs: (s) => s.recordings.filter((r) => r.status === 'recording' || r.status === 'remuxing'),
-    isRecording: (s) => (userId: string) =>
-      s.recordings.some((r) => r.userId === userId && (r.status === 'recording' || r.status === 'remuxing')),
-    isFollowing: (s) => (userId: string) => s.anchors.some((a) => a.userId === userId),
-    /** 该房间是否已持有有效直播源(点了就能播/录, 无需再拉) */
-    isSrcReady: (s) => (userId: string) => s.srcCache.includes(userId)
+    isRecording: (s) => (platform: Platform, userId: string) =>
+      s.recordings.some((r) => r.platform === platform && r.userId === userId && (r.status === 'recording' || r.status === 'remuxing')),
+    isFollowing: (s) => (platform: Platform, userId: string) =>
+      s.anchors.some((a) => a.platform === platform && a.userId === userId),
+    /** 该房间是否已持有有效直播源(点了就能播/录, 无需再拉); srcCache 为主进程推送的房间主键 */
+    isSrcReady: (s) => (platform: Platform, userId: string) => s.srcCache.includes(roomKey(platform, userId))
   },
   actions: {
     async init() {
-      const [anchors, recordings, settings, watcherStatus, account, history, discovery, srcCache] = await Promise.all([
+      const [anchors, recordings, settings, watcherStatus, accounts, history, discovery, srcCache] = await Promise.all([
         api.anchorsList(),
         api.recList(),
         api.settingsGet(),
@@ -85,7 +88,7 @@ export const useAppStore = defineStore('app', {
       this.recordings = recordings
       this.settings = settings
       this.watcher = watcherStatus
-      this.account = account
+      this.accounts = accounts
       this.history = history
       this.discovery = discovery
       this.srcCache = srcCache
@@ -104,7 +107,7 @@ export const useAppStore = defineStore('app', {
         }
       })
       api.onWatcher((w) => (this.watcher = w))
-      api.onAccount((a) => (this.account = a))
+      api.onAccount((a) => (this.accounts = a))
     },
     async refreshHistory() {
       this.history = await api.recHistory()
@@ -112,11 +115,11 @@ export const useAppStore = defineStore('app', {
     async patchSettings(patch: Partial<Settings>) {
       this.settings = await api.settingsSet(patch)
     },
-    async follow(userId: string) {
-      await api.anchorsAdd(userId)
+    async follow(platform: Platform, userId: string) {
+      await api.anchorsAdd(userId, platform)
     },
-    async unfollow(userId: string) {
-      await api.anchorsRemove(userId)
+    async unfollow(platform: Platform, userId: string) {
+      await api.anchorsRemove(platform, userId)
     }
   }
 })

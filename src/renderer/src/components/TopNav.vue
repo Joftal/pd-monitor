@@ -27,16 +27,15 @@ function tabActive(name: string): boolean {
 
 const watcherState = computed(() => {
   const w = store.watcher
-  if (!w) return { cls: 'bg-ink3', text: '—', tip: t('nav.wUnknown') }
-  if (w.circuitOpen) return { cls: 'bg-red-400', text: t('nav.wCooling'), tip: w.message }
-  if (!w.running) return { cls: 'bg-ink3', text: t('nav.wStopped'), tip: t('nav.wStoppedTip') }
+  if (!w) return { cls: 'bg-ink3', text: '—', tip: t('nav.wUnknown'), tone: 'idle' }
+  if (w.circuitOpen) return { cls: 'bg-red-400', text: t('nav.wCooling'), tip: w.message, tone: 'bad' }
+  if (!w.running) return { cls: 'bg-ink3', text: t('nav.wStopped'), tip: t('nav.wStoppedTip'), tone: 'idle' }
   const interval = store.settings?.pollIntervalSec ?? '?'
   const cost = w.roundMs < 1000 ? `${w.roundMs} ${t('common.ms')}` : `${(w.roundMs / 1000).toFixed(1)} ${t('common.sec')}`
-  return {
-    cls: 'bg-live',
-    text: t('nav.liveN', { n: w.liveCount }),
-    tip: t('nav.wTip', { sec: interval, cost })
-  }
+  const heartbeat = t('nav.wTip', { sec: interval, cost })
+  // message 非空但没熔断 = 轮询在跑、某一侧已经瞎掉(SOOP 整轮全灭 / 潘达冷却): 绿点呼吸就是骗人
+  if (w.message) return { cls: 'bg-amber-400', text: t('nav.wWarn'), tip: `${w.message} · ${heartbeat}`, tone: 'warn' }
+  return { cls: 'bg-live', text: t('nav.liveN', { n: w.liveCount }), tip: heartbeat, tone: 'ok' }
 })
 
 const keyword = computed({
@@ -45,6 +44,50 @@ const keyword = computed({
     store.searchKeyword = v
     if (v && route.name !== 'explore') router.push({ name: 'explore' })
   }
+})
+
+/** 两套登录态彼此独立: 一枚头像只代表一边, 点哪枚就在账号页打开哪一方
+ *  状态文字直接摆在头像旁(B4): 合并口径的"已登录"会让人以为两边都稳, 而 tooltip 在截图与触屏里不存在 */
+const avatars = computed(() => {
+  const a = store.accounts
+  const p = a?.pandalive
+  const s = a?.soop
+  return [
+    {
+      key: 'pandalive' as const,
+      short: '潘',
+      live: !!p?.realLogin,
+      held: !!p?.loggedIn,
+      stateText: p?.realLogin ? t('nav.loggedIn') : p?.loggedIn ? t('nav.unverified') : t('nav.notLoggedIn'),
+      tip: !p
+        ? t('nav.wUnknown')
+        : p.realLogin
+          ? p.isAdult
+            ? t('account.descOkAdult')
+            : t('account.descOkNoAdult')
+          : p.netFail
+            ? t('account.netFailTip')
+            : p.loggedIn
+              ? t('account.descWarn')
+              : t('account.descNone')
+    },
+    {
+      key: 'soop' as const,
+      short: 'S',
+      live: !!s?.realLogin,
+      held: !!s?.hasCookies,
+      stateText: s?.realLogin ? t('nav.loggedIn') : s?.hasCookies ? t('nav.unverified') : t('nav.notLoggedIn'),
+      tip: !s
+        ? t('nav.wUnknown')
+        : s.realLogin
+          ? t('account.soopDescOk', { id: s.loginId })
+          : s.netFail
+            ? t('account.netFailTip')
+            : s.hasCookies
+              ? t('account.soopDescWarn')
+              : t('account.soopDescNone')
+    }
+  ]
 })
 </script>
 
@@ -105,7 +148,10 @@ const keyword = computed({
     <div class="no-drag flex items-center gap-1.5 shrink-0">
       <n-tooltip trigger="hover" placement="bottom">
         <template #trigger>
-          <div class="flex items-center gap-1.5 h-8 px-3 rounded-full bg-live/10 text-live text-[12px] font-semibold cursor-default">
+          <div
+            class="flex items-center gap-1.5 h-8 px-3 rounded-full text-[12px] font-semibold cursor-default"
+            :class="watcherState.tone === 'bad' ? 'bg-red-500/10 text-red-600' : watcherState.tone === 'warn' ? 'bg-amber-500/10 text-amber-600' : 'bg-live/10 text-live'"
+          >
             <span class="w-2 h-2 rounded-full" :class="[watcherState.cls, watcherState.cls === 'bg-live' ? 'animate-breathe' : '']"></span>
             <span>{{ watcherState.text }}</span>
           </div>
@@ -113,35 +159,38 @@ const keyword = computed({
         {{ watcherState.tip }}
       </n-tooltip>
 
+      <!-- 双平台登录态: 两套会话互不影响, 各一枚头像 + 各自状态文字 -->
       <button
-        class="h-9 pl-1 pr-3 rounded-full flex items-center gap-2 hover:bg-page transition-colors"
+        class="h-9 pl-1 pr-2.5 rounded-full flex items-center gap-2 hover:bg-page transition-colors"
         @click="router.push({ name: 'account' })"
         :title="t('account.title')"
       >
-        <span class="relative w-8 h-8 shrink-0">
-          <!-- 头像圆: SVG 人像, 登录态渐变粉底, 未登录灰色 -->
-          <span
-            class="w-8 h-8 rounded-full grid place-items-center overflow-hidden ring-2"
-            :class="store.account?.realLogin ? 'bg-gradient-to-br from-live to-fuchsia-400 ring-live/30' : store.account?.loggedIn ? 'bg-gradient-to-br from-amber-400 to-amber-500 ring-amber-300/40' : 'bg-fill ring-fill'"
-          >
-            <svg
-              class="w-[18px] h-[18px]"
-              :class="store.account?.loggedIn ? 'text-white' : 'text-ink3'"
-              viewBox="0 0 24 24" fill="currentColor"
-            >
-              <path d="M12 12a4.4 4.4 0 100-8.8 4.4 4.4 0 000 8.8zM4.5 20.4c1-4.1 4.2-6.1 7.5-6.1s6.5 2 7.5 6.1a.9.9 0 01-.88 1.1H5.38a.9.9 0 01-.88-1.1z"/>
-            </svg>
+        <template v-for="(av, i) in avatars" :key="av.key">
+          <span v-if="i" class="w-px h-4 bg-line shrink-0"></span>
+          <span class="flex items-center gap-1.5">
+            <n-tooltip trigger="hover" placement="bottom">
+              <template #trigger>
+                <span
+                  class="relative w-8 h-8 shrink-0 cursor-pointer"
+                  @click.stop="router.push({ name: 'account', query: { plat: av.key } })"
+                >
+                  <span
+                    class="w-8 h-8 rounded-full grid place-items-center ring-2 text-[12px] font-extrabold select-none"
+                    :class="av.live ? (av.key === 'soop' ? 'bg-[#0f1115] text-[#e8ff3a] ring-live/30' : 'bg-gradient-to-br from-live to-fuchsia-400 text-white ring-live/30') : av.held ? 'bg-gradient-to-br from-amber-400 to-amber-500 text-white ring-amber-300/40' : 'bg-fill text-ink3 ring-fill'"
+                  >{{ av.short }}</span>
+                  <!-- 状态点: 已登录绿 / 有 Cookie 但未过官方校验琥珀 -->
+                  <span
+                    v-if="av.live || av.held"
+                    class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full ring-2 ring-card"
+                    :class="av.live ? 'bg-emerald-500' : 'bg-amber-500'"
+                  ></span>
+                </span>
+              </template>
+              {{ av.tip }}
+            </n-tooltip>
+            <span class="text-[11.5px] shrink-0" :class="av.live ? 'text-ink1 font-medium' : av.held ? 'text-amber-600' : 'text-ink3'">{{ av.stateText }}</span>
           </span>
-          <!-- 状态点: 登录绿/未认证琥珀 -->
-          <span
-            v-if="store.account?.loggedIn"
-            class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full ring-2 ring-card"
-            :class="store.account?.realLogin ? 'bg-emerald-500' : 'bg-amber-500'"
-          ></span>
-        </span>
-        <span class="text-[13px]" :class="store.account?.realLogin ? 'text-ink1 font-medium' : 'text-ink3'">
-          {{ store.account?.realLogin ? t('nav.loggedIn') : store.account?.loggedIn ? t('nav.unverified') : t('nav.login') }}
-        </span>
+        </template>
       </button>
 
       <button

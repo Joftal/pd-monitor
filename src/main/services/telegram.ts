@@ -1,5 +1,6 @@
 import { session } from 'electron'
-import { api, nodeHttpRequest, proxyUrl } from './pandalive'
+import { nodeHttpRequest, proxyUrl } from './pandalive'
+import { sourceFor } from './source'
 import { store } from './store'
 import { UA, sleep } from '../util'
 import { logger } from './logger'
@@ -133,8 +134,10 @@ export async function tgPush(token: string, chatId: string, ev: TgEvent, toast: 
   // master 令牌一回取即焚, 发出去必 403 —— 只在无变体时回退。getPlayCached 与预取泵/录制
   // 共享在途去重, 零增量请求(watcher 先 invalidatePlay 再弹卡, 命中必为新一场源)
   const full: TgCtx = { ...ctx }
-  if ((ev === 'live' || ev === 'fanLive' || ev === 'roomChange') && !full.streamUrl && ctx.anchor) {
-    await api
+  // 只有 pandalive 的源地址能往外贴: SOOP 的流是 127.0.0.1 本地代理地址(见 hlsProxy),
+  // 换台机器就是死链, 而 query 里还明文带着一次性上游取流凭证 —— 既不取(省一整条五步链)也不发
+  if ((ev === 'live' || ev === 'fanLive' || ev === 'roomChange') && !full.streamUrl && ctx.anchor?.platform === 'pandalive') {
+    await sourceFor(ctx.anchor.platform)
       .getPlayCached(ctx.anchor.userId)
       .then((p) => (full.streamUrl = p.ok ? p.variants?.[0]?.url || p.m3u8 || '' : ''))
       .catch(() => undefined)

@@ -4,7 +4,9 @@ import { useRouter } from 'vue-router'
 import { NTooltip, useMessage } from 'naive-ui'
 import { api } from '@/api'
 import { useI18n } from 'vue-i18n'
+import { type Platform } from '@shared/types'
 import { fmtLiveDuration, fmtNum } from '@/utils/media'
+import PlatTag from '@/components/PlatTag.vue'
 
 // ============ 统一直播间卡片(大厅/已关注共用) ============
 // AnchorCard 与 ExploreCard 历史两套近乎逐行重复的模板收敛至此:
@@ -14,6 +16,7 @@ import { fmtLiveDuration, fmtNum } from '@/utils/media'
 // ======================================================
 
 export interface LiveCardModel {
+  platform: Platform
   userId: string
   nick: string
   title: string
@@ -34,7 +37,7 @@ export interface LiveCardModel {
   startTime?: string
 }
 
-const props = defineProps<{ model: LiveCardModel }>()
+const props = withDefaults(defineProps<{ model: LiveCardModel; /** 整屏只有一个平台时(大厅/已关注筛选到单平台)徽标是重复信息, 由调用方关掉 */ showPlatform?: boolean }>(), { showPlatform: true })
 const router = useRouter()
 const message = useMessage()
 const { t, locale } = useI18n()
@@ -42,23 +45,26 @@ const { t, locale } = useI18n()
 const m = computed(() => props.model)
 const isZh = computed(() => locale.value === 'zh-CN')
 const liveDuration = computed(() => (m.value.isLive ? fmtLiveDuration(m.value.startTime, t) : ''))
+/** 观众/赞/粉丝三项只有潘达列表接口给; SOOP 无单频道数据接口(实测), 拿 0 上图会被读成"没人看", 不如整列不出现 */
+const hasStats = computed(() => m.value.platform !== 'soop')
 
 function watchLive(): void {
-  if (m.value.isLive) router.push({ name: 'player', params: { userId: m.value.userId } })
+  if (m.value.isLive)
+    router.push({ name: 'player', params: { platform: m.value.platform, userId: m.value.userId } })
 }
 
 async function toggleRecord(): Promise<void> {
   if (m.value.recording) {
-    await api.recStop(m.value.userId)
+    await api.recStop(m.value.platform, m.value.userId)
     message.success(t('card.recStopped'))
   } else {
-    const r = await api.recStart(m.value.userId)
+    const r = await api.recStart(m.value.platform, m.value.userId)
     if ('userId' in r) {
       message.success(t('card.recStartedNick', { nick: m.value.nick }))
     } else if (r.needPassword) {
       const pwd = window.prompt(t('card.pwPrompt'))
       if (pwd !== null) {
-        const r2 = await api.recStart(m.value.userId, pwd)
+        const r2 = await api.recStart(m.value.platform, m.value.userId, pwd)
         'userId' in r2 ? message.success(t('card.recStarted')) : message.error(r2.error || t('card.recFail'))
       }
     } else {
@@ -107,6 +113,11 @@ async function toggleRecord(): Promise<void> {
         </span>
       </div>
 
+      <!-- 左下: 平台徽标 —— 统一墙里区分两平台的唯一常驻标记(离线卡也要显示, 否则只剩 @ID 猜平台)。
+           不能摆左上: 那一行还要挂 直播中/REC/已缓存, 5 列时卡宽仅 ≈249px, 第四枚必被 overflow 裁掉;
+           右下留给 hover 操作, 左下在离线卡上本就空闲 -->
+      <PlatTag v-if="showPlatform" :platform="m.platform" size="md" surface="onimg" class="absolute bottom-2 left-2" />
+
       <!-- 右上: 19+ -->
       <span v-if="m.isAdult" class="absolute top-2 right-2 px-1.5 py-[3px] rounded bg-red-500/90 text-[11px] font-bold text-white shadow-sm">19+</span>
 
@@ -145,17 +156,17 @@ async function toggleRecord(): Promise<void> {
         <slot name="meta" />
       </div>
 
-      <!-- 第三行: 数据行(统一线性图标, 仅直播中有数据) -->
-      <div v-if="m.isLive" class="flex items-center gap-3 mt-2 pt-2 border-t border-line/70 text-[11.5px] text-ink3">
-        <span class="flex items-center gap-1" :title="t('card.viewers')">
+      <!-- 第三行: 数据行(统计项按平台数据可得性显隐: SOOP 只剩已播时长) -->
+      <div v-if="m.isLive && (hasStats || liveDuration)" class="flex items-center gap-3 mt-2 pt-2 border-t border-line/70 text-[11.5px] text-ink3">
+        <span v-if="hasStats" class="flex items-center gap-1" :title="t('card.viewers')">
           <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
           {{ fmtNum(m.viewers, isZh) }}
         </span>
-        <span class="flex items-center gap-1" :title="t('card.likes')">
+        <span v-if="hasStats" class="flex items-center gap-1" :title="t('card.likes')">
           <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.5s-7.5-4.9-9.7-9.2A5.6 5.6 0 0112 5.9a5.6 5.6 0 019.7 5.4c-2.2 4.3-9.7 9.2-9.7 9.2z"/></svg>
           {{ fmtNum(m.likes, isZh) }}
         </span>
-        <span class="flex items-center gap-1" :title="t('card.fans')">
+        <span v-if="hasStats" class="flex items-center gap-1" :title="t('card.fans')">
           <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8L12 17.2 5.9 20.6l1.4-6.8L2.2 9.1l6.9-.8z"/></svg>
           {{ fmtNum(m.fans, isZh) }}
         </span>

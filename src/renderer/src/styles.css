@@ -17,6 +17,14 @@
   --shadow-card-hover: rgba(0, 0, 0, 0.1);
   --scrollbar: #d6d9dd;
   --scrollbar-hover: #c1c6cc;
+  /* 平台身份色: 只给 6px 色点与徽标文字用, 不做整块底色(白字压 #fb7299 仅约 2.9:1) */
+  --plat-panda: #fb7299;
+  --plat-panda-ink: #b83a5c;
+  --plat-soop: #1b1d22;
+  --plat-soop-accent: #ffd400;
+  --plat-soop-ink: #23262d;
+  /* 徽标压在封面上时的承托底: 半透明墨底, 白字对比度约 13:1 */
+  --tag-onimg: rgba(17, 19, 24, 0.74);
 }
 
 .dark {
@@ -34,6 +42,11 @@
   --shadow-card-hover: rgba(0, 0, 0, 0.6);
   --scrollbar: #3f3f46;
   --scrollbar-hover: #515159;
+  /* 深色下浅底徽标自动换墨色, PlatTag 组件本身不写 dark: 分支 */
+  --plat-panda-ink: #f08bab;
+  --plat-soop-accent: #ffe14d;
+  --plat-soop-ink: #d8dade;
+  --tag-onimg: rgba(10, 11, 14, 0.82);
 }
 
 html,

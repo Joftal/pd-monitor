@@ -3,7 +3,7 @@ import * as http from 'http'
 import * as https from 'https'
 import * as tls from 'tls'
 import * as net2 from 'net'
-import { EV } from '../../shared/types'
+import { EV, Platform, roomKey } from '../../shared/types'
 import type { Anchor } from '../../shared/types'
 import { UA, sleep } from '../util'
 import { vault, CookieJar } from './vault'
@@ -20,6 +20,12 @@ import { mt } from '../i18n'
 
 const API = 'https://api.pandalive.co.kr'
 export const SESSION_PARTITION = 'persist:pl'
+
+/** 录制直连 IVS 源时必带的头(实测缺则分段 403) */
+export const PANDALIVE_DL_HEADERS: Record<string, string> = {
+  Origin: 'https://www.pandalive.co.kr',
+  Referer: 'https://www.pandalive.co.kr/'
+}
 
 export class RiskError extends Error {
   constructor(
@@ -65,6 +71,8 @@ export interface LiveItem {
 export interface PlayResult {
   ok: boolean
   needPassword?: boolean
+  /** SOOP 专有: 房间要登录态(19+/限区/匿名降级), 上层据此给"去登录"入口而不是当成未开播 */
+  needLogin?: boolean
   error?: string
   m3u8?: string
   /** 回放(liveType=rec)播放结果: 录制据此走单文件下载, 前端据此切换文案 */
@@ -74,17 +82,23 @@ export interface PlayResult {
   hlsBackups?: string[]
   title?: string
   nick?: string
+  /** 开播时刻("YYYY-MM-DD HH:MM:SS", KST 钟面): SOOP 由 CHANNEL.BTIME 反推, 用于回写关注卡的已播时长 */
+  startTime?: string
   thumbUrl?: string
   userImg?: string
   media?: Record<string, unknown>
   /** 本源包的生成时刻(缓存写入时打戳; 缓存命中/在途复用返回同一对象, 时戳天然一致) */
   fetchedAt?: number
+  /** 录制侧 ffmpeg 需要注入的请求头(平台各异; SOOP 走本地代理带头, 此处为空) */
+  dlHeaders?: Record<string, string>
 }
 
 export interface VariantInfo {
   url: string
   bandwidth: number
   resolution: string
+  /** 平台给的清晰度名(SOOP 的 sd/hd/original 等), 用于档位文案; 无则前端按分辨率命名 */
+  label?: string
 }
 
 /** checkLoginInfo 结果: netFail=true 表示请求本身失败(网络/风控), 与"服务端明确未登录"语义不同 */
@@ -127,14 +141,24 @@ let nodeProxyUrl = ''
 /** 当前代理地址(供 Telegram 等旁路请求的 Node 兜底通道复用同一代理) */
 export const proxyUrl = (): string => nodeProxyUrl
 
+// 需要跟随「设置-代理」的会话分区清单: 各平台客户端在自己的分区上初始化时登记。
+// 代理必须全平台一致生效, 否则同一份设置换一个平台就变成直连(SOOP 限区场景即全盘失败)。
+const proxyPartitions = new Set<string>([SESSION_PARTITION])
+
+export function registerProxyPartition(partition: string): void {
+  proxyPartitions.add(partition)
+}
+
 export function applyProxy(proxyUrl: string): void {
-  const ses = session.fromPartition(SESSION_PARTITION)
   const url = (proxyUrl || '').trim()
   nodeProxyUrl = url
-  if (url) {
-    void ses.setProxy({ proxyRules: url })
-  } else {
-    void ses.setProxy({ mode: 'direct' })
+  for (const p of proxyPartitions) {
+    const ses = session.fromPartition(p)
+    if (url) {
+      void ses.setProxy({ proxyRules: url })
+    } else {
+      void ses.setProxy({ mode: 'direct' })
+    }
   }
 }
 
@@ -493,7 +517,7 @@ class PandaApi {
   // ---------- 业务接口 ----------
   /** 官方登录态校验: 返回 isLogin / isAdult(成人认证) 等; 可提供 jar 进行"试验证"(不落地, 不经缓存)
    *  netFail=true 表示请求本身失败(网络/风控), 与"服务端明确未登录"语义不同, 调用方不得据此判死会话
-   *  无 jarOverride 时走 30s 结果缓存 + 在途合并: 启动期 authState/自愈核对/pushAccount 三连发收敛为一发;
+   *  无 jarOverride 时走 30s 结果缓存 + 在途合并: 启动期 authState/自愈核对/pushAccounts 三连发收敛为一发;
    *  缓存以 cookieHeader 为键, jar 任何变更(登录/导入/轮换)天然失配; netFail 不缓存, 下次仍真实复检 */
   private loginInfoCache: { at: number; header: string; info: LoginInfoResult } | null = null
   private loginInfoInflight: { header: string; p: Promise<LoginInfoResult> } | null = null
@@ -600,9 +624,10 @@ class PandaApi {
   // ---- 拉源缓存: 不设时限, 源能用就一直用; 仅显式事件作废(重开播/录制出错/换号/手动强刷) ----
   private playCache = new Map<string, PlayResult>()
 
-  /** "已获取有效直播源"的主播 userId 集(缓存即事实源; 卡片「秒开」徽标的用户可见投影) */
+  /** "已获取有效直播源"的房间主键集(缓存即事实源; 卡片「秒开」徽标的用户可见投影)。
+   *  本客户端只服务 pandalive, 裸 userId 键在此出口补成 roomKey —— 渲染层 srcCache 一律复合键。 */
   cachedSourceIds(): string[] {
-    return [...this.playCache.entries()].filter(([, v]) => v.ok).map(([k]) => k)
+    return [...this.playCache.entries()].filter(([, v]) => v.ok).map(([k]) => roomKey('pandalive', k))
   }
 
   // ---- 源保活泵: 轻量心跳维持 IVS 会话活性 ----
@@ -677,16 +702,18 @@ class PandaApi {
     if (!store.getSettings().keepaliveStream) return
     this.keepaliveBusy = true
     try {
-      const anchors = new Map(store.listAnchors().map((a) => [a.userId, a]))
+      // 关注表按复合键索引(playCache 本身是裸 userId, 出口处补 'pandalive'):
+      // 直接用裸 userId 建表会让同号的 SOOP 关注覆盖潘达关注, 保活判定读到别人的 isLive
+      const anchors = new Map(store.listAnchors().map((a) => [roomKey(a.platform, a.userId), a]))
       // 快照防漂移: tick 期间缓存可能增删
       const queue = [...this.playCache.entries()].filter(([userId, pack]) => {
         if (!pack.ok || pack.vod) return false // 回放是静态分片, 无会话活性概念
-        const a = anchors.get(userId)
+        const a = anchors.get(roomKey('pandalive', userId))
         return !a || a.isLive // 已知下播: 会话死亡属预期, 不耗心跳; 未关注源(回访场景)照常养
       })
       const lanes = Array.from({ length: PandaApi.KEEPALIVE_LANES }, async () => {
         for (let next = queue.shift(); next; next = queue.shift()) {
-          await this.keepaliveSource(next[0], next[1], anchors.get(next[0]))
+          await this.keepaliveSource(next[0], next[1], anchors.get(roomKey('pandalive', next[0])))
           await sleep(50)
         }
       })
@@ -734,10 +761,9 @@ class PandaApi {
     }
   }
 
-  /** 源缓存变动统一广播: 渲染层据此点亮/熄灭卡片「秒开」徽标 */
+  /** 源缓存变动统一广播: 渲染层据此点亮/熄灭卡片「已缓存」徽标 */
   private pushSrcCache(): void {
-    const win = BrowserWindow.getAllWindows()[0]
-    win?.webContents.send(EV.srcCache, this.cachedSourceIds())
+    broadcastSrcCache()
   }
 
   invalidatePlay(userId: string): void {
@@ -755,13 +781,16 @@ class PandaApi {
   // ---- 保活运行状态(供播放页"播放源卡"展示) ----
   private keepaliveInfo = new Map<string, { at: number; ok: boolean; variants: number }>()
 
-  keepaliveStatus(userId: string): {
+  keepaliveStatus(platform: Platform, userId: string): {
     enabled: boolean
     cached: boolean
     lastAt: number
     lastOk: boolean
     variants: number
   } {
+    // 本客户端只保活 pandalive 源: 他平台同名房间必须空态, 防跨平台串数据
+    if (platform !== 'pandalive')
+      return { enabled: store.getSettings().keepaliveStream, cached: false, lastAt: 0, lastOk: true, variants: 0 }
     const info = this.keepaliveInfo.get(userId)
     return {
       enabled: store.getSettings().keepaliveStream,
@@ -879,6 +908,7 @@ class PandaApi {
       m3u8: hls,
       variants,
       hlsBackups: backups,
+      dlHeaders: PANDALIVE_DL_HEADERS,
       title: (j.media?.title as string) || '',
       nick: (j.media?.userNick as string) || '',
       thumbUrl: (j.media?.thumbUrl as string) || '',
@@ -886,6 +916,25 @@ class PandaApi {
       media: j.media
     }
   }
+}
+
+// ---- 源缓存列表(跨平台并集) ----
+// 渲染层「已缓存」徽标认的是 roomKey 列表, 两平台的缓存必须合成一份广播。
+// 本客户端只认识自己, 其它平台客户端在模块初始化时把自家的列表登记进来。
+const srcCacheProviders: Array<() => string[]> = []
+
+export function registerSrcCacheProvider(list: () => string[]): void {
+  srcCacheProviders.push(list)
+}
+
+/** 当前拿到有效直播源的全部房间主键(跨平台) */
+export function cachedSourceIdsAll(): string[] {
+  return [...api.cachedSourceIds(), ...srcCacheProviders.flatMap((p) => p())]
+}
+
+/** 源缓存变动统一广播(两平台共用) */
+export function broadcastSrcCache(): void {
+  BrowserWindow.getAllWindows()[0]?.webContents.send(EV.srcCache, cachedSourceIdsAll())
 }
 
 export const api = new PandaApi()

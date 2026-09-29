@@ -1,7 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { dataDir } from '../util'
-import { Anchor, RecHistoryItem, Settings, DEFAULT_SETTINGS } from '../../shared/types'
+import { Anchor, DEFAULT_PLATFORM, isPlatform, Platform, RecHistoryItem, Settings, DEFAULT_SETTINGS } from '../../shared/types'
 import { logger } from './logger'
 
 interface DbShape {
@@ -11,6 +11,16 @@ interface DbShape {
 }
 
 const FILE = () => path.join(dataDir(), 'db.json')
+
+/** 旧版本库无 platform 字段: 读时补默认平台(幂等), 让升级后的复合主键不缺位。
+ *  判据走 isPlatform 而非信任类型 —— 磁盘 JSON 里的值实际可能是 undefined。 */
+function migrateAnchor(x: Anchor): Anchor {
+  return isPlatform(x.platform) ? x : { ...x, platform: DEFAULT_PLATFORM }
+}
+
+function migrateHistory(x: RecHistoryItem): RecHistoryItem {
+  return isPlatform(x.platform) ? x : { ...x, platform: DEFAULT_PLATFORM }
+}
 
 /** 读库带重试: Windows 下应用被强杀后立刻重启, db.json 句柄可能尚未释放(EBUSY/EPERM),
  *  此时若静默回退默认态 + 轮询 flush 会把真数据覆写丢 —— 重试 + dbRecovering 写守卫双保险 */
@@ -22,9 +32,9 @@ function load(retryMs = 0): DbShape {
     const j = JSON.parse(raw)
     dbRecovering = false
     return {
-      anchors: Array.isArray(j.anchors) ? j.anchors : [],
+      anchors: (Array.isArray(j.anchors) ? j.anchors : []).map(migrateAnchor),
       settings: { ...DEFAULT_SETTINGS, ...(j.settings || {}) },
-      history: Array.isArray(j.history) ? j.history : []
+      history: (Array.isArray(j.history) ? j.history : []).map(migrateHistory)
     }
   } catch (e) {
     if (retryMs > 0 && fs.existsSync(FILE())) {
@@ -85,17 +95,17 @@ export const store = {
     return db.anchors
   },
   addAnchor(a: Anchor): void {
-    if (!db.anchors.find((x) => x.userId === a.userId)) {
+    if (!db.anchors.find((x) => x.platform === a.platform && x.userId === a.userId)) {
       db.anchors.push(a)
       persist()
     }
   },
-  removeAnchor(userId: string): void {
-    db.anchors = db.anchors.filter((x) => x.userId !== userId)
+  removeAnchor(platform: Platform, userId: string): void {
+    db.anchors = db.anchors.filter((x) => !(x.platform === platform && x.userId === userId))
     persist()
   },
-  updateAnchor(userId: string, patch: Partial<Anchor>): void {
-    const a = db.anchors.find((x) => x.userId === userId)
+  updateAnchor(platform: Platform, userId: string, patch: Partial<Anchor>): void {
+    const a = db.anchors.find((x) => x.platform === platform && x.userId === userId)
     if (a) {
       Object.assign(a, patch)
       persist()

@@ -4,9 +4,11 @@ import { NEmpty, useMessage } from 'naive-ui'
 import { api } from '@/api'
 import { useAppStore } from '@/stores/app'
 import CinemaOverlay from '@/components/CinemaOverlay.vue'
+import PlatFilter from '@/components/PlatFilter.vue'
+import PlatTag from '@/components/PlatTag.vue'
 import { useI18n } from 'vue-i18n'
 import { fmtBytes, fmtDur, isMergedTask, mergeableTask } from '@/utils/media'
-import type { RecHistoryItem } from '@shared/types'
+import { roomKey, type Platform, type RecHistoryItem } from '@shared/types'
 
 const { t, locale } = useI18n()
 const store = useAppStore()
@@ -58,8 +60,12 @@ const chips = computed(() => [
 
 const isMerged = isMergedTask
 
+/** 平台维度: 同 ID 在两个平台各自成组, 列表要能只看一边 */
+const platFilter = ref<'all' | Platform>('all')
+
 const filtered = computed(() => {
   let rows = store.history
+  if (platFilter.value !== 'all') rows = rows.filter((h) => h.platform === platFilter.value)
   const f = filterChip.value
   if (f === 'live') rows = rows.filter((h) => !h.vod)
   else if (f === 'vod') rows = rows.filter((h) => h.vod)
@@ -96,16 +102,17 @@ const groupModes = computed(() => [
 const groups = computed(() => {
   // 统一按开始时间倒序; 分组 key 必须唯一(外层 v-for key 不能重复, 复用 key 会导致 DOM 补丁残留幻影卡)
   const sorted = [...filtered.value].sort((a, b) => b.startedAt - a.startedAt)
-  const out: { label: string; key: string; short: string; rows: RecHistoryItem[] }[] = []
+  const out: { label: string; key: string; short: string; rows: RecHistoryItem[]; plat?: Platform }[] = []
   if (groupMode.value === 'anchor') {
     const map = new Map<string, RecHistoryItem[]>()
     for (const h of sorted) {
-      const k = h.userId || h.nick
+      const k = h.userId ? roomKey(h.platform, h.userId) : h.nick
       const arr = map.get(k)
       if (arr) arr.push(h)
       else map.set(k, [h])
     }
-    for (const [k, rows] of map) out.push({ label: rows[0].nick, key: k, short: k, rows })
+    // 索引条短标签用裸 ID(平台前缀是给键用的, 不是给人读的); 平台改在分组标题上出徽标
+    for (const [k, rows] of map) out.push({ label: rows[0].nick, key: k, short: rows[0].userId || rows[0].nick, rows, plat: rows[0].platform })
     return out
   }
   for (const h of sorted) {
@@ -266,6 +273,8 @@ async function onMerge(task: RecHistoryItem) {
           :class="filterChip === c.key ? 'bg-live/10 text-live font-semibold' : 'text-ink2 hover:text-ink1'"
           @click="filterChip = c.key"
         >{{ c.label }}</button>
+        <span class="w-px h-4 bg-line mx-0.5"></span>
+        <PlatFilter :model-value="platFilter" @update:model-value="(v: string) => (platFilter = v as 'all' | Platform)" />
         <div class="flex-1"></div>
         <!-- 分组方式切换 -->
         <div class="flex items-center bg-card border border-line rounded-full p-[3px] mr-1.5">
@@ -315,6 +324,8 @@ async function onMerge(task: RecHistoryItem) {
           <template v-for="g in groups" :key="g.key">
             <div class="flex items-baseline gap-2 px-0.5 pt-3.5 pb-2 scroll-mt-2" :data-gkey="g.key">
               <span class="text-[11.5px] font-bold" :class="groupMode === 'anchor' ? 'text-ink1' : 'text-ink3'">{{ g.label }}</span>
+              <!-- 按主播/平台分组: 平台由组标题代表 -->
+              <PlatTag v-if="g.plat" :platform="g.plat" size="sm" surface="onsurf" />
               <span v-if="groupMode === 'anchor'" class="text-[11px] text-ink3 tabular-nums">{{ t('library.itemsN', { n: g.rows.length }) }}</span>
             </div>
             <div class="grid gap-x-4 gap-y-4 pb-1" style="grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); grid-auto-rows: min-content">
@@ -343,7 +354,10 @@ async function onMerge(task: RecHistoryItem) {
                 </div>
                 <div class="mt-2 text-[13px] font-semibold text-ink1 truncate" :title="h.title">{{ h.title || '—' }}</div>
                 <div class="flex items-center gap-1.5 mt-0.5 text-[11.5px] text-ink3">
-                  <span class="truncate">{{ h.nick }}</span><span>·</span><span class="tabular-nums shrink-0">{{ fmtDur(h.startedAt, h.endedAt) }}</span><span>·</span><span class="tabular-nums shrink-0">{{ fmtBytes(h.bytes) }}</span>
+                  <span class="truncate">{{ h.nick }}</span>
+                  <!-- 按日期分组时一场墙里混两平台, 徽标落在卡上; 按主播分组已由组标题代表 -->
+                  <PlatTag v-if="!g.plat" :platform="h.platform" size="sm" surface="onsurf" />
+                  <span>·</span><span class="tabular-nums shrink-0">{{ fmtDur(h.startedAt, h.endedAt) }}</span><span>·</span><span class="tabular-nums shrink-0">{{ fmtBytes(h.bytes) }}</span>
                   <span v-if="h.status === 'error' && h.error" class="text-red-500 truncate">· {{ h.error.slice(0, 30) }}</span>
                 </div>
               </div>
@@ -352,7 +366,7 @@ async function onMerge(task: RecHistoryItem) {
         </div>
       </div>
       <div v-else class="rounded-2xl border border-dashed border-line py-16 grid place-items-center bg-card/40 mt-4">
-        <n-empty :description="keyword || filterChip !== 'all' ? t('library.emptyFilter') : t('library.empty')" size="small" class="text-ink3" />
+        <n-empty :description="keyword || filterChip !== 'all' || platFilter !== 'all' ? t('library.emptyFilter') : t('library.empty')" size="small" class="text-ink3" />
       </div>
     </div>
 

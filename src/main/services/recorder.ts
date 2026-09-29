@@ -3,8 +3,9 @@ import { spawn, ChildProcessByStdio } from 'child_process'
 import { Readable, Writable } from 'stream'
 import * as fs from 'fs'
 import * as path from 'path'
-import { EV, Anchor, RecHistoryItem, RecTask } from '../../shared/types'
+import { EV, Platform, roomKey, Anchor, RecHistoryItem, RecTask } from '../../shared/types'
 import { api } from './pandalive'
+import { sourceFor } from './source'
 import { store } from './store'
 import { thumbs } from './thumbs'
 import { tsName, diskFreeGb, scanTaskMedia, UA, sleep, defaultRecordRoot } from '../util'
@@ -19,6 +20,9 @@ import { mt } from '../i18n'
 // ==================================
 
 const STALL_MS = 60 * 1000 // 字节数 60s 无增长视为源失效
+
+/** 本机回环源(见 hlsProxy): 这类地址必须由 ffmpeg 直连, 不能交给上游代理 */
+const LOOPBACK_RE = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/)/i
 
 function ffmpegPath(): string {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -75,6 +79,7 @@ function concatSegments(files: string[], outPath: string): Promise<boolean> {
 }
 
 export interface StartRecOptions {
+  platform: Platform
   userId: string
   nick: string
   title: string
@@ -84,12 +89,13 @@ export interface StartRecOptions {
 
 /** TG 卡片主播上下文: 监控中取完整 Anchor(标签/头像), 已取关退回任务自带字段 */
 function tgAnchorOf(t: Task): Anchor {
-  const a = store.listAnchors().find((x) => x.userId === t.userId)
-  return { userId: t.userId, nick: t.nick, title: t.title, thumbUrl: t.thumbUrl, userImg: a?.userImg || '', tags: a?.tags ?? null } as unknown as Anchor
+  const a = store.listAnchors().find((x) => x.platform === t.platform && x.userId === t.userId)
+  return { platform: t.platform, userId: t.userId, nick: t.nick, title: t.title, thumbUrl: t.thumbUrl, userImg: a?.userImg || '', tags: a?.tags ?? null } as unknown as Anchor
 }
 
 class Task implements RecTask {
   id: string
+  platform: Platform
   userId: string
   nick: string
   title: string
@@ -106,6 +112,8 @@ class Task implements RecTask {
   vodTotalSec = 0
   vodDoneSec = 0
   thumbUrl = ''
+  /** 源站直连要带的请求头(平台各异; SOOP 的流走本地代理, 由代理带头, 此处为空) */
+  private dlHeaders: Record<string, string> = {}
   stage: NonNullable<RecTask['stage']> = 'fetch'
   stageCur = 0
   stageTotal = 0
@@ -123,7 +131,10 @@ class Task implements RecTask {
   private lastBytesAt = 0
 
   constructor(opt: StartRecOptions, dirPath: string) {
-    this.id = `${opt.userId}_${Date.now()}`
+    // id 带平台前缀: 同 userId 跨平台不再可能撞成同一任务。
+    // 冒号安全 —— id 只作 Map 键与缩略图 sha1 输入(thumbs.hashId), 不进目录/文件名。
+    this.id = `${roomKey(opt.platform, opt.userId)}_${Date.now()}`
+    this.platform = opt.platform
     this.userId = opt.userId
     this.nick = opt.nick
     this.title = opt.title
@@ -154,7 +165,7 @@ class Task implements RecTask {
 
   async run(): Promise<void> {
     fs.mkdirSync(this.dirPath, { recursive: true })
-    const play = await api.getPlayCached(this.userId, this.password)
+    const play = await sourceFor(this.platform).getPlayCached(this.userId, this.password)
     if (!play.ok || !play.m3u8) {
       const err = new Error(play.error || mt('rec.fetchFail'))
       ;(err as Error & { needPassword?: boolean }).needPassword = play.needPassword
@@ -164,6 +175,7 @@ class Task implements RecTask {
     if (this.finalized || this.stopping || this.status !== 'recording') return
     if (play.title) this.title = play.title
     if (play.thumbUrl) this.thumbUrl = play.thumbUrl
+    this.dlHeaders = play.dlHeaders || {}
     this.vod = !!play.vod
     this.refreshBaseName() // 拿到最终标题后再定文件名(首次可能任选项带标题)
     this.lastBytesAt = Date.now() // 停滞计时起点: 从未写入也能被检出
@@ -189,14 +201,19 @@ class Task implements RecTask {
       '-loglevel', 'error',
       '-hide_banner',
       '-user_agent', UA,
-      '-headers', 'Origin: https://www.pandalive.co.kr\r\nReferer: https://www.pandalive.co.kr/\r\n',
       '-protocol_whitelist', 'file,http,https,tcp,tls,crypto',
       '-reconnect', '1',
       '-reconnect_streamed', '1',
       '-reconnect_delay_max', '15',
       '-rw_timeout', '50000000',
     ]
-    if (cfg.proxyUrl) args.push('-http_proxy', cfg.proxyUrl)
+    // 请求头按平台来(见 PlayResult.dlHeaders): SOOP 的流走 127.0.0.1 本地代理, 头由代理注入, 这里留空
+    const hdr = Object.entries(this.dlHeaders)
+      .map(([k, v]) => `${k}: ${v}\r\n`)
+      .join('')
+    if (hdr) args.push('-headers', hdr)
+    // 本地 HLS 代理源(SOOP)不能套上游代理: ffmpeg 无 loopback 豁免, 127.0.0.1 也会被丢给代理 → 必然连不上
+    if (cfg.proxyUrl && !LOOPBACK_RE.test(m3u8)) args.push('-http_proxy', cfg.proxyUrl)
     if (this.vod) {
       // 回放(VOD)下载: 单 TS 文件直出, 不走直播分段; -progress 管道回报已下载媒体时长
       args.push('-nostats', '-progress', 'pipe:1')
@@ -270,7 +287,7 @@ class Task implements RecTask {
   private async handleUnexpectedExit(reason: string): Promise<void> {
     let stillLive = false
     try {
-      const play = await api.fetchPlay(this.userId, this.password)
+      const play = await sourceFor(this.platform).fetchPlay(this.userId, this.password)
       stillLive = !!(play.ok && play.m3u8)
     } catch {
       stillLive = false // 拉不出也按下播论
@@ -356,7 +373,7 @@ class Task implements RecTask {
   /** 用户主动停止; remuxing 转码/合并中: 等待自然收尾(大文件合并不可截断, M1) */
   async stop(): Promise<void> {
     if (this.status === 'remuxing') {
-      for (let i = 0; i < 600 && recorder.hasTask(this.userId); i++) await sleep(500)
+      for (let i = 0; i < 600 && recorder.hasTask(this.platform, this.userId); i++) await sleep(500)
       return
     }
     if (this.status !== 'recording') return
@@ -442,10 +459,10 @@ class Task implements RecTask {
     )
     if (status === 'error') {
       // 录制出错(源死/中断): 立即作废该主播的源缓存, 避免下次重录复用尸源
-      api.invalidatePlay(this.userId)
+      sourceFor(this.platform).invalidatePlay(this.userId)
     }
     store.addHistory(Recorder.publicTask(this))
-    recorder.removeTask(this.userId)
+    recorder.removeTask(this.platform, this.userId)
     this.push()
     // 后台生成视频库九宫格缩略图(串行队列, 不阻塞收尾)
     thumbs.enqueue(this.id)
@@ -464,11 +481,11 @@ class Task implements RecTask {
     // 源失效自动续录(设置开启才生效): 仅"源死而主播仍在"类失败(停滞/中断)触发; 正常收尾给连续失败计数清白
     if (status === 'error') {
       recorder.maybeRetry(
-        { userId: this.userId, nick: this.nick, title: this.title, password: this.password, vod: this.vod, startedAt: this.startedAt },
+        { platform: this.platform, userId: this.userId, nick: this.nick, title: this.title, password: this.password, vod: this.vod, startedAt: this.startedAt },
         failKind
       )
     } else {
-      recorder.clearRetry(this.userId)
+      recorder.clearRetry(this.platform, this.userId)
     }
   }
 
@@ -490,8 +507,8 @@ class Recorder {
 
   static publicTask(t: Task): RecTask {
     // 剥离私有实现字段(进程句柄/房间密码), 只暴露公开数据
-    const { id, userId, nick, title, startedAt, endedAt, status, dirPath, currentFile, files, bytes, error, auto, vod, vodTotalSec, vodDoneSec, thumbUrl, stage, stageCur, stageTotal } = t
-    return { id, userId, nick, title, startedAt, endedAt, status, dirPath, currentFile, files: [...files], bytes, error, auto, vod, vodTotalSec, vodDoneSec, thumbUrl, stage, stageCur, stageTotal }
+    const { id, platform, userId, nick, title, startedAt, endedAt, status, dirPath, currentFile, files, bytes, error, auto, vod, vodTotalSec, vodDoneSec, thumbUrl, stage, stageCur, stageTotal } = t
+    return { id, platform, userId, nick, title, startedAt, endedAt, status, dirPath, currentFile, files: [...files], bytes, error, auto, vod, vodTotalSec, vodDoneSec, thumbUrl, stage, stageCur, stageTotal }
   }
 
   emitUpdate(): void {
@@ -503,19 +520,22 @@ class Recorder {
     return [...this.tasks.values()].map((t) => Recorder.publicTask(t))
   }
 
-  isRecording(userId: string): boolean {
-    const t = this.tasks.get(userId)
+  isRecording(platform: Platform, userId: string): boolean {
+    const t = this.tasks.get(roomKey(platform, userId))
     return !!t && t.status === 'recording'
   }
 
   async start(opt: StartRecOptions): Promise<RecTask> {
-    const exist = this.tasks.get(opt.userId)
+    const key = roomKey(opt.platform, opt.userId)
+    const exist = this.tasks.get(key)
     if (exist && (exist.status === 'recording' || exist.status === 'remuxing')) {
       return Recorder.publicTask(exist)
     }
     const cfg = store.getSettings()
     const root = cfg.savePath || defaultRecordRoot()
-    const dir = path.join(root, `${strictName(opt.nick)}(${opt.userId})`)
+    // 目录: <根>/<平台>/<主播名(主播ID)> —— 平台段用内部枚举('pandalive'/'soop'), 纯 ASCII 且不会随昵称/翻译变动
+    // 裸 userId 而非 roomKey 作末段: ':' 在 Windows 文件名非法
+    const dir = path.join(root, opt.platform, `${strictName(opt.nick)}(${opt.userId})`)
     if (diskFreeGb(dir) < cfg.diskLimitGb) {
       const err = new Error(mt('rec.diskLow', { limit: cfg.diskLimitGb }))
       // 手动路径由 IPC 报错回传视图 message 反馈(单通道统一); 自动路径无人代答, 仍走事件气泡
@@ -524,12 +544,12 @@ class Recorder {
     }
     const task = new Task(opt, dir)
     // 先占位再初始化, 防双击/并发产生两个 ffmpeg; 立刻推送: 卡片即现"拉取直播源"棒(否则卡片要等 run() 走完拉源+spawn 才首见, 管线首棒名存实亡)
-    this.tasks.set(opt.userId, task)
+    this.tasks.set(key, task)
     this.emitUpdate()
     try {
       await task.run()
     } catch (e) {
-      this.tasks.delete(opt.userId)
+      this.tasks.delete(key)
       this.emitUpdate() // 拉源失败: 撤掉刚才的 fetch 卡片, 不留僵尸
       if ((e as Error & { needPassword?: boolean }).needPassword) {
         const err = e as Error & { needPassword?: boolean }
@@ -540,18 +560,18 @@ class Recorder {
       if (opt.auto)
         sendToast(
           { type: 'error', title: mt('rec.toastStartFail', { nick: opt.nick }), body: String((e as Error).message || e) },
-          { ev: 'recError', ctx: { anchor: { userId: opt.userId, nick: opt.nick, title: opt.title } as unknown as Anchor, detail: String((e as Error).message || e) } }
+          { ev: 'recError', ctx: { anchor: { platform: opt.platform, userId: opt.userId, nick: opt.nick, title: opt.title } as unknown as Anchor, detail: String((e as Error).message || e) } }
         )
       throw e
     }
     // 手动开始: 视图已弹"开始录制"message, 不重复; 自动开始(开播自录/续录): 事件气泡通知到位
-    if (opt.auto) sendToast({ type: 'rec', title: mt('rec.toastStart', { nick: opt.nick }), body: opt.title || '' }, { ev: 'recStart', ctx: { anchor: store.listAnchors().find((x) => x.userId === opt.userId) ?? null } })
+    if (opt.auto) sendToast({ type: 'rec', title: mt('rec.toastStart', { nick: opt.nick }), body: opt.title || '' }, { ev: 'recStart', ctx: { anchor: store.listAnchors().find((x) => x.platform === opt.platform && x.userId === opt.userId) ?? null } })
     this.emitUpdate()
     return Recorder.publicTask(task)
   }
 
-  async stop(userId: string): Promise<void> {
-    const t = this.tasks.get(userId)
+  async stop(platform: Platform, userId: string): Promise<void> {
+    const t = this.tasks.get(roomKey(platform, userId))
     if (t) await t.stop()
   }
 
@@ -563,8 +583,8 @@ class Recorder {
     }
   }
 
-  removeTask(userId: string): void {
-    this.tasks.delete(userId)
+  removeTask(platform: Platform, userId: string): void {
+    this.tasks.delete(roomKey(platform, userId))
   }
 
   // ---- 源失效自动续录(设置 autoRetryRecord 开启才生效) ----
@@ -574,29 +594,30 @@ class Recorder {
   private retryStreak = new Map<string, number>()
   private shuttingDown = false
 
-  clearRetry(userId: string): void {
-    this.retryStreak.delete(userId)
+  clearRetry(platform: Platform, userId: string): void {
+    this.retryStreak.delete(roomKey(platform, userId))
   }
 
-  maybeRetry(prev: { userId: string; nick: string; title: string; password: string; vod: boolean; startedAt: number }, failKind?: string): void {
+  maybeRetry(prev: { platform: Platform; userId: string; nick: string; title: string; password: string; vod: boolean; startedAt: number }, failKind?: string): void {
     if (this.shuttingDown) return
     if (prev.vod) return // 回放下载不续(进度无法无损接回)
     if (failKind !== 'stall' && failKind !== 'interrupted') return // 满盘等不可续场景直接放行
     const cfg = store.getSettings()
     if (!cfg.autoRetryRecord) return
+    const key = roomKey(prev.platform, prev.userId)
     const healthy = Date.now() - prev.startedAt >= Recorder.HEALTHY_MS
-    let streak = healthy ? 0 : this.retryStreak.get(prev.userId) || 0
+    let streak = healthy ? 0 : this.retryStreak.get(key) || 0
     if (streak >= Recorder.MAX_RETRY) {
       logger.warn('rec', `${prev.nick}(@${prev.userId}) 自动续录已连续失败 ${streak} 次, 停手(下个健康周期清白)`)
-      sendToast({ type: 'error', title: mt('rec.toastErr', { nick: prev.nick }), body: mt('rec.retryGiveUp', { n: streak }) }, { ev: 'recError', ctx: { anchor: store.listAnchors().find((x) => x.userId === prev.userId) ?? null, detail: mt('rec.retryGiveUp', { n: streak }) } })
+      sendToast({ type: 'error', title: mt('rec.toastErr', { nick: prev.nick }), body: mt('rec.retryGiveUp', { n: streak }) }, { ev: 'recError', ctx: { anchor: store.listAnchors().find((x) => x.platform === prev.platform && x.userId === prev.userId) ?? null, detail: mt('rec.retryGiveUp', { n: streak }) } })
       return
     }
     streak += 1
-    this.retryStreak.set(prev.userId, streak)
+    this.retryStreak.set(key, streak)
     logger.warn('rec', `${prev.nick}(@${prev.userId}) 源失效(${failKind}), 自动续录第 ${streak} 次`)
-    sendToast({ type: 'info', title: mt('rec.toastStart', { nick: prev.nick }), body: mt('rec.retryResume', { n: streak }) }, { ev: 'recStart', ctx: { anchor: store.listAnchors().find((x) => x.userId === prev.userId) ?? null, detail: mt('rec.retryResume', { n: streak }) } })
+    sendToast({ type: 'info', title: mt('rec.toastStart', { nick: prev.nick }), body: mt('rec.retryResume', { n: streak }) }, { ev: 'recStart', ctx: { anchor: store.listAnchors().find((x) => x.platform === prev.platform && x.userId === prev.userId) ?? null, detail: mt('rec.retryResume', { n: streak }) } })
     // finalize(error) 已 invalidatePlay: 新任务必换新签名源 —— 这正是续录要解决的问题
-    void this.start({ userId: prev.userId, nick: prev.nick, title: prev.title, password: prev.password, auto: true }).catch(() => {
+    void this.start({ platform: prev.platform, userId: prev.userId, nick: prev.nick, title: prev.title, password: prev.password, auto: true }).catch(() => {
       // start 失败已弹"启动失败"气泡; streak 保留, 待下个健康周期清白
     })
   }
@@ -814,8 +835,8 @@ class Recorder {
   }
 
   /** 任务是否在管(供 stop 等待 remuxing 收尾, M1) */
-  hasTask(userId: string): boolean {
-    return this.tasks.has(userId)
+  hasTask(platform: Platform, userId: string): boolean {
+    return this.tasks.has(roomKey(platform, userId))
   }
 }
 

@@ -1,4 +1,4 @@
-import { Toast, Anchor } from '../../shared/types'
+import { roomUrl, Toast, Anchor } from '../../shared/types'
 
 // ============ Telegram 消息结构化 ============
 // sendToast 的 title/body 面向应用内气泡(信息量小), TG 需要自成一体的可读卡片:
@@ -14,8 +14,6 @@ export interface TgPayload {
   /** 纯文本卡片内容(无需转义通道, 仅 <b> 头部与 <a> 链接) */
   text: string
 }
-
-const ROOM = (id: string): string => `https://www.pandalive.co.kr/play/${id}`
 
 function esc(s: string): string {
   return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -77,7 +75,7 @@ export function buildTgPayload(ev: TgEvent, t: Toast, ctx: TgCtx): TgPayload {
   const lines: string[] = [HEAD[ev]]
   // 无主播上下文的系统卡(熔断/启动失败): 头部即行, 正文走末行说明 —— 不重复 toast.title
   if (a) {
-    lines.push(link(a.nick || a.userId, ROOM(a.userId)))
+    lines.push(link(a.nick || a.userId, roomUrl(a.platform, a.userId)))
   }
   // 标题行: 标签作前缀(如 "[19+] [粉丝房] 标题"), 无标题有标签时标签独占一行; 录制卡标题走末行说明
   const tags = a ? tagLine(a) : ''

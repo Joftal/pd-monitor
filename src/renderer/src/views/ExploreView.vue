@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api'
 import ExploreCard from '@/components/ExploreCard.vue'
+import PlatTag from '@/components/PlatTag.vue'
 import SpinIcon from '@/components/SpinIcon.vue'
 import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
@@ -32,7 +33,7 @@ const sortVal = (x: { viewers: number; likes: number; fans: number; startTime: s
 
 const list = computed(() => {
   let items = [...store.discovery]
-  if (filter.onlyFollowed) items = items.filter((x) => store.isFollowing(x.userId))
+  if (filter.onlyFollowed) items = items.filter((x) => store.isFollowing('pandalive', x.userId))
   if (filter.onlyAdult) items = items.filter((x) => x.isAdult)
   if (filter.onlyFan) items = items.filter((x) => x.type === 'fan')
   items.sort((a, b) => {
@@ -126,6 +127,9 @@ async function refresh() {
           <span class="w-1.5 h-1.5 rounded-full bg-live animate-breathe"></span>
           {{ t('explore.liveBadge', { n: store.watcher?.liveCount ?? store.discovery.length }) }}
         </span>
+        <!-- 大厅是 PandaLive 专有能力: 平台身份在页头说一次, 卡片不再各挂一枚 -->
+        <PlatTag platform="pandalive" size="md" />
+        <span class="text-[11.5px] text-ink3">{{ t('explore.platHint') }}</span>
         <div class="flex-1"></div>
         <span class="text-[12px] text-ink3 shrink-0">{{ updateInfo }}</span>
         <n-button size="small" secondary type="primary" round :disabled="refreshing" @click="refresh" class="!w-[76px]">

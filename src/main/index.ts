@@ -1,6 +1,6 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage, session } from 'electron'
 import * as path from 'path'
-import { registerIpc, pushAccount } from './ipc'
+import { registerIpc, pushAccounts } from './ipc'
 import { api, SESSION_PARTITION, applyProxy } from './services/pandalive'
 import { store } from './services/store'
 import { watcher } from './services/watcher'
@@ -163,13 +163,13 @@ app.whenReady().then(() => {
   registerIpc()
   createWindow()
   createTray()
-  pushAccount()
+  pushAccounts()
 
   // 启动登录态自愈(异步, 不挡窗口): vault 快照被服务端判死时, 尝试接管本地浏览器存储里更新的 cookie;
   // 治愈成功再推一次账号状态, UI 徽标随之翻绿
   void (async () => {
     if (api.hasSession() && !(await api.checkLoginInfo()).isLogin && (await api.healFromStore())) {
-      pushAccount()
+      pushAccounts()
     }
   })()
 
@@ -182,7 +182,7 @@ app.whenReady().then(() => {
   // 与 anchorsAdd 关注已在播补洞同构; db 陈旧态(实际已下播)拉源失败不落缓存, 仅白耗一发节流请求
   if (cfg.prefetchStream) {
     for (const a of store.listAnchors()) {
-      if (a.isLive) watcher.prewarmNow(a.userId)
+      if (a.isLive) watcher.prewarmNow(a.platform, a.userId)
     }
   }
 

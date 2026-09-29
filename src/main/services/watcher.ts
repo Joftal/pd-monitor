@@ -1,7 +1,9 @@
 import { BrowserWindow } from 'electron'
 import { api, RiskError, BjNotFoundError, LiveItem } from './pandalive'
+import { soopApi } from './soop'
+import { sourceFor, applyPlayMeta } from './source'
 import { store } from './store'
-import { EV, WatcherStatus, Anchor, DiscoveryItem } from '../../shared/types'
+import { EV, Platform, roomKey, WatcherStatus, Anchor, DiscoveryItem } from '../../shared/types'
 import { recorder } from './recorder'
 import { sendToast } from './notify'
 import { sleep } from '../util'
@@ -35,6 +37,13 @@ class Watcher {
   private roundInFlight = false
   private sessionDeadStreak = 0
   private discovery: DiscoveryItem[] = []
+  /** 在播数分平台记: 潘达冷却/熔断的那几轮不复查潘达, 只能沿用上次已知值, 不能被 SOOP 覆盖成 0 */
+  private pandaLiveFound = 0
+  private soopLiveFound = 0
+  /** 上次真发 SOOP 探针的时刻: 潘达冷却期轮次会压到 30s, 用它把 SOOP 的速率钉回用户配的间隔 */
+  private lastSoopRoundAt = 0
+  /** SOOP 连续"整轮全灭"轮数: 单轮失败可能是抖动, 连续两轮说明改版/风控/断网, 必须让用户看见 */
+  private soopFailStreak = 0
   status: WatcherStatus = {
     running: false,
     mode: 'list',
@@ -62,6 +71,7 @@ class Watcher {
     this.running = true
     this.errorStreak = 0
     this.cooldownUntil = 0
+    this.soopFailStreak = 0
     this.schedule(300)
     this.push()
   }
@@ -92,31 +102,60 @@ class Watcher {
     api.setGap(cfg.requestGapMs)
 
     try {
-      if (Date.now() < this.cooldownUntil) {
+      // 本引擎只认 pandalive(api 即 pandalive 客户端): 必须按平台取子集,
+      // 否则 SOOP 关注会被当成"列表里缺失的主播"送去 member/bj 复查 —— 拿频道名打错站接口。
+      const all = store.listAnchors()
+      const anchors = all.filter((a) => a.platform === 'pandalive')
+      const soopAnchors = all.filter((a) => a.platform === 'soop')
+      this.status.monitored = all.length
+
+      // 冷却只退避 pandalive: SOOP 是另一套域名与会话, 潘达被风控无权连坐停掉 SOOP 监控
+      // (注意: 此分支的 schedule/push 由 finally 统一兜底, 不写重复调用)
+      const cooling = Date.now() < this.cooldownUntil
+      // 潘达这一轮的异常先攒着: 抛出去会跳过下面的 SOOP 探针(连坐), 熔断语义延后到 SOOP 跑完再交外层
+      let pandaErr: unknown = null
+      if (cooling) {
         const remain = Math.ceil((this.cooldownUntil - Date.now()) / 1000)
         this.status.message = mt('watcher.cooling', { remain })
-        // 注意: 此分支的 schedule/push 由 finally 统一兜底, 不写重复调用
-        return
-      }
-
-      const anchors = store.listAnchors()
-      this.status.monitored = anchors.length
-
-      if (cfg.watchMode === 'list') {
-        await this.roundByList(anchors)
       } else {
-        // 逐个模式下大厅无数据源: 清空并广播, 让大厅显示"模式不可用"空态
-        this.idleQueue = [] // per-anchor 每轮全量复查: list 残留的 rest 快照作废, 间隙泵在此模式无职责
-        if (this.discovery.length) {
-          this.discovery = []
-          this.pushDiscovery()
+        try {
+          if (cfg.watchMode === 'list') {
+            this.pandaLiveFound = await this.roundByList(anchors)
+          } else {
+            // 逐个模式下大厅无数据源: 清空并广播, 让大厅显示"模式不可用"空态
+            this.idleQueue = [] // per-anchor 每轮全量复查: list 残留的 rest 快照作废, 间隙泵在此模式无职责
+            if (this.discovery.length) {
+              this.discovery = []
+              this.pushDiscovery()
+            }
+            this.pandaLiveFound = await this.roundByBj(anchors)
+          }
+          this.errorStreak = 0
+          this.status.circuitOpen = false
+          this.status.message = ''
+        } catch (e) {
+          pandaErr = e
         }
-        await this.roundByBj(anchors)
       }
 
-      this.errorStreak = 0
-      this.status.circuitOpen = false
-      this.status.message = ''
+      // SOOP 走逐频道播放页探针: 关注数少时一人一发即够(实测全站列表接口 main_broad_list_api.php
+      // 匿名可用, 但要覆盖小主播得翻满 43 页, 每轮 2.7MB 不划算 —— 大厅/搜索另开一期时再接它)
+      // 冷却期轮次被压到 30s(为早点探潘达恢复), SOOP 不跟着加速: 仍按用户配的间隔到期才发
+      if (!soopAnchors.length) {
+        this.soopLiveFound = 0
+        this.soopFailStreak = 0
+      } else if (!cooling || Date.now() - this.lastSoopRoundAt >= cfg.pollIntervalSec * 1000) {
+        this.lastSoopRoundAt = Date.now()
+        this.soopLiveFound = await this.roundSoop(soopAnchors, cfg.requestGapMs)
+      }
+      this.status.liveFound = this.pandaLiveFound + this.soopLiveFound
+      // SOOP 探针永不抛错(防潘达连坐), 所以它瞎了必须由这里出声: 顶栏绿点照常跳、卡片保留旧状态,
+      // 用户读到的却是"一切正常"。潘达侧健康时 message 是空串, 冷却/熔断期的文案归潘达所有, 不抢
+      if (!cooling && this.soopFailStreak >= 2 && !this.status.message) {
+        this.status.message = mt('watcher.soopDown', { n: soopAnchors.length, r: this.soopFailStreak })
+      }
+      if (pandaErr) throw pandaErr
+
       // 轮次心跳: 每 10 轮落一行摘要 —— 事后可证"轮询在这些小时里活着且看得见全站"
       // (每轮都写会刷屏: 30s 间隔下一天 2880 行; 抽稀到 ~5 分钟一行, 14 天约 100KB)
       if (++this.roundCnt % 10 === 0) {
@@ -147,22 +186,22 @@ class Watcher {
   // 绝不计入 errorStreak/熔断: 单主播数据错误无权拖垮全局轮询
   private bjGone = new Set<string>()
   private onBjNotFound(a: Anchor): void {
-    this.bjGone.add(a.userId)
+    this.bjGone.add(roomKey(a.platform, a.userId))
     if (a.isLive) {
-      store.updateAnchor(a.userId, { isLive: false, title: '', tags: null, startTime: '', viewerCount: 0, thumbUrl: '' })
+      store.updateAnchor(a.platform, a.userId, { isLive: false, title: '', tags: null, startTime: '', viewerCount: 0, thumbUrl: '' })
       this.pushAnchors()
     }
     logger.warn('watcher', `关注的主播查无此人(改名/注销/错 id): @${a.userId}`)
     sendToast({ type: 'info', title: mt('watcher.bjGone', { id: a.userId }), body: mt('watcher.bjGoneHint') }, { ev: 'generic', ctx: { anchor: a, detail: mt('watcher.bjGoneHint') } })
   }
-  /** 该锚点是否已确认不存在: true 则所有 bj 复查路径直接跳过(不再发请求) */
-  private isGone(userId: string): boolean {
-    return this.bjGone.has(userId)
+  /** 该房间是否已确认不存在: true 则所有 bj 复查路径直接跳过(不再发请求) */
+  private isGone(a: Anchor): boolean {
+    return this.bjGone.has(roomKey(a.platform, a.userId))
   }
 
   /** 关注增删时清除"查无此人"标记: 移除可重加, 改名/错 id 修正(或平台恢复)后重新探活 */
-  unmarkGone(userId: string): void {
-    this.bjGone.delete(userId)
+  unmarkGone(platform: Platform, userId: string): void {
+    this.bjGone.delete(roomKey(platform, userId))
   }
 
   /** 轮询/间隙泵统一失败处置: 连续失败熔断 + 指数退避 + UI 通知(原 round catch 原语义) */
@@ -183,8 +222,8 @@ class Watcher {
     }
   }
 
-  /** list 模式: 拉全站列表, 本地匹配; 全量列表同时作为大厅数据源 */
-  private async roundByList(anchors: Anchor[]): Promise<void> {
+  /** list 模式: 拉全站列表, 本地匹配; 全量列表同时作为大厅数据源。返回潘达侧在播数 */
+  private async roundByList(anchors: Anchor[]): Promise<number> {
     const liveMap = new Map<string, LiveItem>()
     let page = 0
     let loginInfo: unknown = undefined
@@ -247,7 +286,7 @@ class Watcher {
         thumbUrl: item.thumbUrl || '',
         lastSeenAt: now
       }
-      store.updateAnchor(a.userId, patch)
+      store.updateAnchor(a.platform, a.userId, patch)
       if (!wasLive) this.onLiveStart({ ...a, ...patch } as Anchor)
       else this.onRoomShift(a, prevTags, patch.tags as NonNullable<Anchor['tags']>)
     }
@@ -255,7 +294,7 @@ class Watcher {
     // 兜底: 列表不可见的关注主播(19+/隐藏房/500名外) member/bj 节流复查
     // - urgent: 上轮还在播的, 全部立即复查(防止误判下播) —— 轮内完成
     // - rest: 离线关注交间隙泵(pumpIdle)在轮询空档持续轮扫 —— 发现延迟 ≈ N×gap, 与轮询间隔脱钩
-    const urgent = missing.filter((a) => a.isLive && !this.isGone(a.userId))
+    const urgent = missing.filter((a) => a.isLive && !this.isGone(a))
     for (const a of urgent) {
       try {
         const info = await api.fetchBj(a.userId)
@@ -270,7 +309,6 @@ class Watcher {
     }
     this.idleQueue = missing.filter((a) => !a.isLive) // 新快照整批替换(上轮未扫完的按最新状态重排)
 
-    this.status.liveFound = liveFound
     // 登录态检测: loginInfo 非空即视为 cookie 有效(结构宽容);
     // 有效→无效 连续 2 轮才宣判作废(单轮缺字段可能是末页响应抖动)。
     // 判死前 cookieValid 保持 true(它同时是"未通知过"闩锁), 宣判当轮才翻 false 并通知一次;
@@ -291,6 +329,7 @@ class Watcher {
       this.sessionDeadStreak = 0
     }
     this.pushAnchors()
+    return liveFound
   }
 
   /** 用 member/bj 的响应更新主播状态, 返回 1=在播 0=离线 */
@@ -320,24 +359,24 @@ class Watcher {
         thumbUrl: (media as unknown as { thumbUrl?: string }).thumbUrl || '',
         lastSeenAt: now
       }
-      store.updateAnchor(a.userId, patch)
+      store.updateAnchor(a.platform, a.userId, patch)
       if (!wasLive) this.onLiveStart({ ...a, ...patch } as Anchor)
       else this.onRoomShift(a, prevTags, patch.tags as NonNullable<Anchor['tags']>)
       return 1
     }
     if (wasLive) {
-      store.updateAnchor(a.userId, { isLive: false, title: '', tags: null, startTime: '', viewerCount: 0, thumbUrl: '' })
+      store.updateAnchor(a.platform, a.userId, { isLive: false, title: '', tags: null, startTime: '', viewerCount: 0, thumbUrl: '' })
       this.onLiveEnd(a)
     }
-    if (nick && nick !== a.nick) store.updateAnchor(a.userId, { nick })
+    if (nick && nick !== a.nick) store.updateAnchor(a.platform, a.userId, { nick })
     return 0
   }
 
-  /** per-anchor 模式: 逐个 member/bj */
-  private async roundByBj(anchors: Anchor[]): Promise<void> {
+  /** per-anchor 模式: 逐个 member/bj。返回潘达侧在播数 */
+  private async roundByBj(anchors: Anchor[]): Promise<number> {
     let liveFound = 0
     for (const a of anchors) {
-      if (this.isGone(a.userId)) continue
+      if (this.isGone(a)) continue
       try {
         liveFound += await this.applyBj(a, await api.fetchBj(a.userId))
       } catch (e) {
@@ -348,8 +387,62 @@ class Watcher {
         throw e
       }
     }
-    this.status.liveFound = liveFound
     this.pushAnchors()
+    return liveFound
+  }
+
+  /** SOOP 逐频道轮询: 播放页一发即可判在播/下播(实测页面内嵌 nBroadNo, 无需登录态)
+   *  - 三态必分: 有场次号=在播 / 页面明确 null=下播 / 两者皆无(风控页或改版)=状态未知 → 本轮不动它,
+   *    绝不把"没读到"写成"已下播", 也不把异常拖成全局熔断(单平台故障无权停掉潘达轮询)
+   *  - 节流: 与潘达共用 requestGapMs, 逐发之间睡一个 gap(带抖动), 避免整点齐发撞风控 */
+  private async roundSoop(anchors: Anchor[], gapMs: number): Promise<number> {
+    const now = Date.now()
+    let found = 0
+    let fail = 0
+    for (const a of anchors) {
+      try {
+        const m = await soopApi.fetchPageMeta(a.userId, true)
+        const wasLive = a.isLive
+        if (m.living) {
+          found++
+          const patch: Partial<Anchor> = {
+            isLive: true,
+            nick: m.hostName || a.nick,
+            title: m.roomName || a.title,
+            // 截图就在同一份播放页 HTML 里(szBroadThumPath), 不额外发请求; 取不到则保留上一轮的
+            thumbUrl: m.thumbUrl || a.thumbUrl,
+            lastSeenAt: now
+          }
+          store.updateAnchor(a.platform, a.userId, patch)
+          if (!wasLive) this.onLiveStart({ ...a, ...patch } as Anchor)
+        } else if (m.explicitOffline) {
+          if (wasLive) {
+            store.updateAnchor(a.platform, a.userId, { isLive: false, title: '', tags: null, startTime: '', viewerCount: 0, thumbUrl: '', lastSeenAt: now })
+            this.onLiveEnd(a)
+          } else if (m.hostName && m.hostName !== a.nick) {
+            store.updateAnchor(a.platform, a.userId, { nick: m.hostName, lastSeenAt: now })
+          }
+        }
+        // 第三态(既无场次号也没说下播): 页面异常, 保持上次已知状态
+      } catch (e) {
+        fail++
+        logger.warn('watcher', `SOOP 轮询失败 @${a.userId}: ${String((e as Error).message || e)}`)
+      }
+      if (gapMs > 0) await sleep(Math.max(300, gapMs) * (0.8 + Math.random() * 0.4))
+    }
+    // 整轮全灭才计失败: 部分失败是单房间取页抖动, 不构成"平台级失明"
+    const allFail = anchors.length > 0 && fail === anchors.length
+    this.soopFailStreak = allFail ? this.soopFailStreak + 1 : 0
+    if (allFail) logger.warn('watcher', `SOOP 本轮 ${anchors.length} 个频道全部取页失败(网络/风控/改版) 连续 ${this.soopFailStreak} 轮`)
+    if (this.soopFailStreak === 2) {
+      // 只在跨阈值时提醒一次(与登录失效同语义): 恢复后 streak 归零才会重新武装
+      sendToast(
+        { type: 'error', title: mt('watcher.soopDownT'), body: mt('watcher.soopDown', { n: anchors.length, r: this.soopFailStreak }) },
+        { ev: 'generic', ctx: { detail: mt('watcher.soopDown', { n: anchors.length, r: this.soopFailStreak }) } }
+      )
+    }
+    this.pushAnchors()
+    return found
   }
 
   // ---- 轮次间隙兜底泵: rest(离线且列表不可见的关注)在轮询空档持续轮扫 ----
@@ -374,8 +467,8 @@ class Watcher {
         }
         const a = this.idleQueue.shift()!
         // 快照生成后被取关: 跳过(不再为其发请求; 事件层另有 onLiveStart/onLiveEnd 守卫双保险)
-        if (!this.stillMonitored(a.userId)) continue
-        if (this.isGone(a.userId)) continue // 查无此人: 不发请求(每轮都会被快照带回, 必须在消费前挡)
+        if (!this.stillMonitored(a.platform, a.userId)) continue
+        if (this.isGone(a)) continue // 查无此人: 不发请求(每轮都会被快照带回, 必须在消费前挡)
         api.setGap(store.getSettings().requestGapMs) // 与轮内同节奏(设置页改动即时生效)
         try {
           const info = await api.fetchBj(a.userId)
@@ -397,19 +490,20 @@ class Watcher {
     }
   }
 
-  // ---- 开播预取源泵: 逐个节流拉源写缓存, 点进房间即命中 ----
+  // ---- 开播预取源泵: 逐个节流拉源写缓存, 点进房间即命中(两平台共用, 取流走 sourceFor 契约) ----
   private prewarmQueue: string[] = []
   private prewarmPumping = false
 
-  private enqueuePrewarm(userId: string): void {
-    if (this.prewarmQueue.includes(userId)) return
-    this.prewarmQueue.push(userId)
+  private enqueuePrewarm(platform: Platform, userId: string): void {
+    const key = roomKey(platform, userId)
+    if (this.prewarmQueue.includes(key)) return
+    this.prewarmQueue.push(key)
     void this.pumpPrewarm()
   }
 
   /** 对外入口: 关注"已在播"主播时补一发预取(列表模式下该类主播永不再触发 onLiveStart, 预取泵对其缺席) */
-  prewarmNow(userId: string): void {
-    this.enqueuePrewarm(userId)
+  prewarmNow(platform: Platform, userId: string): void {
+    this.enqueuePrewarm(platform, userId)
   }
 
   private async pumpPrewarm(): Promise<void> {
@@ -422,12 +516,16 @@ class Watcher {
           this.prewarmQueue.length = 0
           break
         }
-        const uid = this.prewarmQueue.shift()!
+        const key = this.prewarmQueue.shift()!
+        const sep = key.indexOf(':')
+        const platform = (sep > 0 ? key.slice(0, sep) : 'pandalive') as Platform
+        const uid = sep > 0 ? key.slice(sep + 1) : key
         // 入队后被取关: 不再为其拉源(与 pumpIdle/事件守卫同规约; 开播入口(onLiveStart)已挡)
-        if (!this.stillMonitored(uid)) continue
+        if (!this.stillMonitored(platform, uid)) continue
         const cfg = store.getSettings()
         api.setGap(cfg.requestGapMs)
-        await api.getPlayCached(uid).catch(() => undefined) // 失败静默(不打扰用户流)
+        const r = await sourceFor(platform).getPlayCached(uid).catch(() => undefined) // 失败静默(不打扰用户流)
+        if (r) applyPlayMeta(platform, uid, r) // SOOP: 顺手把 BTIME 反推的开播时刻/密码房标记写回关注卡
         await sleep(Math.max(1200, cfg.requestGapMs) * (0.8 + Math.random() * 0.4))
       }
     } finally {
@@ -436,18 +534,18 @@ class Watcher {
   }
 
   /** 翻转事件统一守卫: 拉列表/拉 bj 飞行窗口内主播可能已被取关; 事件不得落(防幽灵 toast/自录) */
-  private stillMonitored(userId: string): boolean {
-    return store.listAnchors().some((x) => x.userId === userId)
+  private stillMonitored(platform: Platform, userId: string): boolean {
+    return store.listAnchors().some((x) => x.platform === platform && x.userId === userId)
   }
 
   private roundCnt = 0
 
   private onLiveStart(a: Anchor): void {
-    if (!this.stillMonitored(a.userId)) return
-    api.invalidatePlay(a.userId) // 主播(重)开播: 旧源作废
+    if (!this.stillMonitored(a.platform, a.userId)) return
+    sourceFor(a.platform).invalidatePlay(a.userId) // 主播(重)开播: 旧源作废
     logger.info('watcher', `开播: ${a.nick}(@${a.userId}) title"${a.title}" 自录=${a.autoRecord ? '开' : '关'}`)
     const cfg = store.getSettings()
-    if (cfg.prefetchStream) this.enqueuePrewarm(a.userId) // 后台预取新源写缓存
+    if (cfg.prefetchStream) this.enqueuePrewarm(a.platform, a.userId) // 后台预取新源写缓存
     if (a.tags?.type === 'fan') {
       // 粉丝房开播: 专用通知(与普通开播区分, 仍进系统通知与应用内气泡)
       sendToast({ type: 'fanLive', title: mt('watcher.fanLiveStart', { nick: a.nick }), body: a.title || mt('watcher.clickWatch') }, { ev: 'fanLive', ctx: { anchor: a } })
@@ -456,7 +554,7 @@ class Watcher {
     }
     if (a.autoRecord) {
       // getSettings 恒返回对象(恒真判定已移除)
-      void recorder.start({ userId: a.userId, nick: a.nick, title: a.title, password: '', auto: true }).catch(() => undefined)
+      void recorder.start({ platform: a.platform, userId: a.userId, nick: a.nick, title: a.title, password: '', auto: true }).catch(() => undefined)
     }
   }
 
@@ -466,7 +564,7 @@ class Watcher {
     const toAdult = !oldTags.isAdult && newTags.isAdult
     const toFan = oldTags.type !== 'fan' && newTags.type === 'fan'
     if (!toAdult && !toFan) return
-    if (!this.stillMonitored(a.userId)) return
+    if (!this.stillMonitored(a.platform, a.userId)) return
     const kind = toAdult && toFan ? mt('watcher.roomBoth') : toAdult ? mt('watcher.roomAdult') : mt('watcher.roomFan')
     logger.info('watcher', `房态变更: ${a.nick}(@${a.userId}) ${kind}`)
     sendToast(
@@ -476,11 +574,11 @@ class Watcher {
   }
 
   private onLiveEnd(a: Anchor): void {
-    if (!this.stillMonitored(a.userId)) return // 同 onLiveStart 守卫: 已取关不弹下播
+    if (!this.stillMonitored(a.platform, a.userId)) return // 同 onLiveStart 守卫: 已取关不弹下播
     logger.info('watcher', `下播: ${a.nick}(@${a.userId})`)
     // 下播即频道死(实测: 之后 play 宽限期还会假发旧频道源, master 必 404) ——
     // 缓存源必须当场作废: 保活泵对已知下播不再心跳, 不清就会留死源骗"秒开"徽标, 点播放/录制必暴毙
-    api.invalidatePlay(a.userId)
+    sourceFor(a.platform).invalidatePlay(a.userId)
     sendToast({ type: 'offline', title: mt('watcher.liveEnd', { nick: a.nick }), body: '' }, { ev: 'offline', ctx: { anchor: a, liveSec: liveElapsedSec(a.startTime) } })
   }
 

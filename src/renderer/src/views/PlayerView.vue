@@ -8,7 +8,7 @@ import HlsPlayer from '@/components/HlsPlayer.vue'
 import SpinIcon from '@/components/SpinIcon.vue'
 import { useI18n } from 'vue-i18n'
 import { fmtLiveDuration } from '@/utils/media'
-import type { AnchorTag, KeepaliveStatus } from '@shared/types'
+import { DEFAULT_PLATFORM, isPlatform, type AnchorTag, type KeepaliveStatus, type Platform } from '@shared/types'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -16,9 +16,11 @@ const router = useRouter()
 const store = useAppStore()
 const message = useMessage()
 
+// 路由带平台段(/player/:platform/:userId); 手输/旧链接缺段时回落默认平台
+const platform: Platform = isPlatform(route.params.platform) ? route.params.platform : DEFAULT_PLATFORM
 const userId = String(route.params.userId)
-const anchor = computed(() => store.anchors.find((a) => a.userId === userId))
-const following = computed(() => store.isFollowing(userId))
+const anchor = computed(() => store.anchors.find((a) => a.platform === platform && a.userId === userId))
+const following = computed(() => store.isFollowing(platform, userId))
 
 const loading = ref(true)
 const errorMsg = ref('')
@@ -29,26 +31,30 @@ const userImg = ref(anchor.value?.userImg || '')
 const thumb = ref(anchor.value?.thumbUrl || '')
 const tags = ref<AnchorTag | null>(anchor.value?.tags || null)
 const needPw = ref(false)
+/** 该房要登录态(SOOP 的 19+/限区房): 给"去登录"入口, 不能当成未开播 */
+const needLogin = ref(false)
 const pwdInput = ref('')
 const quality = ref(0)
-const variants = ref<{ url: string; bandwidth: number; resolution: string }[]>([])
+const variants = ref<{ url: string; bandwidth: number; resolution: string; label?: string }[]>([])
 const lastFailedUrl = ref('') // 上一次失效的源(仅展示)
 const backups = ref<string[]>([]) // 备用线路(hls2/hls3 master, hls.js 自动选档)
 const activeLine = ref(0) // 0=主线, 1..N=备用线路
 const fetchedAt = ref(0) // 当前源包(主线分档+备用线路)在主进程缓存中的生成时刻
 
-const recording = computed(() => store.isRecording(userId))
-const discoveryItem = computed(() => store.discovery.find((d) => d.userId === userId))
+const recording = computed(() => store.isRecording(platform, userId))
+// 大厅数据只覆盖 pandalive 房间
+const discoveryItem = computed(() => (platform === 'pandalive' ? store.discovery.find((d) => d.userId === userId) : undefined))
 const viewers = computed(() => anchor.value?.viewerCount || discoveryItem.value?.viewers || 0)
 
 const isVod = computed(() => tags.value?.liveType === 'rec')
 
-/** 档位选项: 解析出分辨率 → N P; 否则最高档/档位 N */
+/** 档位选项: 高度优先(pandalive 给 "1920x1080", SOOP 给 "1080p"), 取不到才用平台清晰度名/档位序号 */
 const levelOptions = computed(() =>
-  variants.value.map((v, i) => ({
-    label: v.resolution && v.resolution !== 'master' ? `${v.resolution.split('x')[1]}P` : i === 0 ? t('player.qBest') : t('player.qLevel', { n: i + 1 }),
-    value: i
-  }))
+  variants.value.map((v, i) => {
+    const h = /x(\d{3,4})/i.exec(v.resolution)?.[1] || /(\d{3,4})p/i.exec(v.resolution)?.[1]
+    const name = h ? `${h}P` : v.label || v.resolution
+    return { label: name && name !== 'master' ? name : i === 0 ? t('player.qBest') : t('player.qLevel', { n: i + 1 }), value: i }
+  })
 )
 
 /** 开播时长(来自关注卡/大厅的 startTime; utils.fmtLiveDuration 收敛) */
@@ -67,7 +73,7 @@ const sinceText = computed(() => {
 async function loadPlay(password = '', forceFresh = false): Promise<boolean> {
   let r
   try {
-    r = await api.livePlay(userId, password, forceFresh)
+    r = await api.livePlay(platform, userId, password, forceFresh)
   } catch (e) {
     errorMsg.value = t('player.playFail') + String((e as Error).message || e)
     loading.value = false
@@ -80,11 +86,19 @@ async function loadPlay(password = '', forceFresh = false): Promise<boolean> {
       loading.value = false
       return false
     }
+    // SOOP 的 19+/限区房在匿名态下会被平台拒发播放信息: 这不是"未开播", 得给去登录入口
+    if (r.needLogin) {
+      needLogin.value = true
+      errorMsg.value = ''
+      loading.value = false
+      return false
+    }
     errorMsg.value = r.error || t('player.noPlay')
     loading.value = false
     return false
   }
   needPw.value = false
+  needLogin.value = false
   errorMsg.value = ''
   variants.value = r.variants || (r.m3u8 ? [{ url: r.m3u8, bandwidth: 0, resolution: 'master' }] : [])
   backups.value = r.hlsBackups || []
@@ -119,10 +133,10 @@ async function submitPwd() {
 async function toggleFollow() {
   try {
     if (following.value) {
-      await store.unfollow(userId)
+      await store.unfollow(platform, userId)
       message.success(t('player.unfollowedMsg'))
     } else {
-      await store.follow(userId)
+      await store.follow(platform, userId)
       message.success(t('player.followedMsg'))
     }
   } catch (e) {
@@ -132,10 +146,10 @@ async function toggleFollow() {
 
 async function toggleRecord() {
   if (recording.value) {
-    await api.recStop(userId)
+    await api.recStop(platform, userId)
     message.success(t('player.recStopped'))
   } else {
-    const r = await api.recStart(userId, pwdInput.value || undefined)
+    const r = await api.recStart(platform, userId, pwdInput.value || undefined)
     if ('userId' in r) {
       message.success(t('player.recStarted'))
     } else if (r.needPassword) {
@@ -154,7 +168,7 @@ let kaTimer: number | null = null
 
 async function refreshKa(): Promise<void> {
   try {
-    ka.value = await api.keepaliveStatus(userId)
+    ka.value = await api.keepaliveStatus(platform, userId)
   } catch {
     /* ignore */
   }
@@ -164,6 +178,8 @@ const kaText = computed(() => {
   const k = ka.value
   if (!k) return '—'
   if (isVod.value) return t('player.kaVod')
+  // SOOP 没有保活泵(上游清单判死即收尸, 下次播放重铸): 显示"已关闭(设置)"会让人去翻一个不存在的开关
+  if (platform === 'soop') return t('player.kaNa')
   if (!k.enabled) return t('player.kaOff')
   if (!k.cached) return t('player.kaNone')
   if (!k.lastOk) return t('player.kaBad')
@@ -210,6 +226,15 @@ function switchLine(i: number) {
   m3u8.value = u
   message.success(i === 0 ? t('player.switchMain') : t('player.switchedLine', { n: i }))
 }
+
+/** 源地址是否来自主进程的本地 HLS 代理(SOOP): 请求头由代理注入, 复制到外部播放器必失效 */
+const isProxySource = computed(() => {
+  try {
+    return new URL(m3u8.value).hostname === '127.0.0.1'
+  } catch {
+    return false
+  }
+})
 
 /** 紧凑展示源链接(host + 路径前缀, 不展开占版面) */
 function shortUrl(u: string): string {
@@ -314,6 +339,14 @@ async function manualRefresh() {
               <div class="flex gap-2">
                 <n-input v-model:value="pwdInput" type="password" :placeholder="t('player.pwPh')" class="!w-52" @keyup.enter="submitPwd" />
                 <n-button type="primary" @click="submitPwd">{{ t('player.pwEnter') }}</n-button>
+              </div>
+            </template>
+            <template v-else-if="needLogin">
+              <div class="text-3xl">🔑</div>
+              <p class="text-[13px] text-gray-200 max-w-[320px] text-center leading-relaxed">{{ t('player.needLogin') }}</p>
+              <div class="flex gap-2">
+                <n-button size="small" secondary @click="loadPlay(pwdInput, true)">{{ t('player.retry') }}</n-button>
+                <n-button size="small" type="primary" @click="router.push({ name: 'account', query: { plat: platform } })">{{ t('player.goLogin') }}</n-button>
               </div>
             </template>
             <template v-else>
@@ -428,6 +461,7 @@ async function manualRefresh() {
             <div class="flex items-center gap-2 bg-fill rounded-lg px-2.5 py-[7px]">
               <span class="flex-1 min-w-0 truncate font-mono text-[11px] text-ink2" :title="m3u8">{{ m3u8 ? shortUrl(m3u8) : t('player.noSource') }}</span>
             </div>
+            <p v-if="isProxySource" class="text-[11px] text-ink3 leading-snug mt-1.5">{{ t('player.srcProxyTip') }}</p>
             <div class="flex items-center justify-between text-[11.5px] py-1.5 mt-1">
               <span class="text-ink3">{{ t('player.line') }}</span>
               <span class="text-ink1 font-medium">{{ activeLine === 0 ? t('player.lineMain') : t('player.lineBak', { n: activeLine }) }}</span>

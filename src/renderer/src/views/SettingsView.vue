@@ -5,6 +5,7 @@ import { useAppStore } from '@/stores/app'
 import { api } from '@/api'
 import type { AppInfo, Settings, UpdateCheckResult } from '@shared/types'
 import SpinIcon from '@/components/SpinIcon.vue'
+import PlatTag from '@/components/PlatTag.vue'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -324,7 +325,11 @@ const tileCls =
           <div class="bg-card rounded-[14px] shadow-card overflow-hidden">
             <div class="flex items-center justify-between gap-4 px-4 py-3">
               <div>
-                <div class="text-[13px] font-medium text-ink1">{{ t('settings.watchMode') }}</div>
+                <div class="flex items-center gap-2">
+                  <span class="text-[13px] font-medium text-ink1">{{ t('settings.watchMode') }}</span>
+                  <!-- 平台边界由徽标说, 不再靠标题里的"(仅 PandaLive)"长括注(中英长度差会撑出两行) -->
+                  <PlatTag platform="pandalive" size="sm" />
+                </div>
                 <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.watchModeDesc') }}</div>
               </div>
               <n-radio-group v-model:value="form.watchMode" size="small">
@@ -360,6 +365,7 @@ const tileCls =
               <div class="min-w-0">
                 <div class="text-[13px] font-medium text-ink1">{{ t('settings.saveDir') }}</div>
                 <div class="text-[11px] text-ink3 mt-0.5 truncate font-mono">{{ form.savePath || defaultRecPath }}</div>
+                <div class="text-[10.5px] text-ink3/75 mt-0.5">{{ t('settings.saveDirLayout') }}</div>
               </div>
               <n-button size="small" secondary @click="pickDir">{{ t('settings.pickDir') }}</n-button>
             </div>
@@ -421,7 +427,10 @@ const tileCls =
               </div>
               <div :class="tileCls">
                 <div class="min-w-0 flex-1">
-                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.keepalive') }}</div>
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.keepalive') }}</span>
+                    <PlatTag platform="pandalive" size="sm" />
+                  </div>
                   <div class="text-[10.5px] text-ink3">{{ t('settings.keepaliveD') }}</div>
                 </div>
                 <n-switch size="small" v-model:value="form.keepaliveStream" />

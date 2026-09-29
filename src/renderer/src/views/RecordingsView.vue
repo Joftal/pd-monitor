@@ -6,7 +6,9 @@ import { api } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useI18n } from 'vue-i18n'
 import { baseName, fmtBytes, fmtDur, fmtDurHMS } from '@/utils/media'
-import type { RecTask } from '@shared/types'
+import PlatFilter from '@/components/PlatFilter.vue'
+import PlatTag from '@/components/PlatTag.vue'
+import { roomKey, type Platform, type RecTask } from '@shared/types'
 
 const { t } = useI18n()
 const store = useAppStore()
@@ -29,7 +31,7 @@ onUnmounted(() => {
 })
 
 // ---- 实时码率/下载速度: 复用 2s 任务推送做字节差分(纯前端, 零请求) ----
-const rates = ref<Record<string, number>>({}) // userId -> bytes/s
+const rates = ref<Record<string, number>>({}) // 房间主键 -> bytes/s
 let prevSnap: Record<string, { bytes: number; at: number }> = {}
 watch(
   () => store.recordings,
@@ -38,11 +40,12 @@ watch(
     const next: typeof prevSnap = {}
     const out: Record<string, number> = {}
     for (const task of list) {
-      const p = prevSnap[task.userId]
+      const k = roomKey(task.platform, task.userId)
+      const p = prevSnap[k]
       if (p && now > p.at) {
-        out[task.userId] = Math.max(0, (task.bytes - p.bytes) / ((now - p.at) / 1000))
+        out[k] = Math.max(0, (task.bytes - p.bytes) / ((now - p.at) / 1000))
       }
-      next[task.userId] = { bytes: task.bytes, at: now }
+      next[k] = { bytes: task.bytes, at: now }
     }
     prevSnap = next
     rates.value = out
@@ -50,7 +53,7 @@ watch(
 )
 /** 直播录制 → Mbps; 回放下载 → MB/s */
 function fmtRate(task: RecTask): string {
-  const v = rates.value[task.userId]
+  const v = rates.value[roomKey(task.platform, task.userId)]
   if (v === undefined) return '—'
   return task.vod ? `${(v / 1048576).toFixed(1)}` : `${((v * 8) / 1e6).toFixed(1)}`
 }
@@ -58,8 +61,10 @@ function fmtRate(task: RecTask): string {
 const fmtDurSec = fmtDurHMS
 
 // ---- 概览 ----
-const active = computed(() => store.activeRecs)
-const activeBytes = computed(() => active.value.reduce((s, task) => s + (task.bytes || 0), 0))
+// 平台筛选(与视频库同一口径): 两平台任务混排时, 同名主播只看卡面分不出来
+const platFilter = ref<'all' | Platform>('all')
+const active = computed(() => store.activeRecs.filter((x) => platFilter.value === 'all' || x.platform === platFilter.value))
+const activeBytes = computed(() => store.activeRecs.reduce((s, task) => s + (task.bytes || 0), 0))
 const diskLow = computed(() => diskFree.value < (store.settings?.diskLimitGb ?? 1) * 2)
 const diskCaption = computed(() => {
   const limit = store.settings?.diskLimitGb ?? 1
@@ -76,7 +81,7 @@ function vodTotalLabel(task: RecTask): string {
 
 /** 跳转到任务对应的直播间/回放间(PlayerView 自治拉源; 录制中的源已在缓存, 秒开零请求; 与录制进程互不影响) */
 function enterRoom(task: RecTask): void {
-  void router.push({ name: 'player', params: { userId: task.userId } })
+  void router.push({ name: 'player', params: { platform: task.platform, userId: task.userId } })
 }
 
 // ---- 管线阶段指示: 告诉用户任务在"哪一棒"、还有多少棒要跑(替代裸进度条, 收尾期不再像卡死) ----
@@ -102,8 +107,8 @@ function pipeCur(task: RecTask): number {
   return i < 0 ? 1 : i
 }
 
-async function stop(userId: string) {
-  await api.recStop(userId)
+async function stop(task: RecTask) {
+  await api.recStop(task.platform, task.userId)
   message.success(t('rec.stopped'))
 }
 async function openFolder(dir: string) {
@@ -122,10 +127,11 @@ async function openFolder(dir: string) {
         <div class="ml-auto flex items-stretch bg-card rounded-2xl shadow-card overflow-hidden divide-x divide-line/70">
           <div class="px-5 py-2 min-w-[100px]">
             <div class="text-[11px] text-ink3 flex items-center gap-1.5">
-              <span class="w-[7px] h-[7px] rounded-full bg-red-500" :class="active.length ? 'animate-breathe' : ''"></span>{{ t('rec.ovActive') }}
+              <!-- 概览恒为全局口径: 不随下面的平台筛选缩小(已写字节总量也是全局的) -->
+              <span class="w-[7px] h-[7px] rounded-full bg-red-500" :class="store.activeRecs.length ? 'animate-breathe' : ''"></span>{{ t('rec.ovActive') }}
             </div>
-            <div class="text-[19px] font-extrabold leading-tight tabular-nums" :class="active.length ? 'text-red-500' : 'text-ink1'">
-              {{ t('rec.ovActiveN', { n: active.length }) }}
+            <div class="text-[19px] font-extrabold leading-tight tabular-nums" :class="store.activeRecs.length ? 'text-red-500' : 'text-ink1'">
+              {{ t('rec.ovActiveN', { n: store.activeRecs.length }) }}
             </div>
           </div>
           <div class="px-5 py-2 min-w-[100px]">
@@ -147,6 +153,8 @@ async function openFolder(dir: string) {
           <span class="w-2 h-2 rounded-full bg-red-500" :class="active.length ? 'animate-breathe' : ''"></span>{{ t('rec.secActive') }}
           <span class="text-[11.5px] font-medium text-ink3">{{ t('rec.secActiveN', { n: active.length }) }}</span>
         </h2>
+        <span class="w-px h-4 bg-line mx-0.5"></span>
+        <PlatFilter :model-value="platFilter" @update:model-value="(v: string) => (platFilter = v as 'all' | Platform)" />
         <span class="ml-auto text-[11.5px] text-ink3">{{ t('rec.rateNote') }}</span>
       </div>
 
@@ -184,6 +192,8 @@ async function openFolder(dir: string) {
                 <span v-if="task.vod" class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#f0a020]/[0.14] text-[#d98a08]">{{ t('rec.tagVod') }}</span>
                 <span v-else class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-red-500/10 text-red-500">{{ t('rec.tagLive') }}</span>
                 <span v-if="task.auto" class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-sky-500/10 text-sky-600">{{ t('rec.tagAuto') }}</span>
+                <!-- 平台徽标: 两平台主播可能同名, 卡面只有昵称会录错人(封面仅 56px 方形放不下文字徽标, 留在卡头) -->
+                <PlatTag :platform="task.platform" size="lg" surface="onsurf" />
               </div>
               <div class="text-[12.5px] text-ink2 truncate mt-1" :title="task.title">{{ task.title || '—' }}</div>
               <div class="text-[11px] text-ink3 truncate mt-0.5 font-mono">{{ baseName(task.dirPath) }}/{{ baseName(task.currentFile) || '…' }}</div>
@@ -209,8 +219,8 @@ async function openFolder(dir: string) {
             <!-- 操作 -->
             <div class="flex flex-col gap-1.5 shrink-0 ml-2">
               <n-button size="small" tertiary round class="!w-[88px]" @click="enterRoom(task)">{{ t(task.vod ? 'rec.enterVod' : 'rec.enterRoom') }}</n-button>
-              <n-button v-if="task.vod" size="small" type="error" secondary round class="!w-[88px]" @click="stop(task.userId)">{{ t('rec.stopVod') }}</n-button>
-              <n-button v-else size="small" type="error" round class="!w-[88px]" @click="stop(task.userId)">{{ t('rec.stop') }}</n-button>
+              <n-button v-if="task.vod" size="small" type="error" secondary round class="!w-[88px]" @click="stop(task)">{{ t('rec.stopVod') }}</n-button>
+              <n-button v-else size="small" type="error" round class="!w-[88px]" @click="stop(task)">{{ t('rec.stop') }}</n-button>
               <n-button size="small" tertiary round class="!w-[88px]" @click="openFolder(task.dirPath)">{{ t('rec.dir') }}</n-button>
             </div>
           </div>

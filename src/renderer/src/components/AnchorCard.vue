@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NPopover, NSwitch } from 'naive-ui'
-import type { Anchor } from '@shared/types'
+import type { Anchor, Platform } from '@shared/types'
+import { roomUrl } from '@shared/types'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api'
 import { useI18n } from 'vue-i18n'
@@ -9,21 +10,22 @@ import LiveCard, { type LiveCardModel } from '@/components/LiveCard.vue'
 
 const { t } = useI18n()
 
-const props = defineProps<{ anchor: Anchor }>()
-const emit = defineEmits<{ (e: 'remove', userId: string): void }>()
+const props = defineProps<{ anchor: Anchor; showPlatform?: boolean }>()
+const emit = defineEmits<{ (e: 'remove', platform: Platform, userId: string): void }>()
 const store = useAppStore()
 
 const model = computed<LiveCardModel>(() => {
   const a = props.anchor
   return {
+    platform: a.platform,
     userId: a.userId,
     nick: a.nick,
     title: a.title || '',
     thumbUrl: a.thumbUrl || '',
     userImg: a.userImg || '',
     isLive: !!a.isLive,
-    recording: store.isRecording(a.userId),
-    srcReady: store.isSrcReady(a.userId),
+    recording: store.isRecording(a.platform, a.userId),
+    srcReady: store.isSrcReady(a.platform, a.userId),
     isAdult: a.tags?.isAdult,
     isPw: a.tags?.isPw,
     isRec: a.tags?.liveType === 'rec',
@@ -36,13 +38,13 @@ const model = computed<LiveCardModel>(() => {
 })
 
 async function setAuto(v: boolean): Promise<void> {
-  await api.anchorsSetAuto(props.anchor.userId, v)
+  await api.anchorsSetAuto(props.anchor.platform, props.anchor.userId, v)
   store.anchors = await api.anchorsList()
 }
 </script>
 
 <template>
-  <LiveCard :model="model">
+  <LiveCard :model="model" :show-platform="props.showPlatform !== false">
     <template #meta>
       <n-popover trigger="click" placement="bottom-end" :show-arrow="false">
         <template #trigger>
@@ -55,10 +57,10 @@ async function setAuto(v: boolean): Promise<void> {
             <span>{{ t('monitor.autoRecTitle') }}</span>
             <n-switch size="small" :value="props.anchor.autoRecord" @update:value="setAuto" />
           </div>
-          <div class="px-3 py-2 text-[12.5px] text-ink2 hover:bg-fillh cursor-pointer" @click="api.openExternal('https://www.pandalive.co.kr/play/' + model.userId)">
+          <div class="px-3 py-2 text-[12.5px] text-ink2 hover:bg-fillh cursor-pointer" @click="api.openExternal(roomUrl(model.platform, model.userId))">
             {{ t('monitor.openInBrowser') }}
           </div>
-          <div class="px-3 py-2 text-[12.5px] text-red-500 hover:bg-red-50 cursor-pointer" @click="emit('remove', model.userId)">
+          <div class="px-3 py-2 text-[12.5px] text-red-500 hover:bg-red-50 cursor-pointer" @click="emit('remove', model.platform, model.userId)">
             {{ t('card.unfollow') }}
           </div>
         </div>

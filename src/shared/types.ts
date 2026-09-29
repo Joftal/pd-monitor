@@ -1,5 +1,53 @@
 // ============ 主进程与渲染进程共享的数据契约 / IPC 通道名 ============
 
+// ---------- 平台与房间主键 ----------
+export type Platform = 'pandalive' | 'soop'
+
+/** 裸 ID / 历史库数据的默认归属平台 */
+export const DEFAULT_PLATFORM: Platform = 'pandalive'
+
+export function isPlatform(v: unknown): v is Platform {
+  return v === 'pandalive' || v === 'soop'
+}
+
+/** 房间主键: 同一 ID 在不同平台是两个房间, 一切去重/查找/Map 键都用它而非裸 userId。
+ *  只做进程内标识: 目录名用裸 userId + 平台层级, 因为 ':' 在 Windows 文件名非法、
+ *  而 strictName 会静默去掉它, 跨平台同 ID 就撞进同一目录。 */
+export function roomKey(platform: Platform, userId: string): string {
+  return `${platform}:${userId}`
+}
+
+/** 房间地址唯一出口(卡片跳转 / 在浏览器打开 / TG 推送都从这里取, 勿再各写各的域名) */
+export function roomUrl(platform: Platform, userId: string): string {
+  return platform === 'soop'
+    ? `https://play.sooplive.com/${userId}`
+    : `https://www.pandalive.co.kr/play/${userId}`
+}
+
+/** 用户输入(裸 ID 或任意房间链接)→ 主键。平台按域名判定, 裸 ID 归 fallback。
+ *  SOOP 的 `/频道/场次号` 形态只取频道名: 场次号每次监控从页面重解析, 不进主键。
+ *  无法识别返回 null, 由调用方决定是报错还是回退。 */
+export function parseRoomInput(raw: string, fallback: Platform = DEFAULT_PLATFORM): { platform: Platform; userId: string } | null {
+  const s = (raw || '').trim()
+  if (!s) return null
+  const platform: Platform = /sooplive\.com\//i.test(s)
+    ? 'soop'
+    : /pandalive\.co\.kr\//i.test(s)
+      ? 'pandalive'
+      : fallback
+  const isUrl = /^https?:\/\//i.test(s)
+  const path = isUrl ? s.replace(/^https?:\/\/[^/]+/i, '') : s
+  const segs = path.split(/[/?#]+/).filter(Boolean)
+  // pandalive 链接带 /play 路由段, SOOP 播放页第一段就是频道名(个别分享链接写作 /channel/频道名)
+  const route = platform === 'pandalive' ? 'play' : 'channel'
+  const cand = segs[0] === route ? segs[1] : segs[0]
+  if (!cand) return null
+  // 纯数字只会是 SOOP 的场次号(或误粘的数字), 不可能是任一平台的登录名
+  if (isUrl && /^\d+$/.test(cand)) return null
+  const userId = cand.replace(/[^\w-]/g, '')
+  return userId ? { platform, userId } : null
+}
+
 export interface AnchorTag {
   isAdult: boolean
   isPw: boolean
@@ -8,6 +56,8 @@ export interface AnchorTag {
 }
 
 export interface Anchor {
+  /** 归属平台; 与 userId 共同构成主键 */
+  platform: Platform
   userId: string
   userIdx: number | null
   nick: string
@@ -29,6 +79,8 @@ export type RecStatus = 'recording' | 'remuxing' | 'done' | 'stopped' | 'error'
 
 export interface RecTask {
   id: string
+  /** 归属平台; 与 userId 共同定位房间(录制产物目录仍按 nick(userId) 命名, 平台分叉在下一层) */
+  platform: Platform
   userId: string
   nick: string
   title: string
@@ -141,7 +193,29 @@ export interface AccountState {
   /** 账号是否已通过 pandalive 成人认证 */
   isAdult: boolean
   userIdx: number | null
+  /** 官方校验请求本身失败(网络/风控): 与"服务端明确未登录"语义不同, 前端不得报成未登录 */
+  netFail: boolean
   encrypted: boolean
+}
+
+/** SOOP 账号态: 与 PandaLive 完全独立的两套登录态, 字段按 SOOP 接口能给的信息来
+ *  (潘达以数字 idx 标识账号, SOOP 只有 LOGIN_ID/LOGIN_NICK; 且 SOOP 支持账密自动重登) */
+export interface SoopAccountState {
+  /** 会话罐里是否已有 .sooplive.com Cookie(匿名站点 Cookie 也算, 故只用于"有没有种过") */
+  hasCookies: boolean
+  /** 官方 get_private_info.php 判定已登录(LOGIN_ID 非空) —— 取 19+/限区房间的依据 */
+  realLogin: boolean
+  /** 请求层失败(网络/风控), 与"服务端明确未登录"语义不同 */
+  netFail: boolean
+  loginId: string
+  nick: string
+  /** 已托管的账密自动重登账号(仅用户名; 密码不出主进程) */
+  credentialUser: string
+}
+
+export interface AccountStates {
+  pandalive: AccountState
+  soop: SoopAccountState
 }
 
 export interface WatcherStatus {
@@ -159,12 +233,14 @@ export interface WatcherStatus {
 export interface PlayInfo {
   ok: boolean
   needPassword?: boolean
+  /** SOOP 专有: 该房间要登录态(19+/限区/匿名降级), 前端据此给"去登录"入口而不是当成未开播 */
+  needLogin?: boolean
   error?: string
   m3u8?: string
   /** 回放(liveType=rec)播放结果: 前端可据此切换"观看/下载回放"语义 */
   vod?: boolean
   /** 变体分档(带宽降序, 第一个是最高档; 用于替代短寿 master 地址) */
-  variants?: { url: string; bandwidth: number; resolution: string }[]
+  variants?: { url: string; bandwidth: number; resolution: string; label?: string }[]
   title?: string
   nick?: string
   thumbUrl?: string
@@ -261,23 +337,28 @@ export interface RecDeleteFileResult {
 
 // ---------- window.api 桥接口契约(单一事实源: preload 实现它, env.d.ts 引用它) ----------
 export interface ApiBridge {
-  authState(): Promise<AccountState>
-  authOpenWindow(): Promise<{ ok: boolean; message: string }>
-  authImportCookies(cookieStr: string): Promise<{ ok: boolean; message: string }>
-  authLogout(): Promise<boolean>
+  /** 两套登录态一次给全: 顶栏双头像与账号页共用同一份事实源 */
+  authState(): Promise<AccountStates>
+  authOpenWindow(platform: Platform): Promise<{ ok: boolean; message: string }>
+  authImportCookies(cookieStr: string, platform: Platform): Promise<{ ok: boolean; message: string }>
+  authLogout(platform: Platform): Promise<boolean>
+  /** SOOP 账密自动重登: 存下凭据并立刻登录一次; 账号传空串=解除托管, 密码不回显也不回传 */
+  authSaveSoopCredentials(username: string, password: string): Promise<{ ok: boolean; message: string }>
   anchorsList(): Promise<Anchor[]>
-  anchorsAdd(input: string): Promise<Anchor>
-  anchorsRemove(userId: string): Promise<boolean>
-  anchorsSetAuto(userId: string, auto: boolean): Promise<boolean>
+  /** platform 省略时由输入形态推断(带域名按域名, 裸 ID 归默认平台) */
+  anchorsAdd(input: string, platform?: Platform): Promise<Anchor>
+  anchorsRemove(platform: Platform, userId: string): Promise<boolean>
+  anchorsSetAuto(platform: Platform, userId: string, auto: boolean): Promise<boolean>
   anchorsRefresh(): Promise<boolean>
-  livePlay(userId: string, password?: string, fresh?: boolean): Promise<PlayInfo>
+  livePlay(platform: Platform, userId: string, password?: string, fresh?: boolean): Promise<PlayInfo>
+  /** 返回 roomKey 集(非裸 userId) */
   liveSrcCache(): Promise<string[]>
-  keepaliveStatus(userId: string): Promise<KeepaliveStatus>
+  keepaliveStatus(platform: Platform, userId: string): Promise<KeepaliveStatus>
   discoveryList(): Promise<DiscoveryItem[]>
   recList(): Promise<RecTask[]>
   recHistory(): Promise<RecHistoryItem[]>
-  recStart(userId: string, password?: string): Promise<RecTask | { ok: false; needPassword?: boolean; error?: string }>
-  recStop(userId: string): Promise<void>
+  recStart(platform: Platform, userId: string, password?: string): Promise<RecTask | { ok: false; needPassword?: boolean; error?: string }>
+  recStop(platform: Platform, userId: string): Promise<void>
   recOpenFolder(dir: string): Promise<boolean>
   recDiskFree(): Promise<number>
   recMerge(taskId: string): Promise<{ ok: boolean; files?: string[]; error?: string }>
@@ -304,12 +385,12 @@ export interface ApiBridge {
   onAnchors(cb: (list: Anchor[]) => void): () => void
   onRecordings(cb: (list: RecTask[]) => void): () => void
   onWatcher(cb: (s: WatcherStatus) => void): () => void
-  onAccount(cb: (s: AccountState) => void): () => void
+  onAccount(cb: (s: AccountStates) => void): () => void
   onToast(cb: (t: Toast) => void): () => void
   onDiscovery(cb: (list: DiscoveryItem[]) => void): () => void
   onRecThumb(cb: (p: RecThumbReady) => void): () => void
-  /** 有效直播源缓存快照(已获取源的主播 userId 集; 卡片「秒开」徽标依据) */
-  onSrcCache(cb: (ids: string[]) => void): () => void
+  /** 有效直播源缓存快照(已获取源的房间 roomKey 集; 卡片「秒开」徽标依据) */
+  onSrcCache(cb: (keys: string[]) => void): () => void
 }
 
 // ---------- IPC invoke 通道 ----------
@@ -318,6 +399,7 @@ export const CH = {
   authOpenWindow: 'auth:open-window',
   authImportCookies: 'auth:import-cookies',
   authLogout: 'auth:logout',
+  authSaveSoopCredentials: 'auth:save-soop-credentials',
   anchorsList: 'anchors:list',
   anchorsAdd: 'anchors:add',
   anchorsRemove: 'anchors:remove',
