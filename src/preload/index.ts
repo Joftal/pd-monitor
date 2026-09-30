@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron'
 import { CH, EV } from '../shared/types'
 import type { ApiBridge } from '../shared/types'
 import type {
-  AccountStates, Anchor, AppInfo, DiscoveryItem, KeepaliveStatus, Platform, PlayInfo, RecDeleteFileResult, RecDeleteResult, RecHistoryItem, RecTask, RecThumbReady, Settings, Toast, UpdateCheckResult, WatcherStatus
+  AccountStates, Anchor, AppInfo, DiscoveryItem, FollowImportResult, KeepaliveStatus, Platform, PlayInfo, RecDeleteFileResult, RecDeleteResult, RecHistoryItem, RecTask, RecThumbReady, Settings, Toast, UpdateCheckResult, WatcherStatus
 } from '../shared/types'
 
 function on<T>(channel: string, cb: (payload: T) => void): () => void {
@@ -15,6 +15,7 @@ function on<T>(channel: string, cb: (payload: T) => void): () => void {
 const apiBridge: ApiBridge = {
   // 账号
   authState: (): Promise<AccountStates> => ipcRenderer.invoke(CH.authState),
+  authRecheck: (platform: Platform): Promise<AccountStates> => ipcRenderer.invoke(CH.authRecheck, platform),
   authOpenWindow: (platform: Platform): Promise<{ ok: boolean; message: string }> =>
     ipcRenderer.invoke(CH.authOpenWindow, platform),
   authImportCookies: (cookieStr: string, platform: Platform): Promise<{ ok: boolean; message: string }> =>
@@ -29,6 +30,8 @@ const apiBridge: ApiBridge = {
     ipcRenderer.invoke(CH.anchorsAdd, input, platform),
   anchorsRemove: (platform: Platform, userId: string): Promise<boolean> =>
     ipcRenderer.invoke(CH.anchorsRemove, platform, userId),
+  anchorsImportSoop: (): Promise<FollowImportResult> => ipcRenderer.invoke(CH.anchorsImportSoop),
+  anchorsImportPanda: (): Promise<FollowImportResult> => ipcRenderer.invoke(CH.anchorsImportPanda),
   anchorsSetAuto: (platform: Platform, userId: string, auto: boolean): Promise<boolean> =>
     ipcRenderer.invoke(CH.anchorsSetAuto, platform, userId, auto),
   anchorsRefresh: (): Promise<boolean> => ipcRenderer.invoke(CH.anchorsRefresh),

@@ -68,6 +68,8 @@ function soopSpec(): LoginWindowSpec {
       soopApi.invalidateCookieCache()
       const info = await soopApi.verifyLogin(undefined, true)
       if (!info.isLogin) return { login: false, message: '' }
+      // 官网只发无期限的会话 Cookie: 不转持久就是"重启即登出"
+      await soopApi.persistSessionCookies()
       return { login: true, message: mt('soop.loginOk', { id: info.loginId }) }
     }
   }

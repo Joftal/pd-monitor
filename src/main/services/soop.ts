@@ -9,7 +9,7 @@ import {
   registerSrcCacheProvider,
   broadcastSrcCache
 } from './pandalive'
-import { roomKey } from '../../shared/types'
+import { isRoomId, roomKey } from '../../shared/types'
 import { UA } from '../util'
 import { logger } from './logger'
 import { mt } from '../i18n'
@@ -35,15 +35,26 @@ const SOOP_ORIGIN = 'https://play.sooplive.com'
 const CHANNEL_API = 'https://live.sooplive.com/afreeca/player_live_api.php'
 const AUTH_CHECK_API = 'https://afevent2.sooplive.com/api/get_private_info.php'
 const LOGIN_API = 'https://login.sooplive.com/app/LoginAction.php'
+/** 关注列表接口: 一发拿到"我关注的全部主播 + 各自在播状态"。服务端校 Origin(实测 play 域回 403), 必须报 www */
+const FAVORITES_API = 'https://myapi.sooplive.com/api/favorite'
+const WEB_ORIGIN = 'https://www.sooplive.com'
 const RESULT_OK = 1
 const RESULT_LOGIN = -6
 const RESULT_EMPTY = 0
 const RESULT_BLOCK = -2
-/** Cookie 分散在四个子域(实测登录链路回吐), 取单域必漏 */
-const COOKIE_HOSTS = ['https://play.sooplive.com', 'https://login.sooplive.com', 'https://live.sooplive.com', 'https://afevent2.sooplive.com']
+/** Cookie 分散在多个子域(实测登录链路回吐), 取单域必漏; www/myapi 是网页登录态与关注接口的落点 */
+const COOKIE_HOSTS = [
+  'https://play.sooplive.com',
+  'https://login.sooplive.com',
+  'https://live.sooplive.com',
+  'https://afevent2.sooplive.com',
+  'https://www.sooplive.com',
+  'https://myapi.sooplive.com'
+]
 /** 实测站点自己的 Cookie 全挂在这个域下, 四子域共用; 手工导入的 Cookie 也按它落罐 */
 const COOKIE_DOMAIN = '.sooplive.com'
-/** 账密托管键(secrets.dat, safeStorage 加密): 密码只在主进程解出, 不进 db.json/不回显渲染层 */
+/** 登录态在罐内的保质期(30 天): 只决定"本地还带着 Cookie 多久", 服务端随时可作废, 届时按未登录处理 */
+const COOKIE_TTL_SEC = 30 * 24 * 3600/** 账密托管键(secrets.dat, safeStorage 加密): 密码只在主进程解出, 不进 db.json/不回显渲染层 */
 const CRED_USER = 'soop.user'
 const CRED_PASS = 'soop.pass'
 /** 登录态校验结果缓存: 顶栏头像/账号页/预检都会反复取态, 2 分钟内复用一次官方校验 */
@@ -124,6 +135,82 @@ function parsePageThumb(body: string): string {
   const raw = parseWindowString(body, 'szBroadThumPath')
   if (!raw || raw.includes('blind_background')) return ''
   return raw.startsWith('//') ? 'https:' + raw : raw
+}
+
+/** 关注列表里"此刻在播"的那一场 */
+export interface SoopFavoriteLive {
+  broadNo: string
+  title: string
+  /** KST 钟面串, 已补齐到秒与平台同格式 */
+  startTime: string
+  thumbUrl: string
+  viewers: number
+  isAdult: boolean
+  isPw: boolean
+}
+
+export interface SoopFavoriteRow {
+  userId: string
+  nick: string
+  isLive: boolean
+  /** 上次开播的钟面串(离线项也有, 可显示"多久没播") */
+  lastStartTime: string
+  /** isLive=true 但这里为 null: 列表说有场次却没给, 状态判不了, 调用方须对该房回落到播放页探针 */
+  live: SoopFavoriteLive | null
+}
+
+/** 接口给的是分钟精度钟面串("2026-09-29 22:01"), 平台内统一为秒级; 形状不对返回空串(不可用) */
+function favClock(v: unknown): string {
+  const s = String(v ?? '').trim()
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) return s
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(s)) return s + ':00'
+  return ''
+}
+
+function favThumb(v: unknown): string {
+  const s = String(v ?? '').trim()
+  if (!s || s.includes('blind_background')) return ''
+  return s.startsWith('//') ? 'https:' + s : s
+}
+
+/** 当前观众数: broad_info 里的 total_view_cnt 就是 pc+mobile 之和(实测与页面口径一致), 分端值缺失才退到它 */
+function favViewers(b: Record<string, unknown>): number {
+  const pc = Number(b.pc_view_cnt)
+  const mo = Number(b.mobile_view_cnt)
+  if (Number.isFinite(pc) || Number.isFinite(mo)) return (Number.isFinite(pc) ? pc : 0) + (Number.isFinite(mo) ? mo : 0)
+  const t = Number(b.total_view_cnt)
+  return Number.isFinite(t) ? t : 0
+}
+
+/** 单条关注 → 内部行; 返回 null 表示这条不可用(缺 user_id / id 不可寻址) */
+function parseFavoriteRow(raw: unknown): SoopFavoriteRow | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const userId = String(r.user_id ?? '')
+  if (!isRoomId(userId)) return null
+  const row: SoopFavoriteRow = {
+    userId,
+    nick: String(r.user_nick ?? ''),
+    isLive: r.is_live === true,
+    lastStartTime: favClock(r.last_broad_start),
+    live: null
+  }
+  if (!row.isLive) return row
+  const b = Array.isArray(r.broad_info) ? r.broad_info[0] : undefined
+  if (!b || typeof b !== 'object') return row
+  const live = b as Record<string, unknown>
+  const broadNo = String(live.broad_no ?? '')
+  if (!broadNo) return row
+  row.live = {
+    broadNo,
+    title: String(live.broad_title ?? ''),
+    startTime: favClock(live.broad_start),
+    thumbUrl: favThumb(live.broad_img),
+    viewers: favViewers(live),
+    isAdult: live.is_adult === true,
+    isPw: live.is_password === true
+  }
+  return row
 }
 
 /** 平台通用的 startTime 是 KST 钟面串("YYYY-MM-DD HH:MM:SS"), 渲染层与 watcher 都按 UTC+9 解析 ——
@@ -216,20 +303,31 @@ class SoopApi {
   private cookieCache: { at: number; header: string } | null = null
 
   /** 本地 HLS 代理单实例: 所有房间/清晰度共用一个回环端口, 靠 ?url= 参数分流 */
+  private proxyStarting: Promise<HlsProxy> | null = null
   private async hls(): Promise<HlsProxy> {
     if (this.proxy) {
       await this.proxy.listen()
       return this.proxy
     }
-    const p = new HlsProxy({
-      sessionPartition: SOOP_SESSION_PARTITION,
-      headers: async () => ({ ...this.baseHeaders(), ...(await this.cookieHeader()) }),
-      // SOOP 没有源保活泵: 上游清单判死是唯一的死源探测口, 不收尸就会留死源骗「已缓存」徽标
-      onDeadUpstream: (target, status) => this.onUpstreamDead(target, status)
-    })
-    await p.listen()
-    this.proxy = p
-    return p
+    // 并发首拉(预取泵与用户手动进房同时到)必须合流: 各建各的会留下两个监听实例, 后写的覆盖 this.proxy,
+    // 先建的那个端口永久泄漏; 更要命的是 onUpstreamDead 用 this.proxy 重算 playlistUrl ——
+    // 缓存里的旧端口地址从此没人认得, 死源收尸整条链路静默失效
+    if (!this.proxyStarting) {
+      this.proxyStarting = (async () => {
+        const p = new HlsProxy({
+          sessionPartition: SOOP_SESSION_PARTITION,
+          headers: async () => ({ ...this.baseHeaders(), ...(await this.cookieHeader()) }),
+          // SOOP 没有源保活泵: 上游清单判死是唯一的死源探测口, 不收尸就会留死源骗「已缓存」徽标
+          onDeadUpstream: (target, status) => this.onUpstreamDead(target, status)
+        })
+        await p.listen()
+        this.proxy = p
+        return p
+      })().finally(() => {
+        this.proxyStarting = null
+      })
+    }
+    return this.proxyStarting
   }
 
   private baseHeaders(referer?: string): Record<string, string> {
@@ -282,6 +380,12 @@ class SoopApi {
    *  - netFail(网络/风控/非 JSON)不进缓存, 也不得被调用方当成"未登录" */
   private loginCache = new Map<string, { at: number; info: SoopLoginInfo }>()
   private loginInflight = new Map<string, Promise<SoopLoginInfo>>()
+  /** 最后一次真实发出 get_private_info 的时刻(含 netFail 的失败尝试; 试验证通道不计): 账号页「上次校验」用 */
+  private loginCheckedAt = 0
+
+  get lastVerifyAt(): number {
+    return this.loginCheckedAt
+  }
 
   async verifyLogin(cookieOverride?: string, force = false): Promise<SoopLoginInfo> {
     const cookie = cookieOverride ?? (await this.cookieString())
@@ -293,6 +397,7 @@ class SoopApi {
     if (flying) return flying
     const p = (async (): Promise<SoopLoginInfo> => {
       let info: SoopLoginInfo
+      if (!cookieOverride) this.loginCheckedAt = Date.now()
       try {
         const headers = { ...this.baseHeaders(), Cookie: cookie }
         const res = cookieOverride
@@ -320,17 +425,55 @@ class SoopApi {
   }
 
   /** 校验通过的 Cookie 落进会话罐: 统一按 .sooplive.com 全域写, 四子域才都读得到
-   *  (实测 Chromium 会忽略手工 Cookie 头而优先用罐内同域 Cookie, 所以登录态必须落罐) */
+   *  (实测 Chromium 会忽略手工 Cookie 头而优先用罐内同域 Cookie, 所以登录态必须落罐)
+   *  expirationDate 必给: 不带期限写入即"会话 Cookie", 应用一退就蒸发 */
   async storeCookies(cookieStr: string): Promise<number> {
     const jar = parseCookieString(cookieStr)
     const ses = session.fromPartition(SOOP_SESSION_PARTITION)
     for (const [name, value] of Object.entries(jar)) {
-      await ses.cookies.set({ url: SOOP_ORIGIN, name, value, domain: COOKIE_DOMAIN, path: '/', secure: true, sameSite: 'no_restriction' })
+      await ses.cookies.set({ url: SOOP_ORIGIN, name, value, domain: COOKIE_DOMAIN, path: '/', secure: true, sameSite: 'no_restriction', expirationDate: Math.floor(Date.now() / 1000) + COOKIE_TTL_SEC })
     }
     this.invalidateCookieCache()
     this.loginCache.clear()
     this.clearPlayCache() // 新会话生效: 旧会话签发的源一律作废
     return Object.keys(jar).length
+  }
+
+  /** 网页登录用的官网只回吐"无 Expires 的会话 Cookie"(实测 UserTicket/AuthTicket 等全无期限),
+   *  persist: 分区也救不了 —— Chromium 只持久化带期限的条目, 于是每次重启都从"已登录"跌回未登录。
+   *  登录确认当刻把罐内 sooplive.com 的会话 Cookie 补期限重写一遍转成持久条目; 已带期限的原样不动。
+   *  返回转换条数。 */
+  async persistSessionCookies(): Promise<number> {
+    const ses = session.fromPartition(SOOP_SESSION_PARTITION)
+    const all = await ses.cookies.get({})
+    const until = Math.floor(Date.now() / 1000) + COOKIE_TTL_SEC
+    let n = 0
+    for (const c of all) {
+      const domain = c.domain ?? ''
+      if (c.expirationDate || !domain.replace(/^\./, '').endsWith('sooplive.com')) continue
+      const host = domain.replace(/^\./, '')
+      try {
+        await ses.cookies.set({
+          url: `https://${host}${c.path ?? '/'}`,
+          name: c.name,
+          value: c.value,
+          domain,
+          path: c.path ?? '/',
+          secure: c.secure,
+          httpOnly: c.httpOnly,
+          sameSite: c.sameSite,
+          expirationDate: until
+        })
+        n++
+      } catch (e) {
+        logger.warn('soop', `Cookie 转持久失败 ${c.name}: ${String((e as Error).message || e)}`)
+      }
+    }
+    if (n) {
+      this.invalidateCookieCache()
+      logger.info('soop', `会话 Cookie 已转持久(${n} 枚)`)
+    }
+    return n
   }
 
   /** 托管账密登录(LoginAction.php): 实测错凭证回 {"RESULT":0}, 成功回 {"RESULT":1} + 四子域 Set-Cookie
@@ -435,6 +578,53 @@ class SoopApi {
       return { status: res.status, text: res.text, finalUrl: url }
     } finally {
       clearTimeout(timer)
+    }
+  }
+
+  /** 全量关注 + 各自在播状态(实测 718 条 / 374KB / 无分页), 一发替代逐房探针。
+   *  返回 null = 列表本轮不可用(未登录 515 / Origin 被拒 / 改版缺 data / 非 JSON / 网络异常):
+   *  调用方必须整体降级到 fetchPageMeta, 绝不能把"没拿到"当成"全都下播了"。
+   *  单条脏数据只丢那一条并计数进日志。 */
+  async fetchFavorites(): Promise<SoopFavoriteRow[] | null> {
+    const headers: Record<string, string> = {
+      'User-Agent': UA,
+      Origin: WEB_ORIGIN,
+      // Referer 只能到 www 的"源根": 这是跨源请求(myapi ← www 页面), Chromium 按默认
+      // strict-origin-when-cross-origin 只允许带 origin 级 Referer, 带完整路径会被网络层直接
+      // 取消("Cancelling request ... with invalid referrer"), 白丢一次 ses.fetch 再靠 Node 兜底
+      Referer: `${WEB_ORIGIN}/`,
+      Accept: 'application/json, text/plain, */*',
+      ...(await this.cookieHeader())
+    }
+    try {
+      const res = await this.req(FAVORITES_API, { headers }, 20_000)
+      if (res.status !== 200) {
+        logger.warn('soop', `关注列表不可用(HTTP ${res.status}), 本轮回到逐房探针`)
+        return null
+      }
+      const j = JSON.parse(res.text) as { data?: unknown }
+      if (!Array.isArray(j.data)) {
+        logger.warn('soop', '关注列表返回结构变更(缺 data 数组), 本轮回到逐房探针')
+        return null
+      }
+      // 建了分组时 data 是"组内数组的数组"(前端拿完就 flat()), 无分组是一维
+      const rawRows: unknown[] = j.data.some((x) => Array.isArray(x)) ? (j.data as unknown[][]).flat() : j.data
+      const rows: SoopFavoriteRow[] = []
+      let dropped = 0
+      for (const x of rawRows) {
+        const r = parseFavoriteRow(x)
+        if (r) rows.push(r)
+        else dropped++
+      }
+      if (rawRows.length && !rows.length) {
+        logger.warn('soop', `关注列表 ${rawRows.length} 条全部解析失败(字段改名?), 本轮回到逐房探针`)
+        return null
+      }
+      if (dropped) logger.warn('soop', `关注列表丢弃 ${dropped}/${rawRows.length} 条非法行`)
+      return rows
+    } catch (e) {
+      logger.warn('soop', `关注列表拉取失败: ${String((e as Error).message || e)}`)
+      return null
     }
   }
 
@@ -564,10 +754,21 @@ class SoopApi {
     }
     if (info.result === RESULT_LOGIN) return { ok: false, needLogin: true, error: mt('soop.needLogin') }
     if (info.needPwd && !password) return { ok: false, needPassword: true, error: mt('soop.pwRequired') }
-    if (info.result !== RESULT_OK) return { ok: false, error: mt('soop.playResult', { why: explainResult(info.result) }) }
+    // 密码房 + 已交过一发密码 + 平台仍不给播放信息: 只可能是密码不对。必须报成"可重填"的形态,
+    // 否则会把它当笼统接口失败 —— 用户看到的是"SOOP 拒绝返回播放信息", 既不知错在哪也无从重试
+    if (info.result !== RESULT_OK) {
+      if (info.needPwd) return { ok: false, needPassword: true, error: mt('soop.pwWrong') }
+      return { ok: false, error: mt('soop.playResult', { why: explainResult(info.result) }) }
+    }
     if (!info.broadNo || !info.rmd) return { ok: false, error: mt('soop.incomplete') }
 
-    const proxy = await this.hls().catch(() => null)
+    // 代理起不来就直接判死: 裸上游地址带不走 Cookie/Origin, 播放器与 ffmpeg 必定 403,
+    // 而且这个"看着有效"的源会被缓存并点亮「秒开」徽标 —— 静默降级等于把故障藏进缓存里
+    const proxy = await this.hls().catch((e) => {
+      logger.warn('soop', `本地 HLS 代理启动失败 @${channel}: ${String((e as Error).message || e)}`)
+      return null
+    })
+    if (!proxy) return { ok: false, error: mt('soop.proxyFail') }
     const presets = this.sortPresets(info.presets).filter((p) => p.name && p.name.toLowerCase() !== 'auto')
     const variants: VariantInfo[] = []
     for (const p of presets) {
@@ -587,7 +788,7 @@ class SoopApi {
         const up = new URL(viewUrl)
         up.searchParams.set('aid', aid)
         variants.push({
-          url: proxy ? proxy.playlistUrl(up.href) : up.href,
+          url: proxy.playlistUrl(up.href),
           bandwidth: p.bps * 1000,
           resolution: p.height ? `${p.height}p` : p.name,
           label: p.label || p.name
@@ -596,7 +797,11 @@ class SoopApi {
         logger.warn('soop', `清晰度取流失败 @${channel} quality=${p.name}: ${String((e as Error).message || e)}`)
       }
     }
-    if (!variants.length) return { ok: false, error: mt('soop.noStream') }
+    if (!variants.length) {
+      // 密码房的 AID 这一发才真验密码: 密码不对时平台不给任何一档(主信息那步照样回 OK)
+      if (info.needPwd && password) return { ok: false, needPassword: true, error: mt('soop.pwWrong') }
+      return { ok: false, error: mt('soop.noStream') }
+    }
 
     logger.info('soop', `拉源成功 @${channel}: 档位=${variants.length} bno=${info.broadNo} cdn=${info.cdn}`)
     // 开播时刻: 播放页整页没有任何时间串, 列表接口才有 broad_start —— 这里用 CHANNEL.BTIME(已播秒数)反推,

@@ -3,7 +3,7 @@ import { spawn, ChildProcessByStdio } from 'child_process'
 import { Readable, Writable } from 'stream'
 import * as fs from 'fs'
 import * as path from 'path'
-import { EV, Platform, roomKey, Anchor, RecHistoryItem, RecTask } from '../../shared/types'
+import { EV, Platform, roomKey, REC_RETRY_MAX, sanitizePathPart, Anchor, RecHistoryItem, RecTask } from '../../shared/types'
 import { api } from './pandalive'
 import { sourceFor } from './source'
 import { store } from './store'
@@ -31,15 +31,11 @@ function ffmpegPath(): string {
   return app.isPackaged ? p.replace('app.asar', 'app.asar.unpacked') : p
 }
 
-/** 严格清理路径用名: 非法字符直接去除(不下划线替代), 收拢空白, 去除首尾点空格(NTFS 约束) */
+/** 严格清理路径用名: 非法字符直接去除(不下划线替代), 收拢空白, 去除首尾点空格(NTFS 约束)。
+ *  `%` 也在此列: 它会被塞进 ffmpeg 的 `-strftime` 式分段模板(`<base>_%04d.ts`), 留在名字里
+ *  等于给模板凭空多一个转换符 —— 产出文件与索引对不上, 分段/合并全乱 */
 export function strictName(s: string): string {
-  return (
-    String(s || '')
-      .replace(/[\\/:*?"<>|]/g, '')
-      .replace(/\s+/g, ' ')
-      .replace(/[.\s]+$/g, '')
-      .trim() || mt('app.unnamed')
-  )
+  return sanitizePathPart(s) || mt('app.unnamed')
 }
 
 /** 录制文件名: 主播名(主播ID)_直播标题(可选,截40)_时间戳; 非法字符直接剔除 */
@@ -49,28 +45,64 @@ function buildBaseName(nick: string, userId: string, title: string): string {
   return t ? `${n}(${userId})_${t}_${tsName()}` : `${n}(${userId})_${tsName()}`
 }
 
-/** 无损合并多个分段为单个 MP4(concat demuxer, -c copy 不重编码); 临时 list 文件随用随删 */
+/** 分段形态后缀(_0001 / _vod + .mp4|.ts): 只有带它的文件才是"一段", 整文件不带 */
+const SEG_RE = /_(\d{4}|vod)\.(mp4|ts)$/i
+
+/** 从在管文件表反推录制基名: 必须挑"分段形态"的那个。合并产物 `<基名>.mp4` 排序天然在 `_0001` 之前,
+ *  用它反推会多吞一层扩展名(基名变成 `X.mp4`), 于是基名扫描再也扫不到真分段 ——
+ *  mergeTask 把成品喂进自己的 concat 输入表, 对账把在盘分段从库里抹掉 */
+function baseOf(list: string[]): string {
+  const seg = list.find((f) => SEG_RE.test(f))
+  if (seg) return path.basename(seg).replace(SEG_RE, '')
+  return path.basename(list[0] || '').replace(/\.(mp4|ts)$/i, '')
+}
+
+/** 无损合并多个分段为单个 MP4(concat demuxer, -c copy 不重编码); 临时 list 文件随用随删
+ *  产物先落 <out>.part, ffmpeg 退出码 0 才改名就位 —— 半截 MP4 永远不进库 */
 function concatSegments(files: string[], outPath: string): Promise<boolean> {
   const listFile = outPath + '.concat.txt'
+  const part = `${outPath}.part`
   try {
-    // concat list 对 Windows 反斜杠/单引号敏感: 统一正斜杠 + 单引号转义
-    const esc = (s: string): string => s.replace(/\\/g, '/').replace(/'/g, "'\\''")
+    // concat demuxer 的词法是"文件名整体在单引号里", 不是 shell: 内部单引号只能写 \' 。
+    // 原来套 shell 的 '\'' 惯用法, ffmpeg 会把结尾那串裸单引号当文件名的一部分读, 主播/标题带 ' 时合并必炸
+    const esc = (s: string): string => s.replace(/\\/g, '/').replace(/'/g, "\\'")
     fs.writeFileSync(listFile, files.map((f) => `file '${esc(f)}'`).join('\n'), 'utf-8')
   } catch {
     return Promise.resolve(false)
   }
   return new Promise((resolve) => {
-    const done = (ok: boolean): void => {
-      try {
-        fs.unlinkSync(listFile)
-      } catch {
-        /* ignore */
+    const cleanup = (): void => {
+      for (const f of [listFile, part]) {
+        try {
+          fs.unlinkSync(f)
+        } catch {
+          /* ignore */
+        }
       }
-      resolve(ok)
+    }
+    const done = (ok: boolean): void => {
+      if (ok) {
+        // Windows: rename 不覆盖已存在目标(重跑/上次产物在), 先去再改名
+        try {
+          fs.rmSync(outPath, { force: true })
+          fs.renameSync(part, outPath)
+          try {
+            fs.unlinkSync(listFile)
+          } catch {
+            /* ignore */
+          }
+          resolve(true)
+          return
+        } catch (e) {
+          logger.warn('rec', `合并产物就位失败(${path.basename(outPath)}): ${String((e as Error).message || e)}`)
+        }
+      }
+      cleanup()
+      resolve(false)
     }
     const ff = spawn(
       ffmpegPath(),
-      ['-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', '-movflags', '+faststart', outPath],
+      ['-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', '-movflags', '+faststart', '-f', 'mp4', part],
       { stdio: ['ignore', 'ignore', 'ignore'], windowsHide: true }
     )
     ff.on('exit', (code) => done(code === 0))
@@ -461,20 +493,23 @@ class Task implements RecTask {
       // 录制出错(源死/中断): 立即作废该主播的源缓存, 避免下次重录复用尸源
       sourceFor(this.platform).invalidatePlay(this.userId)
     }
-    store.addHistory(Recorder.publicTask(this))
+    // 零产物不入库: 拉源阶段就停止/失败时磁盘上一个文件都没有, 而这条空骨架会被对账永久放过
+    // (reconcileItem 只能对"列在管的文件"做实况比对, 空集无从对账) → 库里留下一条永远打不开的空条目
+    if (this.files.length) store.addHistory(Recorder.publicTask(this))
+    else logger.info('rec', `零分段结束(${status}), 不写历史: ${this.nick}(@${this.userId})`)
     recorder.removeTask(this.platform, this.userId)
     this.push()
     // 后台生成视频库九宫格缩略图(串行队列, 不阻塞收尾)
-    thumbs.enqueue(this.id)
+    if (this.files.length) thumbs.enqueue(this.id)
 
     if (status === 'done')
       sendToast(
-        { type: 'rec', title: mt('rec.toastDone', { nick: this.nick }), body: mt('rec.segs', { n: this.files.length }) },
+        { type: 'rec', platform: this.platform, title: mt('rec.toastDone', { nick: this.nick }), body: mt('rec.segs', { n: this.files.length }) },
         { ev: 'recDone', ctx: { anchor: tgAnchorOf(this), recSec: Math.round(((this.endedAt ?? Date.now()) - this.startedAt) / 1000), recMb: this.bytes / 1024 ** 2, files: this.files } }
       )
     if (status === 'error')
       sendToast(
-        { type: 'error', title: mt('rec.toastErr', { nick: this.nick }), body: this.error.slice(0, 120) },
+        { type: 'error', platform: this.platform, title: mt('rec.toastErr', { nick: this.nick }), body: this.error.slice(0, 120) },
         { ev: 'recError', ctx: { anchor: tgAnchorOf(this), recSec: Math.round(((this.endedAt ?? Date.now()) - this.startedAt) / 1000), recMb: this.bytes / 1024 ** 2, files: this.files, detail: this.error || failKind } }
       )
 
@@ -489,16 +524,40 @@ class Task implements RecTask {
     }
   }
 
+  /** TS→MP4 无损 remux: 产物先落 <mp4>.part, 退出码 0 才改名就位。
+   *  直写目标时 ffmpeg 一旦失败(分段截断/尾部坏包)会留下半截 MP4: 它被 statFiles 收进 files 入库,
+   *  还会作为"已有 MP4"喂给后续合并 —— 坏包混进合并池后若合并"成功", 好分段按设置被删, 数据真丢 */
   private async remux(tsFile: string): Promise<boolean> {
     const mp4 = tsFile.replace(/\.ts$/, '.mp4')
-    return new Promise((resolve) => {
-      const ff = spawn(ffmpegPath(), ['-y', '-i', tsFile, '-c', 'copy', '-movflags', '+faststart', mp4], {
+    const part = `${mp4}.part`
+    const ok = await new Promise<boolean>((resolve) => {
+      // -f mp4 不能省: ffmpeg 按输出扩展名选封装器, 而原子产物刻意叫 <mp4>.part —— 不点名格式
+      // 它直接 "Unable to choose an output format" 非零退出, 每一次转码都静默失败在起跑线上
+      const ff = spawn(ffmpegPath(), ['-y', '-i', tsFile, '-c', 'copy', '-movflags', '+faststart', '-f', 'mp4', part], {
         stdio: ['ignore', 'ignore', 'ignore'],
         windowsHide: true
       })
       ff.on('exit', (code) => resolve(code === 0))
       ff.on('error', () => resolve(false))
     })
+    if (ok) {
+      try {
+        // Windows: rename 不覆盖已存在目标(上次留下的同名 MP4), 先去再改名
+        fs.rmSync(mp4, { force: true })
+        fs.renameSync(part, mp4)
+        return true
+      } catch (e) {
+        logger.warn('rec', `remux 产物就位失败(${path.basename(mp4)}): ${String((e as Error).message || e)}`)
+      }
+    } else {
+      logger.warn('rec', `remux 失败(ffmpeg 非零退出), 已保留原分段: ${path.basename(tsFile)}`)
+    }
+    try {
+      fs.unlinkSync(part)
+    } catch {
+      /* ignore */
+    }
+    return false
   }
 }
 
@@ -539,7 +598,7 @@ class Recorder {
     if (diskFreeGb(dir) < cfg.diskLimitGb) {
       const err = new Error(mt('rec.diskLow', { limit: cfg.diskLimitGb }))
       // 手动路径由 IPC 报错回传视图 message 反馈(单通道统一); 自动路径无人代答, 仍走事件气泡
-      if (opt.auto) sendToast({ type: 'error', title: mt('rec.failToast'), body: String(err.message) }, { ev: 'recError', ctx: { detail: String(err.message) } })
+      if (opt.auto) sendToast({ type: 'error', platform: opt.platform, title: mt('rec.failToast'), body: String(err.message) }, { ev: 'recError', ctx: { detail: String(err.message) } })
       throw err
     }
     const task = new Task(opt, dir)
@@ -559,13 +618,13 @@ class Recorder {
       logger.warn('rec', `录制启动失败: ${opt.nick}(@${opt.userId})${opt.auto ? ' [自动]' : ''}: ${String((e as Error).message || e)}`)
       if (opt.auto)
         sendToast(
-          { type: 'error', title: mt('rec.toastStartFail', { nick: opt.nick }), body: String((e as Error).message || e) },
+          { type: 'error', platform: opt.platform, title: mt('rec.toastStartFail', { nick: opt.nick }), body: String((e as Error).message || e) },
           { ev: 'recError', ctx: { anchor: { platform: opt.platform, userId: opt.userId, nick: opt.nick, title: opt.title } as unknown as Anchor, detail: String((e as Error).message || e) } }
         )
       throw e
     }
     // 手动开始: 视图已弹"开始录制"message, 不重复; 自动开始(开播自录/续录): 事件气泡通知到位
-    if (opt.auto) sendToast({ type: 'rec', title: mt('rec.toastStart', { nick: opt.nick }), body: opt.title || '' }, { ev: 'recStart', ctx: { anchor: store.listAnchors().find((x) => x.platform === opt.platform && x.userId === opt.userId) ?? null } })
+    if (opt.auto) sendToast({ type: 'rec', platform: opt.platform, title: mt('rec.toastStart', { nick: opt.nick }), body: opt.title || '' }, { ev: 'recStart', ctx: { anchor: store.listAnchors().find((x) => x.platform === opt.platform && x.userId === opt.userId) ?? null } })
     this.emitUpdate()
     return Recorder.publicTask(task)
   }
@@ -588,9 +647,9 @@ class Recorder {
   }
 
   // ---- 源失效自动续录(设置 autoRetryRecord 开启才生效) ----
-  // 健康判定: 上个任务活满 10 分钟才死 → 视为新一轮失败, 连续计数清白; 快速连续死 → 计满 3 次停手
+  // 健康判定: 上个任务活满 10 分钟才死 → 视为新一轮失败, 连续计数清白; 快速连续死 → 计满 REC_RETRY_MAX 次停手
+  // 上限是共享契约常量(渲染层播放页侧栏要如实显示同一个数), 健康窗口只有主进程用故留在这里
   private static HEALTHY_MS = 10 * 60 * 1000
-  private static MAX_RETRY = 3
   private retryStreak = new Map<string, number>()
   private shuttingDown = false
 
@@ -607,15 +666,15 @@ class Recorder {
     const key = roomKey(prev.platform, prev.userId)
     const healthy = Date.now() - prev.startedAt >= Recorder.HEALTHY_MS
     let streak = healthy ? 0 : this.retryStreak.get(key) || 0
-    if (streak >= Recorder.MAX_RETRY) {
+    if (streak >= REC_RETRY_MAX) {
       logger.warn('rec', `${prev.nick}(@${prev.userId}) 自动续录已连续失败 ${streak} 次, 停手(下个健康周期清白)`)
-      sendToast({ type: 'error', title: mt('rec.toastErr', { nick: prev.nick }), body: mt('rec.retryGiveUp', { n: streak }) }, { ev: 'recError', ctx: { anchor: store.listAnchors().find((x) => x.platform === prev.platform && x.userId === prev.userId) ?? null, detail: mt('rec.retryGiveUp', { n: streak }) } })
+      sendToast({ type: 'error', platform: prev.platform, title: mt('rec.toastErr', { nick: prev.nick }), body: mt('rec.retryGiveUp', { n: streak }) }, { ev: 'recError', ctx: { anchor: store.listAnchors().find((x) => x.platform === prev.platform && x.userId === prev.userId) ?? null, detail: mt('rec.retryGiveUp', { n: streak }) } })
       return
     }
     streak += 1
     this.retryStreak.set(key, streak)
     logger.warn('rec', `${prev.nick}(@${prev.userId}) 源失效(${failKind}), 自动续录第 ${streak} 次`)
-    sendToast({ type: 'info', title: mt('rec.toastStart', { nick: prev.nick }), body: mt('rec.retryResume', { n: streak }) }, { ev: 'recStart', ctx: { anchor: store.listAnchors().find((x) => x.platform === prev.platform && x.userId === prev.userId) ?? null, detail: mt('rec.retryResume', { n: streak }) } })
+    sendToast({ type: 'info', platform: prev.platform, title: mt('rec.toastStart', { nick: prev.nick }), body: mt('rec.retryResume', { n: streak }) }, { ev: 'recStart', ctx: { anchor: store.listAnchors().find((x) => x.platform === prev.platform && x.userId === prev.userId) ?? null, detail: mt('rec.retryResume', { n: streak }) } })
     // finalize(error) 已 invalidatePlay: 新任务必换新签名源 —— 这正是续录要解决的问题
     void this.start({ platform: prev.platform, userId: prev.userId, nick: prev.nick, title: prev.title, password: prev.password, auto: true }).catch(() => {
       // start 失败已弹"启动失败"气泡; streak 保留, 待下个健康周期清白
@@ -624,7 +683,7 @@ class Recorder {
 
   /**
    * 手动合并某个历史任务的分段(MP4 ≥2 优先, 否则 TS ≥2 直接 concat 出 MP4)
-   * 幂等: 已存在整文件时直接刷新历史并返回成功; 受「合并后删除分段」设置约束
+   * 幂等: 已存在且"非空 + 不早于任一分段"的整文件才直接返回成功; 坏/过期文件会重做。受「合并后删除分段」设置约束
    */
   async mergeTask(taskId: string): Promise<{ ok: boolean; files?: string[]; error?: string }> {
     const item = store.listHistory().find((h) => h.id === taskId)
@@ -632,24 +691,45 @@ class Recorder {
     const dir = item.dirPath
     if (!dir || !fs.existsSync(dir)) return { ok: false, error: mt('rec.mergeNoDir') }
 
-    // 只合并现存文件(外部删段不死在 concat 里)
+    // 只合并现存文件(外部删段不死在 concat 里), 且只有"分段形态"文件能进 concat 输入表(见 baseOf)
     const existing = (item.files || []).filter((f) => fs.existsSync(f))
-    const mp4s = existing.filter((f) => f.toLowerCase().endsWith('.mp4')).sort()
-    const tss = existing.filter((f) => f.toLowerCase().endsWith('.ts')).sort()
-    const first = mp4s[0] || tss[0]
-    if (!first) return { ok: false, error: mt('rec.mergeNoFiles') }
-    const base = path.basename(first).replace(/_(\d{4}|vod)\.(mp4|ts)$/i, '')
+    const segFiles = existing.filter((f) => SEG_RE.test(f))
+    const mp4s = segFiles.filter((f) => f.toLowerCase().endsWith('.mp4')).sort()
+    const tss = segFiles.filter((f) => f.toLowerCase().endsWith('.ts')).sort()
+    if (!mp4s.length && !tss.length) return { ok: false, error: existing.length ? mt('rec.mergeFew') : mt('rec.mergeNoFiles') }
+    const base = baseOf(existing)
     const out = path.join(dir, `${base}.mp4`)
 
     const refresh = (): { files: string[]; bytes: number } => scanTaskMedia(dir, base)
+    const segs = mp4s.length >= 2 ? mp4s : tss
 
     if (fs.existsSync(out)) {
-      const r = refresh()
-      store.updateHistory(taskId, { files: r.files, bytes: r.bytes })
-      thumbs.enqueue(taskId)
-      return { ok: true, files: r.files }
+      // 幂等命中必须先验这个整文件"非空且不早于任一分段": 零字节 = 上次合并被腰斩,
+      // 比最新分段旧 = 合并后又续录过. 直接返回成功等于把坏文件和缺尾的成品一起交出去, 且永不重做
+      let wholeSize = 0
+      let wholeMtime = 0
+      try {
+        const st = fs.statSync(out)
+        wholeSize = st.size
+        wholeMtime = st.mtimeMs
+      } catch {
+        /* ignore */
+      }
+      const stale = segs.some((f) => {
+        try {
+          return fs.statSync(f).mtimeMs > wholeMtime
+        } catch {
+          return false
+        }
+      })
+      if (wholeSize > 0 && !stale) {
+        const r = refresh()
+        store.updateHistory(taskId, { files: r.files, bytes: r.bytes })
+        thumbs.enqueue(taskId)
+        return { ok: true, files: r.files }
+      }
+      logger.warn('rec', `既有整文件不可用(大小=${wholeSize}B, 分段更新=${stale}), 重新合并: ${item.nick}(@${item.userId})`)
     }
-    const segs = mp4s.length >= 2 ? mp4s : tss
     if (segs.length < 2) return { ok: false, error: mt('rec.mergeFew') }
 
     logger.info('rec', `手动合并开始: ${item.nick}(@${item.userId}) ${segs.length} 段`)
@@ -702,7 +782,22 @@ class Recorder {
     const dir = item.dirPath
     if (!dir) return 'same'
     const listed = (item.files || []).filter((f) => /\.(mp4|ts)$/i.test(f))
-    if (!listed.length) return 'same' // 条目本就是空集: 没在管的文件, 无从对账
+    if (!listed.length) {
+      // 空集条目(修复前留下的历史): 没有在管文件可对账, 但"目录里一个媒体都没有"就是骨架, 清掉。
+      // 目录里还有别的会话的媒体时保守保留 —— 空条目无权认领别人的文件
+      if (!fs.existsSync(dir)) {
+        if (this.diskGone(dir)) return 'same'
+        thumbs.remove(item.id)
+        store.removeHistory(item.id)
+        logger.info('rec', `对账移除(空条目 + 目录已删): ${item.nick}(@${item.userId})`)
+        return 'dropped'
+      }
+      if (fs.readdirSync(dir).some((n) => /\.(mp4|ts)$/i.test(n))) return 'same'
+      thumbs.remove(item.id)
+      store.removeHistory(item.id)
+      logger.info('rec', `对账移除(空条目): ${item.nick}(@${item.userId})`)
+      return 'dropped'
+    }
     if (!fs.existsSync(dir)) {
       // 目录不存在: 盘拔掉则保守保留; 盘在而目录没了 = 被删 → 移除条目
       if (this.diskGone(dir)) return 'same'
@@ -711,7 +806,7 @@ class Recorder {
       logger.info('rec', `对账移除(目录已删): ${item.nick}(@${item.userId})`)
       return 'dropped'
     }
-    const base = path.basename(listed[0]).replace(/_(\d{4}|vod)\.(mp4|ts)$/i, '')
+    const base = baseOf(listed)
     const { files: scanned, bytes } = scanTaskMedia(dir, base)
     if (scanned.length) {
       // listed 来自录制期已排序 statFiles, 但历史库里可能有旧/手工数据, 用集合比对稳妥

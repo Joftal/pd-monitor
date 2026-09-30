@@ -6,6 +6,14 @@ export type Platform = 'pandalive' | 'soop'
 /** 裸 ID / 历史库数据的默认归属平台 */
 export const DEFAULT_PLATFORM: Platform = 'pandalive'
 
+/** 源失效自动续录的连续失败上限(超过即停手, 等下个健康周期清白)。
+ *  放在共享契约里而不是 recorder 私有常量: 播放页侧栏要如实显示这个数字,
+ *  渲染层抄一份字面量必然与真实值漂移(设计稿 S5「失效自动续录 · 连续上限 N 次」)。 */
+export const REC_RETRY_MAX = 3
+
+/** 启动默认工作区(D5): remember=落在上次离开的那一页, 其余为恒定进入指定平台 */
+export type WorkspacePref = 'remember' | Platform
+
 export function isPlatform(v: unknown): v is Platform {
   return v === 'pandalive' || v === 'soop'
 }
@@ -17,11 +25,37 @@ export function roomKey(platform: Platform, userId: string): string {
   return `${platform}:${userId}`
 }
 
+/** 平台徽标/正文统一称谓(设计稿 5.2): 顶栏、卡片、播放页、设置页共用一枚名字,
+ *  避免各处 ternary 各写各的(曾经 Panda/pandalive/潘达 三种叫法同时在线)。 */
+export function platformName(platform: Platform): string {
+  return platform === 'soop' ? 'SOOP' : 'Panda'
+}
+
 /** 房间地址唯一出口(卡片跳转 / 在浏览器打开 / TG 推送都从这里取, 勿再各写各的域名) */
 export function roomUrl(platform: Platform, userId: string): string {
   return platform === 'soop'
     ? `https://play.sooplive.com/${userId}`
     : `https://www.pandalive.co.kr/play/${userId}`
+}
+
+/** 房间 ID 的合法形态(主进程 IPC 入参校验与用户输入解析共用同一把尺):
+ *  它参与 roomKey 主键, 并被**裸拼进落盘目录名**(`<根>/<平台>/<主播名>(<userId>)`), 所以
+ *  路径分隔符、Windows 保留字符、控制字符、`..` 一律拒绝; 上限 80 给整条路径留余量(Windows 260 截断)。
+ *  parseRoomInput 的产物是 [\w-]+, 历史库里的登录名/频道名不会超出 [\w.-], 正常调用不会被误杀。 */
+export function isRoomId(v: unknown): v is string {
+  if (typeof v !== 'string' || !v || v.length > 80) return false
+  return /^[\w.-]+$/.test(v) && !v.includes('..') && !/[.\s]$/.test(v)
+}
+
+/** 路径片段清洗(录制目录/文件名用): 非法字符直接去除(不替换), 收拢空白, 去首尾点空格(NTFS 约束)。
+ *  空串由调用方给兜底词 —— 主进程兜底走 mt('app.unnamed'), 渲染层兜底走自己的文案, 语义一致。
+ *  放共享层是因为播放页侧栏要如实显示本房间的录制目录: 渲染层抄一份正则必然与真实落盘名漂移。 */
+export function sanitizePathPart(s: string): string {
+  return String(s || '')
+    .replace(/[\\/:*?"<>|%]/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/[.\s]+$/g, '')
+    .trim()
 }
 
 /** 用户输入(裸 ID 或任意房间链接)→ 主键。平台按域名判定, 裸 ID 归 fallback。
@@ -45,7 +79,8 @@ export function parseRoomInput(raw: string, fallback: Platform = DEFAULT_PLATFOR
   // 纯数字只会是 SOOP 的场次号(或误粘的数字), 不可能是任一平台的登录名
   if (isUrl && /^\d+$/.test(cand)) return null
   const userId = cand.replace(/[^\w-]/g, '')
-  return userId ? { platform, userId } : null
+  // 与主进程 IPC 校验(roomErr)同一把尺: 不可寻址的输入根本不入库, 免得存进去再被拒
+  return isRoomId(userId) ? { platform, userId } : null
 }
 
 export interface AnchorTag {
@@ -73,6 +108,14 @@ export interface Anchor {
   autoRecord: boolean
   addedAt: number
   lastSeenAt: number
+  /** 上一次「我们亲眼见到他在播」的开播时刻, KST 钟面串(与 startTime 同格式), 空串=从未见过开播。
+   *  与 lastSeenAt 语义不同: 后者是「最后一次拉到他」(每轮轮询都会刷新), 离线卡的「上次开播 / 未播 N 天」
+   *  必须用前者, 否则永远显示「今天」。Panda 在翻离线那一轮写 startTime, SOOP 直接取关注列表的 last_broad_start。 */
+  lastLiveAt: string
+  /** 「站内已取关 · 本地仍保留」(决策 D3): 只由「同步站内关注」的反向差值写入 —— 本次站内列表里没有、
+   *  本地却关注的房间标 true, 重新出现在站内列表即清掉。绝不据此自动删墙;
+   *  undefined(老库)= 从未同步过, 语义是"未知", 不得当成已取关展示 */
+  siteGone?: boolean
 }
 
 export type RecStatus = 'recording' | 'remuxing' | 'done' | 'stopped' | 'error'
@@ -111,6 +154,28 @@ export interface RecTask {
 
 export type RecHistoryItem = RecTask
 
+/** 通知事件域: 矩阵的行轴。live=开播(含粉丝房/房态变更), offline=下播, record=录制开始/完成/出错,
+ *  alert=异常与会话失效(熔断/整轮拉取失败/登录态作废)。开播与下播分行是现状(tgLive/tgOffline 各一开关),
+ *  合成一行会让"只想收开播"的人被下播刷屏。 */
+export type NotifyEvent = 'live' | 'offline' | 'record' | 'alert'
+/** 一格的两个通道: 系统通知 / Telegram 推送 */
+export interface NotifyRow {
+  system: boolean
+  telegram: boolean
+}
+/** 只有开播行有「声音」: 提示音的语义是"人在播", 挂到下播/录制/异常上就是改了没反应的假开关(设计稿 S6 判据) */
+export interface NotifyLiveRow extends NotifyRow {
+  sound: boolean
+}
+export interface NotifyRules {
+  live: NotifyLiveRow
+  offline: NotifyRow
+  record: NotifyRow
+  alert: NotifyRow
+}
+/** 按平台的通知矩阵(D4): 两平台混排后"只关一个平台"必须是能点出来的, 全局开关做不到 */
+export type NotifyMatrix = Record<Platform, NotifyRules>
+
 export interface Settings {
   savePath: string
   splitSeconds: number
@@ -120,9 +185,10 @@ export interface Settings {
   requestGapMs: number
   proxyUrl: string
   watchMode: 'list' | 'per-anchor'
-  notifySystem: boolean
-  notifySound: boolean
-  autoRecordDefault: boolean
+  /** 通知矩阵(平台 × 事件 × 通道), 取代旧的全局 notifySystem/notifySound + tg* 四开关 */
+  notify: NotifyMatrix
+  /** 新增关注时的「开播自动录制」初始值: 两平台的可用面不同(SOOP 有 19+/限区房), 各留一档 */
+  autoRecordDefault: Record<Platform, boolean>
   closeToTray: boolean
   diskLimitGb: number
   /** 开播即预取直播源(后台节流泵), 点进房间零等待 */
@@ -135,24 +201,21 @@ export interface Settings {
   mergeDeleteSegments: boolean
   /** 录制因源失效(停滞/中断)失败时自动重拉新源续录 —— 显式开启才生效(跨签名过期/跨天挂机场景); 每主播连续最多 3 次 */
   autoRetryRecord: boolean
-  /** Telegram 推送: 开播(含粉丝房) */
-  tgLive: boolean
-  /** Telegram 推送: 下播 */
-  tgOffline: boolean
-  /** Telegram 推送: 录制启动/完成 */
-  tgRecord: boolean
-  /** Telegram 推送: 错误(录制出错/熔断等) */
-  tgError: boolean
   /** Telegram chatId(@BotFather 建 bot 后用 getUpdates 或 /getChatId 获取) */
   tgChatId: string
   /** Telegram 专用代理(如 http://127.0.0.1:7890); 留空则跟随全局代理 */
   tgProxy: string
   /** bot token 是否已配置(真值存 secrets 保险箱, 此处仅投影供 UI 展示) */
   tgTokenSet: boolean
+  /** 机密保险箱(secrets.dat: bot token / SOOP 托管密码)当前是否真加密。
+   *  safeStorage 不可用或已落盘的那份是 plain 封装时为 false —— 仅主进程投影, 渲染层提交一律忽略 */
+  secretsEncrypted: boolean
   /** 界面主题: light(默认) | dark */
   theme: 'light' | 'dark'
   /** 界面语言 */
   locale: 'zh-CN' | 'en-US'
+  /** 启动默认工作区(D5): remember(默认)=上次离开的那一页 */
+  defaultWorkspace: WorkspacePref
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -164,9 +227,21 @@ export const DEFAULT_SETTINGS: Settings = {
   requestGapMs: 1200,
   proxyUrl: '',
   watchMode: 'list',
-  notifySystem: true,
-  notifySound: true,
-  autoRecordDefault: false,
+  notify: {
+    pandalive: {
+      live: { system: true, telegram: true, sound: true },
+      offline: { system: true, telegram: false },
+      record: { system: true, telegram: true },
+      alert: { system: true, telegram: true }
+    },
+    soop: {
+      live: { system: true, telegram: true, sound: true },
+      offline: { system: true, telegram: false },
+      record: { system: true, telegram: true },
+      alert: { system: true, telegram: true }
+    }
+  },
+  autoRecordDefault: { pandalive: false, soop: false },
   closeToTray: true,
   diskLimitGb: 1,
   prefetchStream: true,
@@ -174,15 +249,13 @@ export const DEFAULT_SETTINGS: Settings = {
   mergeMp4: false,
   mergeDeleteSegments: true,
   autoRetryRecord: false,
-  tgLive: true,
-  tgOffline: false,
-  tgRecord: true,
-  tgError: true,
   tgChatId: '',
   tgProxy: '',
   tgTokenSet: false,
+  secretsEncrypted: false,
   theme: 'light',
-  locale: 'zh-CN'
+  locale: 'zh-CN',
+  defaultWorkspace: 'remember'
 }
 
 export interface AccountState {
@@ -195,6 +268,9 @@ export interface AccountState {
   userIdx: number | null
   /** 官方校验请求本身失败(网络/风控): 与"服务端明确未登录"语义不同, 前端不得报成未登录 */
   netFail: boolean
+  /** 上次真实发出 login_info 的时刻(ms, 0=从未校验过): 账号页「上次校验 / 立即重新校验」用。
+   *  命中 30s 缓存时沿用缓存时刻 —— 那正是官方最后一次答复的时间, 不能刷新成"现在" */
+  lastVerifyAt: number
   encrypted: boolean
 }
 
@@ -211,11 +287,39 @@ export interface SoopAccountState {
   nick: string
   /** 已托管的账密自动重登账号(仅用户名; 密码不出主进程) */
   credentialUser: string
+  /** 上次真实发出 get_private_info 的时刻(ms, 0=从未): 与 Panda 侧同义, 缓存命中时沿用缓存时刻 */
+  lastVerifyAt: number
 }
 
 export interface AccountStates {
   pandalive: AccountState
   soop: SoopAccountState
+}
+
+/** 「导入站内关注」回执(两平台共用): total=站内关注总数, added=本次新增(已在库的只跳过),
+ *  siteGone=本次新标为「站内已取关」的本地房间数(D3: 只标注, 不删除) */
+export interface FollowImportResult {
+  total: number
+  added: number
+  siteGone: number
+}
+
+/** 单平台轮询态: 一级导航按平台分家后, 每个工作区必须能读到"自己"的健康状况 ——
+ *  合并口径会让 Panda 冷却期里 SOOP 的正常轮询被读成"挂了", 反之 SOOP 整轮全灭也被 Panda 的健康态盖掉 */
+export interface PlatformStatus {
+  running: boolean
+  lastRoundAt: number | null
+  /** 本平台本轮耗时(ms): Panda 全站在播列表翻页与 SOOP 一发关注列表的量级差一个数量级, 合并显示没有意义 */
+  roundMs: number
+  monitored: number
+  liveFound: number
+  /** 仅 Panda 有熔断语义(串行队列撞风控); SOOP 恒 false */
+  circuitOpen: boolean
+  /** 本轮"读不到状态"的房间数: 只有回落到逐房探针的那些会计数, 列表整表覆盖时恒 0。
+   *  部分失败既不该报成失明(那是 soopDown 的口径), 也不该报成一切正常(设计稿 7.2) */
+  roundFailed: number
+  /** 本平台自己的异常正文, 空串=健康; 不再与另一平台抢同一个字段 */
+  message: string
 }
 
 export interface WatcherStatus {
@@ -228,6 +332,7 @@ export interface WatcherStatus {
   liveFound: number
   circuitOpen: boolean
   message: string
+  byPlatform: Record<Platform, PlatformStatus>
 }
 
 export interface PlayInfo {
@@ -289,6 +394,8 @@ export interface DiscoveryItem {
 
 export interface Toast {
   type: 'live' | 'fanLive' | 'roomChange' | 'offline' | 'rec' | 'error' | 'info' | 'session'
+  /** 事件归属平台: 通知矩阵按它决定系统通知/推送/提示音三路是否出条(设计稿 D4) */
+  platform: Platform
   title: string
   body: string
 }
@@ -339,6 +446,8 @@ export interface RecDeleteFileResult {
 export interface ApiBridge {
   /** 两套登录态一次给全: 顶栏双头像与账号页共用同一份事实源 */
   authState(): Promise<AccountStates>
+  /** 绕过结果缓存、立即向官方重发一次登录态校验(账号页「立即重新校验」, 用户点击驱动, 非轮询) */
+  authRecheck(platform: Platform): Promise<AccountStates>
   authOpenWindow(platform: Platform): Promise<{ ok: boolean; message: string }>
   authImportCookies(cookieStr: string, platform: Platform): Promise<{ ok: boolean; message: string }>
   authLogout(platform: Platform): Promise<boolean>
@@ -348,6 +457,10 @@ export interface ApiBridge {
   /** platform 省略时由输入形态推断(带域名按域名, 裸 ID 归默认平台) */
   anchorsAdd(input: string, platform?: Platform): Promise<Anchor>
   anchorsRemove(platform: Platform, userId: string): Promise<boolean>
+  /** 把站内 SOOP 关注全量导入本地库(含离线房; 已在库跳过, autoRecord 恒为关) */
+  anchorsImportSoop(): Promise<FollowImportResult>
+  /** 把站内 Panda 关注(북마크, 官方上限 200)全量导入本地库; 落库语义与 SOOP 导入一致 */
+  anchorsImportPanda(): Promise<FollowImportResult>
   anchorsSetAuto(platform: Platform, userId: string, auto: boolean): Promise<boolean>
   anchorsRefresh(): Promise<boolean>
   livePlay(platform: Platform, userId: string, password?: string, fresh?: boolean): Promise<PlayInfo>
@@ -396,12 +509,15 @@ export interface ApiBridge {
 // ---------- IPC invoke 通道 ----------
 export const CH = {
   authState: 'auth:state',
+  authRecheck: 'auth:recheck',
   authOpenWindow: 'auth:open-window',
   authImportCookies: 'auth:import-cookies',
   authLogout: 'auth:logout',
   authSaveSoopCredentials: 'auth:save-soop-credentials',
   anchorsList: 'anchors:list',
   anchorsAdd: 'anchors:add',
+  anchorsImportSoop: 'anchors:import-soop',
+  anchorsImportPanda: 'anchors:import-panda',
   anchorsRemove: 'anchors:remove',
   anchorsSetAuto: 'anchors:set-auto',
   anchorsRefresh: 'anchors:refresh',

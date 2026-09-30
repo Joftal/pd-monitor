@@ -1,5 +1,6 @@
 import { session } from 'electron'
 import { createServer, type IncomingMessage, type ServerResponse } from 'http'
+import { randomBytes } from 'crypto'
 import { logger } from './logger'
 
 // ============ 本地 HLS 过滤代理 ============
@@ -8,6 +9,8 @@ import { logger } from './logger'
 //   2. 尾部可能挂 name 含 preloading 的预载分段, 内容尚未写完, 取到就是半截 TS(实测偶发, 不代表常态)。
 // 因此所有 SOOP 流统一走 127.0.0.1 的一层本地代理: 播放清单在本地重写并把分段收进 /media,
 // 上游请求头由本模块注入。用户看到的"播放源"是代理地址, 复制到外部播放器会失效(设计上已说明)。
+// 访问面三道闸: 只绑回环 + 目标 origin 必须是本代理签发过的(表有上限、按活跃度淘汰)
+// + 每个 URL 带一次性令牌(?t=, 仅 playlistUrl / 清单重写产出的地址里有)。
 // ==========================================
 
 /** 伴随标签: 过滤预载分段时要连同它们一起丢弃, 否则留下"有 EXTINF 无 URI"的非法清单 */
@@ -88,8 +91,14 @@ export class HlsProxy {
   private server = createServer((req, res) => void this.handle(req, res))
   private port = 0
   /** 本代理签发过的上游 origin。代理会替请求附上 SOOP 登录 Cookie, 目标地址绝不能由请求方任意指定:
-   *  只放行自家签发过的地址(playlistUrl + 清单重写时逐条登记), 本机其它进程/网页便无法把它当开放代理用 */
-  private readonly allowedOrigins = new Set<string>()
+   *  只放行自家签发过的地址(playlistUrl + 清单重写时逐条登记), 本机其它进程/网页便无法把它当开放代理用
+   *  Map 记"最后一次被签发的时刻"而不是 Set: 长跑挂机每轮换 CDN 会让这张表只增不减, 面越铺越宽 */
+  private readonly allowedOrigins = new Map<string, number>()
+  /** 同时保活的签发 origin 上限: SOOP 一场直播只用 1~2 个 CDN, 32 已远超需要, 超出按最久未签发淘汰 */
+  private static readonly MAX_ORIGINS = 32
+  /** 每次请求必须带的令牌: 端口是回环随机口, 但本机任意进程都能扫到它并借它带着用户 Cookie 出网。
+   *  令牌只出现在本代理自己签发的 playlistUrl / mediaUrl 里, 第三方构造不出可用地址 */
+  private readonly token = randomBytes(16).toString('hex')
 
   constructor(private readonly opts: HlsProxyOptions) {
     // ffmpeg/hls.js 会复用长连接取分段: 服务端一旦主动掐掉空闲 keep-alive, 下一发请求就是连接重置。
@@ -99,7 +108,7 @@ export class HlsProxy {
     this.server.headersTimeout = 0
   }
 
-  /** 绑定随机空闲端口; 失败即抛, 调用方据此回落上游直连 */
+  /** 绑定随机空闲端口; 失败即抛, 调用方据此判定取流失败(soop.ts 不做直连回落) */
   listen(): Promise<void> {
     if (this.port) return Promise.resolve()
     return new Promise((resolve, reject) => {
@@ -108,6 +117,8 @@ export class HlsProxy {
       this.server.listen(0, '127.0.0.1', () => {
         const addr = this.server.address()
         this.port = typeof addr === 'object' && addr ? addr.port : 0
+        // once(reject) 已自我摘除: 运行期再来的 'error' 若无人接管就是未捕获异常, 这里补一个常驻出口
+        this.server.on('error', (e) => logger.warn('hls', `HLS 代理运行期错误: ${String((e as Error).message || e)}`))
         logger.info('hls', `SOOP HLS 代理已启动: 127.0.0.1:${this.port}`)
         resolve()
       })
@@ -117,12 +128,23 @@ export class HlsProxy {
   /** 播放清单入口: 上游 m3u8 经本地重写后回给播放器/ffmpeg */
   playlistUrl(upstream: string): string {
     this.allowTarget(upstream)
-    return `http://127.0.0.1:${this.port}/playlist.m3u8?url=${encodeURIComponent(upstream)}`
+    return `http://127.0.0.1:${this.port}/playlist.m3u8?t=${this.token}&url=${encodeURIComponent(upstream)}`
   }
 
   private allowTarget(raw: string): void {
     try {
-      this.allowedOrigins.add(new URL(raw).origin)
+      const origin = new URL(raw).origin
+      // 重复签发 = 刷新时效(活跃 CDN 永不被淘汰), 新 origin 超上限时淘汰最久未签发的那个
+      this.allowedOrigins.set(origin, Date.now())
+      if (this.allowedOrigins.size > HlsProxy.MAX_ORIGINS) {
+        let oldest = ''
+        let at = Infinity
+        for (const [o, t] of this.allowedOrigins) if (t < at && o !== origin) ((at = t), (oldest = o))
+        if (oldest) {
+          this.allowedOrigins.delete(oldest)
+          logger.info('hls', `签发 origin 表已满(${HlsProxy.MAX_ORIGINS}), 淘汰最久未用: ${oldest}`)
+        }
+      }
     } catch {
       /* 非法地址: 不登记, handle() 里也一律拒 */
     }
@@ -131,7 +153,7 @@ export class HlsProxy {
   /** 分段/EXT-X-MAP 的本地地址: 顺带放行其 origin —— 清单里指向哪个 CDN, 下一次 /media 才取得到 */
   private mediaUrlOf = (abs: string): string => {
     this.allowTarget(abs)
-    return `http://127.0.0.1:${this.port}/media?url=${encodeURIComponent(abs)}`
+    return `http://127.0.0.1:${this.port}/media?t=${this.token}&url=${encodeURIComponent(abs)}`
   }
 
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -140,6 +162,12 @@ export class HlsProxy {
       if (u.pathname !== '/playlist.m3u8' && u.pathname !== '/media') {
         res.writeHead(404, { 'Access-Control-Allow-Origin': '*' })
         res.end('not found')
+        return
+      }
+      // 令牌先于一切校验: 少这一道, 本机任何进程扫到端口就能借用户 Cookie 拉任意已签发 origin
+      if (u.searchParams.get('t') !== this.token) {
+        res.writeHead(403, { 'Access-Control-Allow-Origin': '*' })
+        res.end('bad token')
         return
       }
       const raw = u.searchParams.get('url') || ''

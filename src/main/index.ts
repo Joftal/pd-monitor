@@ -71,8 +71,8 @@ function createWindow(): void {
     frame: false,
     show: false,
     // 启动窗口底色跟随主题, 避免加载瞬间主题不符的闪屏
-    backgroundColor: cfg.theme === 'dark' ? '#181818' : '#f1f2f3',
-    title: 'PandaLive Monitor',
+    backgroundColor: cfg.theme === 'dark' ? '#14161a' : '#f4f5f7',
+    title: 'SODALive Monitor',
     icon: path.join(__dirname, '../../resources/icon.png'),
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
@@ -124,7 +124,7 @@ function createTray(): void {
       icon = loadColored()
     }
     tray = new Tray(icon)
-    tray.setToolTip('PandaLive Monitor')
+    tray.setToolTip('SODALive Monitor')
     tray.setContextMenu(
       Menu.buildFromTemplate([
         { label: mt('tray.show'), click: () => (mainWin ? mainWin.show() : createWindow()) },
@@ -152,7 +152,7 @@ function createTray(): void {
 app.whenReady().then(() => {
   // 初始化服务
   logger.cleanup()
-  logger.info('app', `PandaLive Monitor v${app.getVersion()} 启动 (packaged=${app.isPackaged})`)
+  logger.info('app', `SODALive Monitor v${app.getVersion()} 启动 (packaged=${app.isPackaged})`)
   installMediaHandler()
   const cfg = store.getSettings()
   setMainLocale(cfg.locale)

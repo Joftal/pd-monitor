@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, net, session, shell } from 'electron'
 import * as path from 'path'
 import {
-  CH, EV, AccountState, AccountStates, Anchor, AppInfo, DEFAULT_PLATFORM, isPlatform, parseRoomInput, Platform, PlayInfo, Settings, SoopAccountState, UpdateCheckResult
+  CH, EV, AccountState, AccountStates, Anchor, AppInfo, DEFAULT_PLATFORM, FollowImportResult, isPlatform, isRoomId, parseRoomInput, Platform, PlayInfo, Settings, SoopAccountState, UpdateCheckResult
 } from '../shared/types'
 import { APP_META, cmpSemver } from '../shared/appmeta'
 import { api, SESSION_PARTITION, applyProxy, cachedSourceIdsAll } from './services/pandalive'
@@ -39,6 +39,7 @@ async function pandaAccount(): Promise<AccountState> {
     isAdult,
     userIdx,
     netFail,
+    lastVerifyAt: api.lastLoginCheckAt,
     encrypted: vault.encrypted
   }
   // 登录态核对留痕: 区分「本地没存住(cookie=0)」与「服务端判死(有cookie但未登录)」与「网络/风控误检(netFail)」
@@ -69,7 +70,8 @@ async function soopAccount(): Promise<SoopAccountState> {
     netFail: v.netFail,
     loginId: v.loginId,
     nick: v.nick,
-    credentialUser: cred.username
+    credentialUser: cred.username,
+    lastVerifyAt: soopApi.lastVerifyAt
   }
   logger.info(
     'auth',
@@ -81,7 +83,9 @@ async function soopAccount(): Promise<SoopAccountState> {
 }
 
 async function pushAccounts(): Promise<AccountStates> {
-  const states: AccountStates = { pandalive: await pandaAccount(), soop: await soopAccount() }
+  // 两平台并行取态: 各自打一次官方接口, 串行等于把最慢那一方的等待时间叠加一遍
+  const [pandalive, soop] = await Promise.all([pandaAccount(), soopAccount()])
+  const states: AccountStates = { pandalive, soop }
   const win = BrowserWindow.getAllWindows()[0]
   win?.webContents.send(EV.account, states)
   return states
@@ -105,9 +109,124 @@ async function importSoopCookies(cookieStr: string): Promise<{ ok: boolean; mess
   return { ok: true, message: mt('soop.importOk', { id: info.loginId }) }
 }
 
+/** 房间寻址入参的边界校验: 渲染层一旦被注入脚本/XSS, 这些字符串就是它唯一能递进主进程的载荷。
+ *  - 平台必须命中枚举: sourceFor 对未知值兜底成 Panda, 静默改写会把请求与 Cookie 落到另一方的账号上
+ *  - userId 见 isRoomId(与用户输入解析共用一把尺: 它参与主键, 又被裸拼进落盘目录名)
+ *  返回 null=通过, 否则为可直接显示给渲染层的错误串(调用方按各自返回形态消化, 不抛异常打断 UI) */
+function roomErr(platform: unknown, userId: unknown): string | null {
+  let err: string | null = null
+  if (!isPlatform(platform)) err = mt('ipc.badPlatform')
+  else if (!isRoomId(userId)) err = mt('ipc.badUserId')
+  if (err) logger.warn('ipc', `房间入参被拒(${platform}/${String(userId).slice(0, 40)}): ${err}`)
+  return err
+}
+
+/** 房间密码的入参收敛: 截 64 位并去控制字符。它会被拼进 SOOP 的 BPWD 查询串、也会进日志,
+ *  \r\n 放进去就是日志伪造/请求头注入口。合法密码(可见字符, 十几位)不受影响 */
+function safePwd(p: unknown): string {
+  return typeof p === 'string' ? p.slice(0, 64).replace(/[\u0000-\u001f\u007f]/g, '') : ''
+}
+
+/** 站内关注行的共用形状: SOOP 的 favorite 行与 Panda 的 bookmark 行都能结构匹配到这里 */
+interface FollowIn {
+  userId: string
+  userIdx?: number | null
+  nick: string
+  userImg?: string
+  isLive: boolean
+  /** 上一次开播时刻(KST 钟面): SOOP 关注列表带 last_broad_start, Panda 的 bookmark 行没有这个字段 */
+  lastStartTime?: string
+  live: {
+    title?: string
+    thumbUrl?: string
+    userImg?: string
+    startTime?: string
+    viewers?: number
+    likes?: number
+    fans?: number
+    isAdult?: boolean
+    isPw?: boolean
+    type?: string
+    liveType?: string
+  } | null
+}
+
+/** 站内关注 → 已关注页的共用落库语义(两平台一处规定):
+ *  只增不改不删(已在库的跳过, 不用列表值覆盖用户本地状态)、列表内重复只算一次、
+ *  autoRecord 恒为关(批量撞上 autoRecordDefault=true = 一次性给几十个在播房开自录,
+ *  磁盘与风控都是瞬时灾难)、整批只 flush 一次。
+ *  listComplete=false 时跳过 D3 反向差值: 站内列表被官方截断(북마크 上限 200)时
+ *  "本地有、列表没有"完全可能是翻页截断而非真取关, 宁可不标。 */
+async function importFollowRows(platform: Platform, rows: FollowIn[], listComplete = true): Promise<FollowImportResult> {
+  const cfg = store.getSettings()
+  const seen = new Set<string>()
+  let added = 0
+  for (const r of rows) {
+    if (seen.has(r.userId)) continue
+    seen.add(r.userId)
+    if (store.listAnchors().find((a) => a.platform === platform && a.userId === r.userId)) continue
+    const live = r.live
+    const anchor: Anchor = {
+      platform,
+      userId: r.userId,
+      userIdx: r.userIdx ?? null,
+      nick: r.nick || r.userId,
+      userImg: live?.userImg || r.userImg || '',
+      isLive: !!live,
+      title: live?.title || '',
+      tags: live ? { isAdult: !!live.isAdult, isPw: !!live.isPw, type: live.type || '', liveType: live.liveType || 'live' } : null,
+      startTime: live?.startTime || '',
+      viewerCount: live?.viewers || 0,
+      likes: live?.likes || 0,
+      fans: live?.fans || 0,
+      thumbUrl: live?.thumbUrl || '',
+      autoRecord: false,
+      addedAt: Date.now(),
+      lastSeenAt: Date.now(),
+      // 在播房的「上次开播」就是本场 startTime; 离线房取列表回包的 last_broad_start(仅 SOOP 有)
+      lastLiveAt: live?.startTime || r.lastStartTime || ''
+    }
+    store.addAnchor(anchor)
+    added++
+    if (anchor.isLive && cfg.prefetchStream) watcher.prewarmNow(platform, r.userId) // 限速泵逐发, 不会齐发
+  }
+  // D3 反向差值: 站内列表里没有、本地仍在墙上挂着的 → 标「站内已取关 · 本地仍保留」。
+  // 只写标注, 一个房间都不删(删墙是用户的决定); 重新被站内列表带回时清掉标注。
+  let siteGone = 0
+  if (listComplete) {
+    for (const a of store.listAnchors()) {
+      if (a.platform !== platform) continue
+      const gone = !seen.has(a.userId)
+      if (gone === !!a.siteGone) continue
+      store.updateAnchor(platform, a.userId, { siteGone: gone })
+      if (gone) siteGone++
+    }
+  }
+  store.flush()
+  logger.info(
+    platform === 'soop' ? 'soop' : 'api',
+    `关注导入: 站内 ${rows.length} 条, 新增 ${added} 条, 已在库跳过 ${rows.length - added} 条` +
+      (listComplete ? `, 本次标注站内已取关 ${siteGone} 条` : ', 列表被截断, 跳过已取关标注')
+  )
+  BrowserWindow.getAllWindows()[0]?.webContents.send(EV.anchors, store.listAnchors())
+  return { total: rows.length, added, siteGone }
+}
+
 export function registerIpc(): void {
   // ---------- 账号(两套登录态互不影响) ----------
   ipcMain.handle(CH.authState, () => pushAccounts())
+
+  // 账号页「立即重新校验」: 绕过 30s/2min 结果缓存真实打一次官方接口。
+  // 只在用户点击时发生, 不进轮询; 无会话时直接取态不发请求(匿名态压根没凭证可验)
+  ipcMain.handle(CH.authRecheck, async (_e, platform: Platform) => {
+    const plat = isPlatform(platform) ? platform : DEFAULT_PLATFORM
+    if (plat === 'soop') {
+      if (await soopApi.hasJarCookies()) await soopApi.verifyLogin(undefined, true)
+    } else if (api.hasSession()) {
+      await api.checkLoginInfo(undefined, true)
+    }
+    return pushAccounts()
+  })
 
   ipcMain.handle(CH.authOpenWindow, async (e, platform: Platform) => {
     const win = BrowserWindow.fromWebContents(e.sender)
@@ -258,9 +377,10 @@ export function registerIpc(): void {
       likes: disc?.likes || 0,
       fans: disc?.fans || 0,
       thumbUrl: disc?.thumbUrl || pageThumb,
-      autoRecord: cfg.autoRecordDefault,
+      autoRecord: cfg.autoRecordDefault[plat],
       addedAt: Date.now(),
-      lastSeenAt: disc ? Date.now() : 0
+      lastSeenAt: disc ? Date.now() : 0,
+      lastLiveAt: disc?.startTime || ''
     }
     store.addAnchor(anchor)
     watcher.unmarkGone(plat, userId) // 也可能是已修正的新 ID: 允许重新探活
@@ -277,7 +397,23 @@ export function registerIpc(): void {
     return anchor
   })
 
+  /** 「导入站内 SOOP 关注」: 一发关注列表全量落库(含离线房) */
+  ipcMain.handle(CH.anchorsImportSoop, async (): Promise<FollowImportResult> => {
+    const rows = await soopApi.fetchFavorites()
+    if (!rows) throw new Error(mt('soop.importFail'))
+    return importFollowRows('soop', rows)
+  })
+
+  /** 「导入站内 Panda 关注」: 북마크 列表(官方上限 200)全量落库, 与 SOOP 导入同语义。
+   *  取满 200 = 用户关注数触到官方上限, 列表可能不完整, 因此这一趟不做「站内已取关」差值 */
+  ipcMain.handle(CH.anchorsImportPanda, async (): Promise<FollowImportResult> => {
+    const rows = await api.fetchBookmarks()
+    if (!rows) throw new Error(mt('panda.importFail'))
+    return importFollowRows('pandalive', rows, rows.length < 200)
+  })
+
   ipcMain.handle(CH.anchorsRemove, async (_e, platform: Platform, userId: string) => {
+    if (roomErr(platform, userId)) return false
     // 先取关再停录: removeAnchor 先于 await 落库, watcher 的 stillMonitored 守卫立即生效 ——
     // 否则 stop 的慢窗口(remuxing 收尾最长达分钟级)内开播翻转会穿过守卫启动孤儿录制
     store.removeAnchor(platform, userId)
@@ -289,6 +425,7 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle(CH.anchorsSetAuto, (_e, platform: Platform, userId: string, auto: boolean) => {
+    if (roomErr(platform, userId)) return false
     store.updateAnchor(platform, userId, { autoRecord: auto })
     return true
   })
@@ -300,9 +437,11 @@ export function registerIpc(): void {
 
   // ---------- 播放 ----------
   ipcMain.handle(CH.livePlay, async (_e, platform: Platform, userId: string, password?: string, fresh?: boolean): Promise<PlayInfo> => {
+    const bad = roomErr(platform, userId)
+    if (bad) return { ok: false, error: bad }
     let r
     try {
-      r = await sourceFor(platform).getPlayCached(userId, password || '', !!fresh)
+      r = await sourceFor(platform).getPlayCached(userId, safePwd(password), !!fresh)
     } catch (e) {
       // 网络异常/风控(403/429 等)——必须回落为 ok:false, 否则前端永远停在"获取直播流…"
       return { ok: false, error: mt('ipc.playFail', { msg: (e as Error).message || String(e) }) }
@@ -335,7 +474,11 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle(CH.liveSrcCache, () => cachedSourceIdsAll())
-  ipcMain.handle(CH.liveKeepaliveStatus, (_e, platform: Platform, userId: string) => api.keepaliveStatus(platform, String(userId)))
+  ipcMain.handle(CH.liveKeepaliveStatus, (_e, platform: Platform, userId: string) => {
+    // 非法寻址不查保活表(api.keepaliveStatus 会按裸 userId 建条目), 回一个"没缓存"的中性投影
+    if (roomErr(platform, userId)) return { enabled: false, cached: false, lastAt: 0, lastOk: false, variants: 0 }
+    return api.keepaliveStatus(platform, String(userId))
+  })
 
   // ---------- 大厅 ----------
   ipcMain.handle(CH.discoveryList, () => watcher.getDiscovery())
@@ -349,6 +492,9 @@ export function registerIpc(): void {
   })
 
   ipcMain.handle(CH.recStart, async (_e, platform: Platform, userId: string, password?: string) => {
+    // 这是唯一会建目录、spawn ffmpeg 的入口: 裸 userId 直接进落盘路径, 校验必须发生在拼路径之前
+    const bad = roomErr(platform, userId)
+    if (bad) return { ok: false, error: bad }
     // 允许录制未监控的主播(大厅/播放页直接录制)
     const anchor = store.listAnchors().find((a) => a.platform === platform && a.userId === userId)
     let nick = anchor?.nick || userId
@@ -377,7 +523,7 @@ export function registerIpc(): void {
         userId,
         nick,
         title,
-        password: password || '',
+        password: safePwd(password),
         auto: false
       })
     } catch (e) {
@@ -386,11 +532,15 @@ export function registerIpc(): void {
     }
   })
 
-  ipcMain.handle(CH.recStop, (_e, platform: Platform, userId: string) => recorder.stop(platform, userId))
+  ipcMain.handle(CH.recStop, (_e, platform: Platform, userId: string) => {
+    if (roomErr(platform, userId)) return
+    return recorder.stop(platform, userId)
+  })
 
   ipcMain.handle(CH.recOpenFolder, async (_e, dir: string) => {
     // M10: 只允许打开录制/应用数据相关目录(任意路径探测封堵; 对照 openExternal 已有白名单)
-    const resolved = path.resolve(String(dir || ''))
+    // 空串 = 「打开保存目录」但用户没改过路径: 落在默认录制根(它本来就在白名单里), 而不是 process.cwd()
+    const resolved = path.resolve(String(dir || '').trim() || defaultRecordRoot())
     const roots = new Set<string>([
       path.resolve(store.getSettings().savePath || defaultRecordRoot()),
       path.resolve(defaultRecordRoot()),
@@ -426,23 +576,31 @@ export function registerIpc(): void {
   // ---------- 设置 ----------
   // tgTokenSet 只作投影下发(UI 显隐用), 真值永不出 secrets 保险箱 ——
   // 不把活引用直接递给渲染层, 防投影写回 db.json
-  const projectTg = (): Settings => ({ ...store.getSettings(), tgTokenSet: Boolean(secrets.get('tgToken')) })
+  // secretsEncrypted 同为投影: 系统密钥不可用时保险箱是可逆编码明文, UI 必须据此改口而不是继续宣称"加密"
+  const projectTg = (): Settings => ({
+    ...store.getSettings(),
+    tgTokenSet: Boolean(secrets.get('tgToken')),
+    secretsEncrypted: !secrets.degraded
+  })
 
   ipcMain.handle(CH.settingsGet, () => projectTg())
 
   ipcMain.handle(CH.settingsSet, (_e, patch: Partial<Settings>) => {
-    // tgTokenSet 是主进程投影字段, 渲染层误提交一律忽略(防真值开关被当设置落盘)
+    // tgTokenSet / secretsEncrypted 是主进程投影字段, 渲染层误提交一律忽略(防状态开关被当设置落盘)
     const p = { ...patch }
     delete p.tgTokenSet
+    delete p.secretsEncrypted
     const before = store.getSettings()
     const cfg = store.setSettings(p)
     // 变更留痕(排查"参数什么时候被改过"类问题; 代理地址可能内嵌凭据, 一律掩码)
+    // 值比对走 JSON: 通知矩阵/自录默认是嵌套对象, 浅比较恒不等 → 每次保存都把整块原值写进日志
+    const showVal = (v: unknown): string => (v && typeof v === 'object' ? JSON.stringify(v) : String(v))
     const diffs = (Object.keys(p) as (keyof Settings)[])
-      .filter((k) => p[k] !== undefined && before[k] !== cfg[k])
+      .filter((k) => p[k] !== undefined && JSON.stringify(before[k]) !== JSON.stringify(cfg[k]))
       .map((k) =>
         k === 'proxyUrl' || k === 'tgProxy'
           ? (cfg[k] ? `${k}=已设置` : `${k}=已清空`)
-          : `${k}=${String(before[k])}→${String(cfg[k])}`
+          : `${k}=${showVal(before[k])}→${showVal(cfg[k])}`
       )
     if (diffs.length) logger.info('app', `设置变更: ${diffs.join(', ')}`)
     applyProxy(cfg.proxyUrl)

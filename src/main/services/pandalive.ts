@@ -3,7 +3,7 @@ import * as http from 'http'
 import * as https from 'https'
 import * as tls from 'tls'
 import * as net2 from 'net'
-import { EV, Platform, roomKey } from '../../shared/types'
+import { EV, isRoomId, Platform, roomKey } from '../../shared/types'
 import type { Anchor } from '../../shared/types'
 import { UA, sleep } from '../util'
 import { vault, CookieJar } from './vault'
@@ -66,6 +66,65 @@ export interface LiveItem {
   isLive: boolean
   thumbUrl: string
   userImg: string
+}
+
+/** 站内关注(북마크)行里的在播信息: 直接取自 media 子对象(与全站列表同构的字段名) */
+export interface PandaBookmarkLive {
+  title: string
+  thumbUrl: string
+  userImg: string
+  startTime: string
+  viewers: number
+  likes: number
+  fans: number
+  isAdult: boolean
+  isPw: boolean
+  type: string
+  liveType: string
+}
+
+/** 站内关注一行。media 只在该房开播时下发(实测 158 关注中 13 条带), 离线行只剩昵称/头像 */
+export interface PandaBookmarkRow {
+  userId: string
+  userIdx: number | null
+  nick: string
+  userImg: string
+  isLive: boolean
+  live: PandaBookmarkLive | null
+}
+
+const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+
+/** 单条关注 → 行; userId 不可寻址(改版/脏数据)则丢弃这一条, 绝不让它变成一张坏卡 */
+function parseBookmarkRow(x: unknown): PandaBookmarkRow | null {
+  const r = x as { userId?: unknown; userIdx?: unknown; userNick?: unknown; userImg?: unknown; media?: Record<string, unknown> } | null
+  const userId = str(r?.userId)
+  if (!isRoomId(userId)) return null
+  const m = r?.media
+  const live = m && m.isLive ? m : null
+  return {
+    userId,
+    userIdx: typeof r?.userIdx === 'number' ? r.userIdx : null,
+    nick: str(r?.userNick) || userId,
+    userImg: str(r?.userImg),
+    isLive: Boolean(live),
+    live: live
+      ? {
+          title: str(live.title),
+          thumbUrl: str(live.thumbUrl) || str(live.ivsThumbnail) || str(live.thumbUrlOrigin),
+          userImg: str(live.userImg),
+          startTime: str(live.startTime),
+          viewers: num(live.user),
+          likes: num(live.likeCnt),
+          fans: num(live.fanCnt),
+          isAdult: Boolean(live.isAdult),
+          isPw: Boolean(live.isPw),
+          type: str(live.type),
+          liveType: str(live.liveType) || 'live'
+        }
+      : null
+  }
 }
 
 export interface PlayResult {
@@ -521,14 +580,20 @@ class PandaApi {
    *  缓存以 cookieHeader 为键, jar 任何变更(登录/导入/轮换)天然失配; netFail 不缓存, 下次仍真实复检 */
   private loginInfoCache: { at: number; header: string; info: LoginInfoResult } | null = null
   private loginInfoInflight: { header: string; p: Promise<LoginInfoResult> } | null = null
+  /** 最后一次真实发出 login_info 的时刻(含 netFail 的失败尝试): 账号页要把它摊给用户看 */
+  private loginCheckedAt = 0
 
-  async checkLoginInfo(jarOverride?: CookieJar): Promise<LoginInfoResult> {
+  get lastLoginCheckAt(): number {
+    return this.loginCheckedAt
+  }
+
+  async checkLoginInfo(jarOverride?: CookieJar, force = false): Promise<LoginInfoResult> {
     if (jarOverride) return this.fetchLoginInfo(jarOverride)
     const header = this.cookieHeader
-    if (this.loginInfoCache && this.loginInfoCache.header === header && Date.now() - this.loginInfoCache.at < 30_000) {
+    if (!force && this.loginInfoCache && this.loginInfoCache.header === header && Date.now() - this.loginInfoCache.at < 30_000) {
       return this.loginInfoCache.info
     }
-    if (this.loginInfoInflight && this.loginInfoInflight.header === header) return this.loginInfoInflight.p
+    if (!force && this.loginInfoInflight && this.loginInfoInflight.header === header) return this.loginInfoInflight.p
     const p = this.fetchLoginInfo().finally(() => {
       if (this.loginInfoInflight?.p === p) this.loginInfoInflight = null
     })
@@ -538,6 +603,7 @@ class PandaApi {
 
   private async fetchLoginInfo(jarOverride?: CookieJar): Promise<LoginInfoResult> {
     let out: LoginInfoResult
+    if (!jarOverride) this.loginCheckedAt = Date.now()
     try {
       const { text } = await this.rawFetch('POST', '/v1/member/login_info', {}, {}, jarOverride)
       const j = this.parseText<{
@@ -618,6 +684,46 @@ class PandaApi {
       userIdx: media?.userIdx ?? null,
       userImg: media?.userImg || j.bjInfo?.img || j.bjInfo?.profileImage || '',
       media
+    }
+  }
+
+  /** 站内关注全量(官方上限 200 个): 一页 100, 按 page.total 收满或短页即停。
+   *  返回 null = 列表不可用(未登录/风控/改版/整表脏): 调用方必须报失败,
+   *  绝不能把"没读到"当成"一个关注都没有"而清库或判全员下播。 */
+  async fetchBookmarks(): Promise<PandaBookmarkRow[] | null> {
+    const limit = 100
+    const out: PandaBookmarkRow[] = []
+    let collected = 0
+    let dropped = 0
+    try {
+      for (let page = 0; page < 10; page++) {
+        const j = await this.json<{ list?: unknown; page?: { total?: number }; result?: boolean }>('POST', '/v1/live/bookmark', {
+          offset: String(page * limit),
+          limit: String(limit)
+        })
+        if (j.result === false || !Array.isArray(j.list)) {
+          logger.warn('api', `关注列表不可用(result=${String(j.result)}, list=${Array.isArray(j.list) ? 'ok' : typeof j.list})`)
+          return null
+        }
+        collected += j.list.length
+        for (const x of j.list) {
+          const row = parseBookmarkRow(x)
+          if (row) out.push(row)
+          else dropped++
+        }
+        const total = Number(j.page?.total ?? NaN)
+        if (j.list.length < limit || (Number.isFinite(total) && collected >= total)) break
+      }
+      if (dropped) logger.warn('api', `关注列表丢弃 ${dropped} 条不可寻址记录(共取 ${collected} 条)`)
+      if (!out.length && collected) {
+        logger.warn('api', '关注列表字段改版? 全部记录都不可寻址')
+        return null
+      }
+      return out
+    } catch (e) {
+      // RiskError(403/429/5xx/HTML 验证页)与其它异常一律降级为"本轮没有列表"
+      logger.warn('api', `关注列表异常: ${String((e as Error).message || e)}`)
+      return null
     }
   }
 
