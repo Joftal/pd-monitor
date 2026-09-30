@@ -5,7 +5,7 @@ import { api, SESSION_PARTITION, applyProxy } from './services/pandalive'
 import { store } from './services/store'
 import { watcher } from './services/watcher'
 import { recorder } from './services/recorder'
-import { UA, redirectElectronDataDir } from './util'
+import { UA, redirectElectronDataDir, windowBg } from './util'
 import { mt, setMainLocale } from './i18n'
 import { logger } from './services/logger'
 import { registerMediaScheme, installMediaHandler } from './services/localMedia'
@@ -70,8 +70,8 @@ function createWindow(): void {
     minHeight: 660,
     frame: false,
     show: false,
-    // 启动窗口底色跟随主题, 避免加载瞬间主题不符的闪屏
-    backgroundColor: cfg.theme === 'dark' ? '#14161a' : '#f4f5f7',
+    // 启动窗口底色跟随主题, 避免加载瞬间主题不符的闪屏(切换时由 settingsSet 同步 setBackgroundColor)
+    backgroundColor: windowBg(cfg.theme),
     title: 'SODALive Monitor',
     icon: path.join(__dirname, '../../resources/icon.png'),
     webPreferences: {

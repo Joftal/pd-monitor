@@ -36,6 +36,12 @@ export function dataDir(): string {
 }
 
 /** 默认录制根目录: 数据根/recording(未配置 savePath 时使用; 数据根三态见 dataRoot) */
+/** 窗口底色(与 styles.css 的 --c-page 同值): 主题切换时要同步改 BrowserWindow,
+ *  否则「主题立即生效」只管界面不管启动闪屏 —— createWindow 是一次性读值 */
+export function windowBg(theme: 'light' | 'dark'): string {
+  return theme === 'dark' ? '#14161a' : '#f4f5f7'
+}
+
 export function defaultRecordRoot(): string {
   return path.join(dataRoot(), 'recording')
 }

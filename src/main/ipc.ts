@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, net, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron'
 import * as path from 'path'
 import {
   CH, EV, AccountState, AccountStates, Anchor, AppInfo, DEFAULT_PLATFORM, FollowImportResult, isPlatform, isRoomId, parseRoomInput, Platform, PlayInfo, Settings, SoopAccountState, UpdateCheckResult
@@ -8,6 +8,7 @@ import { api, SESSION_PARTITION, applyProxy, cachedSourceIdsAll } from './servic
 import { sourceFor, applyPlayMeta } from './services/source'
 import { maskLoginId, soopApi } from './services/soop'
 import { store } from './services/store'
+import { sanitizeSettingsPatch } from './services/settingsGuard'
 import { vault } from './services/vault'
 import { watcher } from './services/watcher'
 import { recorder } from './services/recorder'
@@ -15,7 +16,7 @@ import { openLoginWindow } from './services/authWin'
 import { sendToast } from './services/notify'
 import { secrets } from './services/secrets'
 import { tgSendMessage } from './services/telegram'
-import { dataDir, defaultRecordRoot, diskFreeGb, UA } from './util'
+import { dataDir, defaultRecordRoot, diskFreeGb, UA, windowBg } from './util'
 import { logger } from './services/logger'
 import { thumbs } from './services/thumbs'
 import { mt, setMainLocale } from './i18n'
@@ -586,29 +587,36 @@ export function registerIpc(): void {
   ipcMain.handle(CH.settingsGet, () => projectTg())
 
   ipcMain.handle(CH.settingsSet, (_e, patch: Partial<Settings>) => {
-    // tgTokenSet / secretsEncrypted 是主进程投影字段, 渲染层误提交一律忽略(防状态开关被当设置落盘)
-    const p = { ...patch }
-    delete p.tgTokenSet
-    delete p.secretsEncrypted
+    // 入站先过闸(类型/区间/枚举/绝对路径), 不合格键不收 —— 闸门必须在写盘之前:
+    // 收了坏值就是「盘已写脏、后续每次保存都在 applyProxy 里抛」的分叉态, 只能重启才解
+    const { patch: clean, dropped } = sanitizeSettingsPatch(patch)
+    if (dropped.length) logger.warn('app', `设置补丁拒收: ${dropped.join(', ')}`)
     const before = store.getSettings()
-    const cfg = store.setSettings(p)
+    const cfg = store.setSettings(clean)
     // 变更留痕(排查"参数什么时候被改过"类问题; 代理地址可能内嵌凭据, 一律掩码)
     // 值比对走 JSON: 通知矩阵/自录默认是嵌套对象, 浅比较恒不等 → 每次保存都把整块原值写进日志
     const showVal = (v: unknown): string => (v && typeof v === 'object' ? JSON.stringify(v) : String(v))
-    const diffs = (Object.keys(p) as (keyof Settings)[])
-      .filter((k) => p[k] !== undefined && JSON.stringify(before[k]) !== JSON.stringify(cfg[k]))
+    const diffs = (Object.keys(clean) as (keyof Settings)[])
+      .filter((k) => clean[k] !== undefined && JSON.stringify(before[k]) !== JSON.stringify(cfg[k]))
       .map((k) =>
         k === 'proxyUrl' || k === 'tgProxy'
           ? (cfg[k] ? `${k}=已设置` : `${k}=已清空`)
           : `${k}=${showVal(before[k])}→${showVal(cfg[k])}`
       )
     if (diffs.length) logger.info('app', `设置变更: ${diffs.join(', ')}`)
-    applyProxy(cfg.proxyUrl)
-    setMainLocale(cfg.locale) // 语言变更即时注入主进程 i18n(单向数据流)
-    // 只有轮询相关设置的【值真的变了】才即时拉一轮(前端提交的是全量对象, 不能按 key 存在判断)
-    const WATCH_KEYS: (keyof Settings)[] = ['watchMode', 'pollIntervalSec', 'requestGapMs', 'proxyUrl']
-    if (WATCH_KEYS.some((k) => before[k] !== cfg[k])) {
-      watcher.tick()
+    if (before.theme !== cfg.theme) {
+      // 「主题立即生效」不能只管界面: 窗口底色是 createWindow 的一次性读值, 不同步就慢一拍
+      BrowserWindow.fromWebContents(_e.sender)?.setBackgroundColor(windowBg(cfg.theme))
+    }
+    // 生效动作失败只留痕, 不回拒 IPC: 盘已经写对, 抛错会让前端以为没存上而反复重试
+    try {
+      applyProxy(cfg.proxyUrl)
+      setMainLocale(cfg.locale) // 语言变更即时注入主进程 i18n(单向数据流)
+      // 只有轮询相关设置的【值真的变了】才即时拉一轮(不能按 key 存在判断)
+      const WATCH_KEYS: (keyof Settings)[] = ['watchMode', 'pollIntervalSec', 'requestGapMs', 'proxyUrl']
+      if (WATCH_KEYS.some((k) => before[k] !== cfg[k])) watcher.tick()
+    } catch (e) {
+      logger.warn('app', `设置已保存但生效动作失败: ${String((e as Error).message || e)}`)
     }
     return projectTg()
   })
@@ -677,15 +685,22 @@ export function registerIpc(): void {
   ipcMain.handle(CH.appInfo, (): AppInfo => ({
     version: app.getVersion(),
     author: APP_META.author,
+    authorUrl: APP_META.authorUrl,
     repo: APP_META.repo,
-    releasesPage: APP_META.releasesPage
+    releasesPage: APP_META.releasesPage,
+    logsDir: logger.dir()
   }))
 
   ipcMain.handle(CH.appCheckUpdate, async (): Promise<UpdateCheckResult> => {
     const current = app.getVersion()
     try {
       // 走 releases/latest 网页 302 跳转而非 REST API(匿名 API 有每 IP 60 次/时限流, 共享出口 IP 易爆)
-      const res = await net.fetch(APP_META.releasesPage + '/latest', { headers: { 'User-Agent': UA } })
+      // 借会话分区发请求而不是 net.fetch: net.fetch 走 defaultSession, 而 applyProxy 只覆盖
+      // 登记过的分区 —— 于是"设了死代理、全网不通, 唯独检查更新报成功"。GitHub 域下没有本站
+      // Cookie, 借用分区只是拿它的代理配置, 不外带凭据
+      const res = await session
+        .fromPartition(SESSION_PARTITION)
+        .fetch(APP_META.releasesPage + '/latest', { headers: { 'User-Agent': UA } })
       if (res.status === 404) {
         // 仓库尚无 Release: 视为已是最新
         return { ok: true, current, latest: '', hasUpdate: false, url: APP_META.releasesPage }
