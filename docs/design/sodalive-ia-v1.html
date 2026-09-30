@@ -403,7 +403,7 @@
     <div class="doc-sub">
       根因不是「缺一个页面」，而是<strong>平台被降格成了一个筛选条件</strong>：两个能力集合不同的平台（Panda 有全站列表 / IVS 直连 / 源保活 / 备用线路，SOOP 只有关注列表整轮 + 逐房探针 / 本地 HLS 代理 / 无保活）
       共用一条页面轴、一个轮询状态对象、一套排序，结果是谁的能力都在给对方制造空态与误读。本稿把轴换过来：<strong>先选平台，再看内容</strong>；直播大厅与已关注整合为一页，页内按<strong>视图分段</strong>（在播关注 / 站内发现 / 离线关注）切换，并在顶部挂一条「在播坞」保证切去逛发现或做离线管理时仍能一眼看到关注的人在播（坞不挂在「在播关注」视图上，理由见 ㉖；滚动墙形态已被你否决，理由与三个候选见 L 屏）；
-      主色从中性蓝取，平台色只用于表达身份，不再兼作主题色。录制 / 库 / 账号保持结构不动，只做令牌换皮与可见性修补（账号页的 5 处见 S9）；落地时「库」进一步并进了录制页（㉒）。
+      主色从中性蓝取，平台色只用于表达身份，不再兼作主题色。录制 / 库 / 账号保持结构不动，只做令牌换皮与可见性修补（账号页的 5 处见 S9）；落地时「库」进一步并进了录制页（㉒）。<span class="d">订正（2026-09-30 三次）：账号页的「结构不动」已作废 —— 页内平台分段撤归顶栏、三张登录方式卡并成一卡三行、徽章与存储文案去重，见 S9 与 ㊀ ㊁。页面仍是一页讲一方，不拆两页这条不变。</span>
     </div>
 
     <div class="sec"><h2>0.1 信息架构：旧 → 新</h2><span class="d">一级轴从「页面」换成「平台 × 页面」；发现能力收进各自工作区，SOOP 缺该段时以引导卡补位而不是留空墙</span></div>
@@ -430,7 +430,7 @@
             <tr><td class="mono">/:plat/recordings</td><td>录制任务 + <strong>库</strong>（原视频库页并入本页第三段，见 ㉒）</td><td>本页不设平台 tab（它没有「在播 / 发现 / 离线」那种视图）；<code class="tok">:plat</code> 段作为库的初始筛选，库段内仍可切「全部平台」</td></tr>
             <tr><td class="mono">/:plat/library</td><td><strong>重定向</strong> → <code class="tok">/:plat/recordings</code></td><td>库不另立页面（㉒）；旧深链必须继续可用，用户的历史 TG 卡片与本仓库脚本都指着它</td></tr>
             <tr><td class="mono">/player/:plat/:userId</td><td>播放 + 录制控制</td><td>返回目标改「返回 {平台}直播」；能力缺失区块显示「不适用 + 原因」</td></tr>
-            <tr><td class="mono">/account</td><td>两平台登录卡片</td><td>结构不动（不拆成两页），只做 S9 的 5 处令牌换皮与可见性修补</td></tr>
+            <tr><td class="mono">/account</td><td>两平台登录卡片</td><td><span class="d">2026-09-30 三次订正：结构已动</span> 仍是一页讲一方（不拆两页），但页内平台分段撤归顶栏、三张登录方式卡并成一卡三行（低频两条折叠），见 S9 / ㊀ / ㊁</td></tr>
             <tr><td class="mono">/settings</td><td>全局 + 平台分节</td><td>监控拆「全局节奏 / Panda 采集 / SOOP 采集」；通知改按平台矩阵</td></tr>
           </tbody>
         </table>
@@ -1550,16 +1550,17 @@
   <div class="body">
     <div class="ph">
       <div>
-        <h3>账号</h3>
-        <div class="sub">两套会话彼此独立，一次只看一方 · Cookie 与托管账密经系统安全存储加密，仅存本机</div>
+        <h3>账号 <span class="chip" style="height:22px;font-size:11px;padding:0 9px;vertical-align:2px"><span class="cdot p"></span>Panda</span></h3>
+        <div class="sub">两套会话彼此独立，一次只看一方 <span class="d">落地订正（2026-09-30 三次）：原来这句尾巴上还挂着一句「Cookie 与托管账密经系统安全存储加密，仅存本机」，与「🔒 加密存储」徽章、SOOP 方式 C 脚注、页底数据目录说明是同一个承诺的四次复读 —— 现全页只在页底说一次，加密不可用时由页顶降级横幅当场更正。</span></div>
       </div>
       <div class="right">
-        <div class="platseg">
+        <div class="platseg" style="opacity:.45;text-decoration:line-through">
           <button class="on p"><span class="cdot p" style="background:#2FAD5F"></span>Panda</button>
           <button><span class="cdot s" style="background:#E0A526"></span>SOOP</button>
         </div>
       </div>
     </div>
+    <div class="note gray" style="margin-top:10px"><b>页头这套分段已划掉（㊀）</b>：顶栏本来就有一条全局平台分段，而它在账号页会把人踢回直播页（<code class="tok">switchPlat</code> 的 keep 名单里没有 account），页面只好自备第二套 —— 同屏两套同功能分段就是这么来的。现在顶栏分段在账号页原地改 <code class="tok">?plat=</code>，页内分段与它的「色点 + 已登录 / 未认证 / 未登录」状态标签一并撤掉，页头只留一枚平台牌（色点 + 平台名）说明下面讲的是哪一方。</div>
 
     <div class="h3" style="margin-top:18px"><span class="num">9.1</span> 状态横幅 · 三种会话状态各自的写法</div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;align-items:start">
@@ -1575,7 +1576,7 @@
           </div>
           <div style="display:flex;align-items:center;gap:7px;width:100%">
             <span class="chip on" style="height:22px;font-size:10.5px;padding:0 8px;background:rgba(47,173,95,.13);border-color:rgba(47,173,95,.4);color:var(--ok-ink)">成人认证 ✓</span>
-            <span class="chip" style="height:22px;font-size:10.5px;padding:0 8px">🔒 加密存储</span>
+            <span class="chip" style="height:22px;font-size:10.5px;padding:0 8px;text-decoration:line-through;opacity:.5">🔒 加密存储</span>
             <button class="btn btn-danger-ghost btn-sm" style="margin-left:auto;height:24px;font-size:11px;padding:0 9px">退出登录</button>
           </div>
         </div>
@@ -1614,10 +1615,14 @@
     </div>
     <div class="note gray" style="margin-top:12px">
       <b>这一态的现状问题</b>：分段按钮上的状态点只有颜色（绿 / 琥珀 / 灰），<code class="tok">account.stWarn</code> 的正文又只在切到那一方时可见 —— 于是「琥珀」被读成「已登录」。
-      本稿给它的修法是<strong>颜色 + 文字双通道</strong>：分段按钮右侧从纯色点改成 <code class="tok">色点 + 「已登录 / 未认证 / 未登录」</code> 短标签（原则 R3 的又一次落地）。
+      本稿给它的修法是<strong>颜色 + 文字双通道</strong>：分段按钮右侧从纯色点改成 <code class="tok">色点 + 「已登录 / 未认证 / 未登录」</code> 短标签（原则 R3 的又一次落地）。<span class="d">落地订正（2026-09-30 三次）：双通道这条判据不变，但它的落点变了 —— 页内分段已撤（㊀），状态文字改由顶栏胶囊与本页大状态卡的标题承担，<code class="tok">account.segOk / segWarn / segNone</code> 三键随之删除。三块横幅同时并成一块：状态标题 / 身份 / 结论一行读完，「立即重新校验 + 退出登录 + 上次校验时刻」收进右列竖排，不再单独铺第二行（上一版那一行在 <code class="tok">mode === 'none'</code> 时整行消失，同一张卡在两平台之间换了形状）。「上次校验」从徽章降成 11px 正文 —— 它是一个时刻，不是一枚需要抢注意力的状态。</span>
     </div>
 
     <div class="h3" style="margin-top:22px"><span class="num">9.2</span> 登录方式（三种，失败即往下换一种）</div>
+    <div class="note gray" style="margin-bottom:12px"><b>三张卡已并成一张卡三行（㊁）</b>：下面这三块各自带图标 + 标题 + 徽章 + 说明 + 脚注，纵向叠起来实测要滚两屏才看完「登录方式」，第一次登录的人真正要的只有第一块里那枚按钮。现 <strong>网页登录</strong> 一行直给（唯一一枚 primary 按钮），<strong>Cookie 导入</strong> 与 <strong>账密自动重登</strong> 收成一行、点开才出步骤与输入框。<br/>
+      同轮撤掉四类噪声：① <code class="tok">推荐</code>（品牌色）与 <code class="tok">最稳定</code>（绿）两枚徽章在同一屏互相拆台，且绿色那一枚借用了「成功态」的颜色 —— 推荐与否改由按钮档位表达，全页只剩一枚 primary；② 方式 A 的三条 ✓ 卖点（「支持验证码 / 二次验证」「成功后自动捕获 Cookie 关窗」「事件驱动，零轮询」）压着两屏高却不给操作信息，前两条并进一行说明，第三条是实现细节直接删；③ 方式 B 的第 4 步「粘贴到右侧，点击「导入并验证」」与按钮标签逐字重复，四步收成两步（F12 与 document.cookie 两步本就一次做完）；④ <code class="tok">已托管 1004***</code> 从徽章改成行右侧文字 —— 折叠状态下也必须看得见托管与否。SOOP 校验走 <code class="tok">get_private_info.php</code>、只认 <code class="tok">LOGIN_ID</code> 这条判据从界面撤下（它是排障依据不是操作指引，见 8.2 D）。<br/>
+      <strong>换平台时收起两个面板并清空粘贴串</strong>：Cookie 串是按平台导入的，留着 A 平台的串配 B 平台的按钮只隔一次误点。<br/>
+      <strong>另：㉜ 的 CTA 定宽在账号页改成下限</strong>（<code class="tok">!w-[112px]</code> → <code class="tok">!min-w-[112px]</code>）。英文实机渲染抓到「Open login window」被 112px 裁成「Open login wind」—— 中文标签量出来的死宽，换一门语言就变成裁字；下限既保住同列按钮的对齐，也让翻译自己撑开。<strong>这条只有切到英文真机看过才会暴露</strong>，中文渲染下它是绿的。</div>
     <div class="method on">
       <div class="mh">
         <div class="mi">🌐</div>
@@ -1743,7 +1748,7 @@
             ⑤ 播放页命名统一 + SOOP「不适用」区块改为显示；<br/>
             ⑥ 设置页按三域分节：全局六节（外观/监控/录制/网络/推送与行为/数据与日志）+ <strong>Panda / SOOP 两个平台节</strong> + 关于；平台专属项（检测模式、源保活、开播自录默认、通知矩阵）只出现在平台节，通知矩阵按平台各一张、整块开/关也按平台走（详见 ㉝）；<br/>
             ⑦ 数据面扩展（见 8.2：A/B 是原列的两项，C/D 是本屏 S9 与 D3 落地时补的，都不加轮询）；<br/>
-            ⑧ 账号页按 S9 的 5 处改动落地（结构未动：仍是一页两态分段，只换皮、补状态文字、补校验轨、把密钥降级告警提到页顶、退出确认合并）；<br/>
+            ⑧ 账号页按 S9 的 5 处改动落地（当时结构未动：仍是一页两态分段，只换皮、补状态文字、补校验轨、把密钥降级告警提到页顶、退出确认合并）；<span class="d">2026-09-30 三次：这一条的「结构未动」已被 S9 的 ㊀ ㊁ 取代 —— 两态分段并成顶栏一套、三卡并成一卡三行、校验轨并进状态卡右列，密钥降级告警仍在页顶、退出确认仍合并。</span><br/>
             ⑨ D3 反向差值上线：同步站内关注只<strong>标注</strong>「站内已取关 · 本地仍保留」，一条都不删，离线视图另给一枚筛子。
           </td>
           <td>类型检查 + <code class="tok">npm run verify</code> 八套脚本全绿；两平台各自的三个视图在真实数据下渲染正确，切换视图后排序/分页/滚动位置互不污染；在播为 0 时在播坞整体收起；「在播关注」视图不挂坞（㉖，D15m）；各屏空态为有界卡且下一步可点（㉕/㉗，D15i–n）、零数据页的下半屏由空槽撑满（㉘，D15o）；旧深链不落到空白页（由 <code class="tok">scripts/verify-deeplink.mjs</code> 在真路由表上断言）；老库的全局通知开关升格为矩阵后行为逐格不变（由 <code class="tok">scripts/verify-notify.mjs</code> 写真 db.json 走真 store 断言迁移与三路门禁）；「站内已取关」只标注不删墙、跨平台同名不串、重新回榜即清、북마크 取满 200 时跳过差值（由 <code class="tok">scripts/verify-follows.mjs</code> 的 D3 / E8 场景走真 <code class="tok">importFollowRows</code> 断言）；<strong>本稿可静态判定的规则已写成 <code class="tok">scripts/verify-design.mjs</code>（D1~D24，129 条断言，进 <code class="tok">npm run verify</code> 与 CI）</strong>：档位/禁原生色/禁硬编码色/纯色状态底白名单/状态色不承载文字/命名表/令牌层完好/双语键位与占位符/取词键存在/动效预算/瓷片可点性/平台分解行/白屏与最小窗宽/首屏不等官方校验与空态有界且可点/关注取关承载矩阵与进度承载面唯一/管线文案与码率差分按任务类型与字节实长走/仓库卫生（死令牌·无横幅历史稿·docs 二进制·README 双平台口径）/圆角四档（模板与 CSS 双向，禁任意值）/平台色点唯一规格/计数药丸唯一规格/等宽数字唯一拼法/naive 主题逐值对齐语义变量/文案品牌形/自绘按钮锁 <code class="tok">h-*</code>。<br/><span style="color:#b02a31"><strong>验收口径未完成项（如实标注）：</strong></span>「深浅两主题逐屏截图比对」<strong>已执行三轮</strong>（2026-09-30，CDP 驱动真实 Electron 实例 + 真库 876 关注 / 24 在播，覆盖工作区三视图 / 录制页 / 账号页 / 设置页 / 播放页，两主题 × 1380 与 1024 宽；第三轮另真起两段 SOOP 直播录制并正常停止收尾），当场查出并修掉冷启动「加载中」空屏、设置页白屏、页头按钮档位并存、空态整屏居中、取关在播放页穿中性灰、卡片菜单用 div 装按钮、<strong>转码从未产出 MP4 且完全静默</strong>、实时码率是采样噪声、回放行首棒误写「拉取直播源」等 13 项，均由 D14/D15/D16 与 P1 套锁死。<strong>第四轮（㉜ 令牌层收敛，同日）</strong>量的是「同一物件在不在一档上」而非「有没有白屏」：顶栏两枚 <code class="tok">.platn</code>（999px / 实测 5 与 22）、<code class="tok">.pdot</code> 7px + ink3 描边（Panda 粉 #fb7299 / SOOP 黄 #ffd400）、视图分段 <code class="tok">.sec-n</code> 21.25px + <code class="tok">tabular-nums</code>、卡片 14px、在播坞 chip 27px（注入 9 位探针在播房间取证，坞在「在播关注」视图不渲染 = ㉖ 成立）、影院浮层动作行三枚 34px（注入 3 段/1 段探针条目取证）、账号页三枚 CTA 等宽 112px、设置保存条 128/128 对称、深浅两主题下 GitHub 按钮底色逐值等于 <code class="tok">--c-fill</code>。当场查出两处：<strong>设置·关于的自绘「GitHub 主页」按钮 34.35px 与同行 naive 的 28px 并排</strong>（已锁 <code class="tok">h-7</code>，由 D24 锁死）、<strong>深色 naive <code class="tok">errorColor</code> 沿用浅色档的 #e5484d</strong>（已改 <code class="tok">#eb575c</code> = <code class="tok">.dark --c-live</code>，由 D22 锁死）；另把免责文案里的小写 <code class="tok">pandalive</code> 订正为品牌形 <code class="tok">PandaLive</code>（D23，仅「落盘结构」两条保留小写 —— 那里说的就是目录名）。<strong>仍未实机覆盖的只剩一处，且不是「没做」而是现场不存在</strong>：发现卡的 hover 心形 —— Panda 未认证使站内发现为 0 张、SOOP 发现未开放，两平台都渲染空墙。回放管线行的有数据形态按 ㉚ 的口径取证（真机拉源 14/14 失败，改由同形状注入渲染）。</td>
@@ -1812,6 +1817,9 @@
       ㉝ <strong>设置页的「全局 / 平台」不能靠徽标区分，要靠节区分</strong>（2026-09-30 三域 IA 落地）。S6 的判据（含义不同的设置下沉平台节）此前只在「监控」一卡内用三张子卡表达：改一个 SOOP 的开关要在一屏全局项里找平台徽标；通知矩阵把两平台的 16 格摆进同一张表，「全部关闭」一次哑掉两个平台；「开播自动录制默认值」一块里并排两枚平台徽标。现侧栏导航分三域（<code class="tok">全局</code> / <code class="tok">平台</code> 两枚组标签 + 关于），正文九节与导航同序（scrollspy 的前提）：平台专属键（<code class="tok">watchMode</code> / <code class="tok">keepaliveStream</code> / <code class="tok">autoRecordDefault</code> / <code class="tok">notify</code>）只落在平台节，全局节不再挂平台徽标；<code class="tok">prefetchStream</code> 与 <code class="tok">requestGapMs</code> 经主进程消费点核实为两平台共用（watcher 进房预热 / <code class="tok">api.setGap</code> + SOOP 轮询同吃），留在监控节。<strong>脏点与整块开/关一并按平台走</strong>：只改 SOOP 那一半时亮 Panda 的点就是谎报，故 <code class="tok">dirtySecs</code> 对这两个跨平台键做逐平台深比对，「全部开启/关闭」也变成各平台节内的一枚按钮。SOOP 采集三行仍是只读事实（S6 判据不变，从子卡升格为平台节内的「采集」组）。实机验证 71 条断言全绿（CDP 驱动真渲染：逐项编辑 → 逐步脏计数 → 保存 → 盘上真值 → 主题/语言即时通道 → 入站闸门 → 轮询模式生效），含两条平台隔离断言：只改一个平台只亮一个平台的脏点；SOOP「全部关闭」不回踩 Panda。同轮把两处承载面也归回全站语言：五处「多选一」从 naive radio-button（描边方盒 + 主色描边选中，全站第二套分段语言）换成自绘 <code class="tok">Seg.vue</code>（填充容器 + 瓷片选中，与左导航同档；<code class="tok">role=radiogroup/radio</code> 语义与全站 focus-visible 焦点环保留，高度锁 h-7）；通知矩阵从裸 <code class="tok">&lt;table&gt;</code>（通栏细线 + 悬空表头 + 右端 92px 小开关列）换成 <code class="tok">bg-fill rounded-ctl</code> 面板，逐事件带一行说明，声音列仍只在开播行给开关、其余标「—」。实机断言扩到 82 条全绿，新增 Seg hover / Tab 焦点环 / 矩阵行 hover 三组交互态留档。<br/>
       ㉞ <strong>页头快捷入口的文案承诺，就是它的验收标准</strong>（2026-09-30 实机 CDP 逐枚点过录制页页头三枚：typecheck / verify / build 全绿，而三枚里两枚点了没反应）。① <strong>「打开保存目录」在 <code class="tok">savePath</code> 为空时被写成跳设置页</strong> —— 空串从来不是「没有保存目录」，录制一律落默认录制根 <code class="tok">&lt;数据根&gt;/recording</code>（设置页那一行显示的也是它），点「打开目录」却被甩到另一页等于没回答他问的问题；现按同一口径解到默认根，<strong>白名单过关后先 <code class="tok">mkdir -p</code> 再开</strong> —— 默认根只在第一次开录时才建，而 <code class="tok">shell.openPath</code> 对不存在的路径只回一个错误串、界面毫无动静，这是"点了没反应"的第二条根因（错误串此前被丢弃，现进日志）。② <strong>「录制设置」只 push 到设置页第一屏（外观）</strong> —— 按钮写的是节名，落点就得是那节：设置页新增 <code class="tok">?sec=&lt;节&gt;</code> 深链，滚动挂在 <code class="tok">scrollRef</code> 上而不是 <code class="tok">onMounted</code>（整页在 <code class="tok">v-if="form"</code> 里，settings 未到时根本没有容器可滚）。③ <strong>失败必须出声</strong>：主进程只在目录真打开后回 <code class="tok">true</code>，渲染层拿到 <code class="tok">false</code> 给一条 <code class="tok">rec.openDirFail</code> 提示 —— 与 ㉚ 同一口径，静默 no-op 在静态断言里永远是绿的。<br/>
       ㉟ <strong>一个去向在一屏只允许一个入口：㉗ 补的两枚按钮就此撤掉</strong>（2026-09-30 二次订正，判据换向）。录制页无数据时同屏出现两枚「去直播页」（页头右上角 + 「进行中」空槽正中），库空态行末尾再挂一枚「录制设置 ›」而页头已有同名一枚 —— 页头那一排本来就是这一屏的快捷入口轴，空态再各挂同去向的入口，用户第一步变成判断该点哪个。<strong>缺入口是缺陷，多入口是噪声</strong>：现空态只给结论与指引（进行中空槽留「点 ⏺ 开始录制，或在关注视图开启「开播自动录制」」一句；库空态行收成一句「库里还没有视频」），去向说明文案键 <code class="tok">library.emptyGoLive</code> / <code class="tok">library.emptyNoDir</code> 随之删除。同轮去掉段标题右侧那栏复读的「磁盘充足」（见 S4 ③ 的订正），<code class="tok">secCaption</code> 只剩「分段 N 分钟/段」，全回放时该栏为空、分隔线一起收掉。由 D14g / D15n / D15n2 / D15n3 锁死 —— 四条断言本轮从「必须出现」反转为「不再出现」，反转本身要留判据文字，否则下一轮又会把按钮补回来。<br/>
+      ㊀ <strong>一套全局切换器必须服务每一页，页面就不该自备第二套</strong>（2026-09-30 账号页重设计，与 ㉟ 同源：重复布线）。顶栏那条平台分段是一级导航，账号页却又摆了一套带状态标签的分段 —— 不是设计者忘了全局有，而是<strong>全局那套在这一页不管用</strong>：<code class="tok">TopNav.switchPlat()</code> 的 keep 名单只有 <code class="tok">live / recordings</code>，在账号页点顶栏分段会把人一脚踢回直播页，页面只能自己补一套。现顶栏分段在账号页原地改 <code class="tok">?plat=</code>（<code class="tok">plat</code> 计算属性同时读 <code class="tok">route.query.plat</code>，让分段高亮、头像状态与页面内容指向同一方），页内分段与 <code class="tok">PlatFilter</code> 的 <code class="tok">states</code> 通道（无消费方即删）一起退役，页头只留一枚「色点 + 平台名」的牌说明下面讲的是哪一方。<strong>口径：一个功能在一屏只允许一个承载面；发现自己在页面里重建全局控件时，先去看全局那个为什么不能用</strong>。由 D15f / D15f2 / D15f3 锁死。<br/>
+      ㊁ <strong>徽章是状态预算，不是强调手段；同一承诺一屏只说一次</strong>（同轮）。账号页改版前挂着四枚徽章：<code class="tok">推荐</code>（品牌色）、<code class="tok">最稳定</code>（绿）、<code class="tok">🔒 加密存储</code>（恒定值）、<code class="tok">上次校验 09-30 22:01</code>。前两枚是<strong>两个不同颜色的"最"</strong>，同屏并存等于互相拆台，且绿色借走了「成功态」的颜色；后两枚一个不是状态（本机加密与否由页顶降级横幅在它为假时才出声，平时挂一枚「加密存储」是自我表扬），一个只是时刻。<strong>判据：徽章只挂"会变化且需要一眼扫到"的事实</strong> —— 现全页只剩 <code class="tok">成人认证 ✓</code> 一枚真状态徽章（外加 SOOP 托管与否，改成行右侧文字）；推荐由唯一的 primary 按钮表达，时刻降成 11px 正文。<br/>
+      同一判据也管文案：<strong>「Cookie 经系统安全存储加密、仅存本机」此前出现四次</strong>（页头副标题 / 加密存储徽章 / SOOP 方式 C 脚注 / 页底数据目录说明），而它在密钥降级态还是假话。现全页只在页底 doorNote 说一次，降级时由页顶横幅当场更正；方式 C 脚注只留「日志中账号脱敏，密码不回显也不回传」这条不与页底重复的。<code class="tok">badgeEnc / mARec / mCStable / mBT1~3 / mBHint(Soop) / mCHint / mCS4(Soop) / soopImportHint / seg*</code> 十四个键随之外科切除，由 D15f4 锁住不再长回来。<br/>
       · S5 侧栏「失效自动续录 · 连续上限 3 次」只显示开关，不镜像次数：<code class="tok">Recorder.MAX_RETRY = 3</code> 是主进程私有常量，渲染层抄一份必然与真实值漂移 —— 宁可少说一个数字。<br/>
       · 3.1 ⑫⑬「关注与取关不上卡片」在<strong>站内发现卡</strong>上留了例外（hover 给心形）：发现页的唯一主行动就是关注，收进菜单等于把这一屏的核心动作藏起来；已关注卡与在播坞仍按原规则（取关在「…」菜单里，坞不承载）。四处的完整分工见 ㉙。<br/>
       · 设置页 GitHub 按钮保留官方 <code class="tok">#24292f / #0d1117</code>（第三方品牌面，不属于本应用令牌板）；品牌横幅因需三段渐变而用内联 <code class="tok">style</code> 写死深阶蓝 —— 这两处是 D4 白名单的全部条目。
