@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, toRaw, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { NButton, NInput, NInputNumber, NSwitch, NRadioGroup, NRadioButton, useMessage } from 'naive-ui'
+import { NButton, NInput, NInputNumber, NSwitch, useMessage } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api'
 import type { AppInfo, NotifyEvent, NotifyRow, Platform, Settings, UpdateCheckResult } from '@shared/types'
 import { platformName, REC_RETRY_MAX } from '@shared/types'
 import SpinIcon from '@/components/SpinIcon.vue'
-import PlatTag from '@/components/PlatTag.vue'
+import Seg from '@/components/Seg.vue'
 import { useI18n } from 'vue-i18n'
 
 const { t, locale } = useI18n()
@@ -243,30 +243,54 @@ function hideBrokenImg(e: Event): void {
 }
 
 // ---- 左侧锚点导航(手动 scrollspy) ----
-type NavKey = 'appearance' | 'monitor' | 'record' | 'network' | 'notify' | 'storage' | 'about'
-const navs = computed<{ key: NavKey; label: string }[]>(() => [
-  { key: 'appearance', label: t('settings.navAppearance') },
-  { key: 'monitor', label: t('settings.navMonitor') },
-  { key: 'record', label: t('settings.navRecord') },
-  { key: 'network', label: t('settings.navNetwork') },
-  { key: 'notify', label: t('settings.navNotify') },
-  { key: 'storage', label: t('settings.navStorage') },
-  { key: 'about', label: t('settings.navAbout') }
+// 三域: 全局 / 平台(Panda、SOOP) / 关于。平台专属键(检测模式、源保活、自录默认、通知行)
+// 只出现在平台节里 —— 混在全局节里时, 改一个 SOOP 的开关要在一屏全局项里找平台徽标
+type NavKey =
+  | 'appearance'
+  | 'monitor'
+  | 'record'
+  | 'network'
+  | 'push'
+  | 'storage'
+  | 'panda'
+  | 'soop'
+  | 'about'
+const navGroups = computed<{ label: string; items: { key: NavKey; label: string }[] }[]>(() => [
+  {
+    label: t('settings.navGroupGlobal'),
+    items: [
+      { key: 'appearance', label: t('settings.navAppearance') },
+      { key: 'monitor', label: t('settings.navMonitor') },
+      { key: 'record', label: t('settings.navRecord') },
+      { key: 'network', label: t('settings.navNetwork') },
+      { key: 'push', label: t('settings.navNotify') },
+      { key: 'storage', label: t('settings.navStorage') }
+    ]
+  },
+  {
+    label: t('settings.navGroupPlat'),
+    items: [
+      { key: 'panda', label: platformName('pandalive') },
+      { key: 'soop', label: platformName('soop') }
+    ]
+  },
+  { label: '', items: [{ key: 'about', label: t('settings.navAbout') }] }
 ])
+const navs = computed(() => navGroups.value.flatMap((g) => g.items))
 
 const scrollRef = ref<HTMLElement | null>(null)
 const activeNav = ref<NavKey>('appearance')
 
-/** 设置键 → 所在节: 脏标记只写在吸底条上等于让人逐屏找, 亮的应该是「哪一屏有没保存的项」 */
+/** 设置键 → 所在节: 脏标记只写在吸底条上等于让人逐屏找, 亮的应该是「哪一屏有没保存的项」。
+ *  跨平台的两个键(autoRecordDefault / notify)不在这张表里: 它们一节一半,
+ *  只改 SOOP 那一半时亮 Panda 的点就是谎报 —— 见 dirtySecs 的逐平台比对 */
 const SEC_OF_KEY: Partial<Record<keyof Settings, NavKey>> = {
   theme: 'appearance',
   locale: 'appearance',
   pollIntervalSec: 'monitor',
   requestGapMs: 'monitor',
-  watchMode: 'monitor',
   defaultWorkspace: 'monitor',
   prefetchStream: 'monitor',
-  keepaliveStream: 'monitor',
   savePath: 'record',
   splitSeconds: 'record',
   diskLimitGb: 'record',
@@ -275,22 +299,31 @@ const SEC_OF_KEY: Partial<Record<keyof Settings, NavKey>> = {
   mergeMp4: 'record',
   mergeDeleteSegments: 'record',
   autoRetryRecord: 'record',
-  autoRecordDefault: 'record',
   proxyUrl: 'network',
-  notify: 'notify',
-  closeToTray: 'notify',
-  tgChatId: 'notify',
-  tgProxy: 'notify'
+  closeToTray: 'push',
+  tgChatId: 'push',
+  tgProxy: 'push',
+  watchMode: 'panda',
+  keepaliveStream: 'panda'
 }
 
 const dirtySecs = computed<Set<NavKey>>(() => {
   const out = new Set<NavKey>()
+  const f = form.value
+  const b = baseline.value
   for (const k of dirtyKeys.value) {
+    if (k === 'autoRecordDefault' || k === 'notify') {
+      if (!f || !b) continue
+      for (const p of PLATS) {
+        if (JSON.stringify(f[k][p]) !== JSON.stringify(b[k][p])) out.add(p === 'pandalive' ? 'panda' : 'soop')
+      }
+      continue
+    }
     const sec = SEC_OF_KEY[k as keyof Settings]
     if (sec) out.add(sec)
   }
-  // Token 草稿属通知节
-  if (tgTokenDraft.value.trim()) out.add('notify')
+  // Token 草稿属推送节
+  if (tgTokenDraft.value.trim()) out.add('push')
   return out
 })
 
@@ -355,11 +388,11 @@ function clone(s: Settings): Settings {
 
 // ---- 通知矩阵(D4): 平台 × 事件 × 通道 ----
 const PLATS: Platform[] = ['pandalive', 'soop']
-const notifyEvents = computed<{ key: NotifyEvent; label: string }[]>(() => [
-  { key: 'live', label: t('settings.nmLive') },
-  { key: 'offline', label: t('settings.nmOffline') },
-  { key: 'record', label: t('settings.nmRecord') },
-  { key: 'alert', label: t('settings.nmAlert') }
+const notifyEvents = computed<{ key: NotifyEvent; label: string; desc: string }[]>(() => [
+  { key: 'live', label: t('settings.nmLive'), desc: t('settings.nmLiveD') },
+  { key: 'offline', label: t('settings.nmOffline'), desc: t('settings.nmOfflineD') },
+  { key: 'record', label: t('settings.nmRecord'), desc: t('settings.nmRecordD') },
+  { key: 'alert', label: t('settings.nmAlert'), desc: t('settings.nmAlertD') }
 ])
 
 /** 「已单独覆盖 N 位」: 自录默认值只管新关注, 存量主播以观感为准给个数量提示 */
@@ -376,16 +409,15 @@ function setNotify(p: Platform, e: NotifyEvent, ch: 'system' | 'telegram', v: bo
   if (row) (row as NotifyRow)[ch] = v
 }
 
-/** 整矩阵开/关(声音列不动: 它只在开播行存在, 且「全部关闭」的诉求就是不响) */
-function setNotifyAll(v: boolean): void {
+/** 单平台整块开/关(声音列不动: 它只在开播行存在, 且「全部关闭」的诉求就是不响)。
+ *  矩阵按平台拆到各自节后, 整块按钮也跟着按平台走 —— 静音 SOOP 不该连 Panda 一起哑 */
+function setNotifyAll(p: Platform, v: boolean): void {
   const f = form.value
   if (!f) return
-  for (const p of PLATS) {
-    for (const e of ['live', 'offline', 'record', 'alert'] as NotifyEvent[]) {
-      const row = f.notify[p][e] as NotifyRow
-      row.system = v
-      row.telegram = v
-    }
+  for (const e of ['live', 'offline', 'record', 'alert'] as NotifyEvent[]) {
+    const row = f.notify[p][e] as NotifyRow
+    row.system = v
+    row.telegram = v
   }
 }
 
@@ -411,19 +443,22 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
     <!-- 主体: 左导航 + 右滚动区 -->
     <div class="flex-1 min-h-0 flex px-7 gap-5 pb-4">
       <nav class="w-[200px] shrink-0 pt-0.5">
-        <button
-          v-for="n in navs"
-          :key="n.key"
-          class="flex items-center gap-2.5 w-full px-3 py-2 rounded-ctl text-[13px] transition-colors text-left"
-          :class="activeNav === n.key
-            ? 'bg-card text-ink1 font-semibold shadow-card'
-            : 'text-ink2 hover:text-ink1 hover:bg-fillh'"
-          @click="scrollToSec(n.key)"
-        >
+        <template v-for="(g, gi) in navGroups" :key="gi">
+          <div v-if="g.label" class="px-3 text-[10.5px] text-ink3 tracking-wide" :class="gi === 0 ? 'pb-1' : 'mt-3.5 pb-1'">{{ g.label }}</div>
+          <button
+            v-for="n in g.items"
+            :key="n.key"
+            class="flex items-center gap-2.5 w-full px-3 py-2 rounded-ctl text-[13px] transition-colors text-left"
+            :class="activeNav === n.key
+              ? 'bg-card text-ink1 font-semibold shadow-card'
+              : 'text-ink2 hover:text-ink1 hover:bg-fillh'"
+            @click="scrollToSec(n.key)"
+          >
           <svg v-if="n.key === 'monitor'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="2.2"/><path stroke-linecap="round" d="M12 6.5a5.5 5.5 0 015.5 5.5M12 2.8a9.2 9.2 0 019.2 9.2"/></svg>
           <svg v-else-if="n.key === 'record'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="3.5"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/></svg>
           <svg v-else-if="n.key === 'network'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" d="M3 12h18M12 3c2.5 2.6 3.8 5.7 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.7-3.8-9S9.5 5.6 12 3z"/></svg>
-          <svg v-else-if="n.key === 'notify'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2a2 2 0 01-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1"/></svg>
+          <svg v-else-if="n.key === 'push'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2a2 2 0 01-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1"/></svg>
+          <svg v-else-if="n.key === 'panda' || n.key === 'soop'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3l7 4v5c0 4.4-3 7.4-7 9-4-1.6-7-4.6-7-9V7l7-4z"/></svg>
           <svg v-else-if="n.key === 'storage'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="6" rx="8" ry="3"/><path stroke-linecap="round" d="M4 6v6c0 1.66 3.58 3 8 3s8-1.34 8-3V6M4 12v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg>
           <svg v-else class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" d="M12 16v-5m0-3.5h.01"/></svg>
           <span class="flex-1 min-w-0 truncate">{{ n.label }}</span>
@@ -433,7 +468,8 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
             class="w-1.5 h-1.5 rounded-full bg-warnink shrink-0"
             :title="t('settings.dirtyHere')"
           ></i>
-        </button>
+          </button>
+        </template>
         <div class="mt-3.5 px-3 text-[11px] text-ink3 tabular-nums">SODALive Monitor v{{ info?.version || '…' }}</div>
       </nav>
 
@@ -491,23 +527,25 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
                 <div class="text-[13px] font-medium text-ink1">{{ t('settings.language') }}</div>
                 <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.langDesc') }}</div>
               </div>
-              <n-radio-group :value="form.locale" size="small" @update:value="applyLocale">
-                <n-radio-button value="zh-CN">{{ t('settings.langZh') }}</n-radio-button>
-                <n-radio-button value="en-US">{{ t('settings.langEn') }}</n-radio-button>
-              </n-radio-group>
+              <Seg
+                :model-value="form.locale"
+                :options="[
+                  { value: 'zh-CN', label: t('settings.langZh') },
+                  { value: 'en-US', label: t('settings.langEn') }
+                ]"
+                @update:model-value="applyLocale"
+              />
             </div>
           </div>
         </section>
 
-        <!-- 监控: 全局一条时间轴 + 两平台各自的采集面 -->
+        <!-- 监控: 两平台共用一条轮询时间轴; 平台专属采集项在各自的平台节里 -->
         <section data-sec="monitor" class="mb-5">
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
             <h2 class="sec-h">{{ t('settings.monitor') }}</h2>
             <span class="text-[11px] text-ink3 ml-auto">{{ t('settings.monitorDesc') }}</span>
           </div>
-
-          <div class="grp-h px-1 pb-1.5">{{ t('settings.grpGlobal') }}</div>
-          <div class="bg-card rounded-card shadow-card overflow-hidden mb-4">
+          <div class="bg-card rounded-card shadow-card overflow-hidden">
             <div class="flex items-center justify-between gap-4 px-4 py-3">
               <div>
                 <div class="text-[13px] font-medium text-ink1">{{ t('settings.pollSec') }}</div>
@@ -520,34 +558,16 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
                 <div class="text-[13px] font-medium text-ink1">{{ t('settings.defaultWs') }}</div>
                 <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.defaultWsD') }}</div>
               </div>
-              <n-radio-group v-model:value="form.defaultWorkspace" size="small">
-                <n-radio-button value="remember">{{ t('settings.wsRemember') }}</n-radio-button>
-                <!-- 平台称呼走 platformName()(与 PlatTag 同一出口), 不在模板里手打裸字:
-                     手打的 "Panda"/"SOOP" 与组件文案漂移时没人会发现(全站身份词只允许一处定义) -->
-                <n-radio-button value="pandalive">{{ platformName('pandalive') }}</n-radio-button>
-                <n-radio-button value="soop">{{ platformName('soop') }}</n-radio-button>
-              </n-radio-group>
-            </div>
-          </div>
-
-          <div class="flex items-baseline gap-2 px-1 pb-1.5">
-            <span class="grp-h">{{ t('settings.grpPanda') }}</span>
-            <span class="text-[10.5px] font-normal text-ink3">{{ t('settings.grpPandaD') }}</span>
-          </div>
-          <div class="bg-card rounded-card shadow-card overflow-hidden mb-4">
-            <div class="flex items-center justify-between gap-4 px-4 py-3">
-              <div>
-                <div class="flex items-center gap-2">
-                  <span class="text-[13px] font-medium text-ink1">{{ t('settings.watchMode') }}</span>
-                  <!-- 平台边界由徽标说, 不再靠标题里的"(仅 PandaLive)"长括注(中英长度差会撑出两行) -->
-                  <PlatTag platform="pandalive" size="sm" />
-                </div>
-                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.watchModeDesc') }}</div>
-              </div>
-              <n-radio-group v-model:value="form.watchMode" size="small">
-                <n-radio-button value="list">{{ t('settings.modeList') }}</n-radio-button>
-                <n-radio-button value="per-anchor">{{ t('settings.modePer') }}</n-radio-button>
-              </n-radio-group>
+              <!-- 平台称呼走 platformName()(与 PlatTag 同一出口), 不在模板里手打裸字:
+                   手打的 "Panda"/"SOOP" 与组件文案漂移时没人会发现(全站身份词只允许一处定义) -->
+              <Seg
+                v-model="form.defaultWorkspace"
+                :options="[
+                  { value: 'remember', label: t('settings.wsRemember') },
+                  { value: 'pandalive', label: platformName('pandalive') },
+                  { value: 'soop', label: platformName('soop') }
+                ]"
+              />
             </div>
             <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-line/40">
               <div>
@@ -556,7 +576,7 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
               </div>
               <n-input-number v-model:value="form.requestGapMs" :min="300" :max="10000" :step="100" size="small" class="!w-28" />
             </div>
-            <div class="grid grid-cols-2 gap-2.5 px-4 py-3 border-t border-line/40">
+            <div class="grid grid-cols-1 gap-2.5 px-4 py-3 border-t border-line/40">
               <div :class="tileCls" role="switch" :aria-checked="form.prefetchStream" tabindex="0" @click="tileClick($event, 'prefetchStream')" @keydown.space.prevent="tileKey('prefetchStream')" @keydown.enter="tileKey('prefetchStream')">
                 <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.prefetch') }}</div>
@@ -564,54 +584,6 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
                 </div>
                 <n-switch size="small" v-model:value="form.prefetchStream" />
               </div>
-              <div :class="tileCls" role="switch" :aria-checked="form.keepaliveStream" tabindex="0" @click="tileClick($event, 'keepaliveStream')" @keydown.space.prevent="tileKey('keepaliveStream')" @keydown.enter="tileKey('keepaliveStream')">
-                <div class="min-w-0 flex-1">
-                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.keepalive') }}</div>
-                  <div class="text-[10.5px] text-ink3">{{ t('settings.keepaliveD') }}</div>
-                </div>
-                <n-switch size="small" v-model:value="form.keepaliveStream" />
-              </div>
-            </div>
-          </div>
-
-          <div class="flex items-baseline gap-2 px-1 pb-1.5">
-            <span class="grp-h">{{ t('settings.grpSoop') }}</span>
-            <span class="text-[10.5px] font-normal text-ink3">{{ t('settings.grpSoopD') }}</span>
-          </div>
-          <div class="bg-card rounded-card shadow-card overflow-hidden">
-            <div class="flex items-center justify-between gap-4 px-4 py-3">
-              <div>
-                <div class="flex items-center gap-2">
-                  <span class="text-[13px] font-medium text-ink1">{{ t('settings.soopChain') }}</span>
-                  <PlatTag platform="soop" size="sm" />
-                </div>
-                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.soopChainD') }}</div>
-              </div>
-              <div class="text-right shrink-0">
-                <div class="text-[12px] font-semibold text-ink1">{{ t('settings.soopChainFixed') }}</div>
-                <div v-if="soopStatus" class="text-[11px] text-ink3 mt-0.5 tabular-nums">
-                  {{ t('settings.soopRound', { ms: soopStatus.roundMs, n: soopStatus.monitored, at: soopStatus.lastRoundAt ? roundTime(soopStatus.lastRoundAt) : '—' }) }}
-                </div>
-              </div>
-            </div>
-            <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-line/40">
-              <div>
-                <div class="text-[13px] font-medium text-ink1">{{ t('settings.soopLogin') }}</div>
-                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.soopLoginD') }}</div>
-              </div>
-              <div class="flex items-center gap-2 shrink-0">
-                <span class="text-[12px]" :class="soopAccount?.realLogin ? 'text-okink' : 'text-warnink'">
-                  {{ soopAccount?.realLogin ? t('settings.soopLoginOn', { id: soopAccount.loginId || soopAccount.nick || '—' }) : t('settings.soopLoginOff') }}
-                </span>
-                <n-button size="tiny" secondary @click="router.push({ name: 'account', query: { plat: 'soop' } })">{{ t('settings.goAccount') }}</n-button>
-              </div>
-            </div>
-            <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-line/40">
-              <div>
-                <div class="text-[13px] font-medium text-ink1">{{ t('settings.soopNa') }}</div>
-                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.soopNaD') }}</div>
-              </div>
-              <span class="text-[12px] text-deco shrink-0">{{ t('settings.na') }}</span>
             </div>
           </div>
         </section>
@@ -678,9 +650,9 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
               </div>
             </div>
 
-            <!-- 自动化: 一块磁贴 + 按平台的开播自录默认值并排(此前磁贴独占半行、右侧留空) -->
+            <!-- 自动化: 开播自录默认值是按平台分的, 已移到各平台节 -->
             <div class="px-4 pt-3.5 pb-1 grp-h border-t border-line/40">{{ t('settings.automation') }}</div>
-            <div class="grid grid-cols-2 gap-2.5 px-4 py-3">
+            <div class="grid grid-cols-1 gap-2.5 px-4 py-3">
               <div :class="tileCls" role="switch" :aria-checked="form.autoRetryRecord" tabindex="0" @click="tileClick($event, 'autoRetryRecord')" @keydown.space.prevent="tileKey('autoRetryRecord')" @keydown.enter="tileKey('autoRetryRecord')">
                 <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.autoRetry') }}</div>
@@ -688,22 +660,6 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
                   <div class="text-[10.5px] text-ink3">{{ t('settings.autoRetryD', { max: REC_RETRY_MAX }) }}</div>
                 </div>
                 <n-switch size="small" v-model:value="form.autoRetryRecord" />
-              </div>
-
-              <!-- 开播自动录制的默认值按平台各留一档(SOOP 有 19+/限区房, 默认全开会撞进拉不到源的录制) -->
-              <div class="rounded-ctl bg-fill px-3 py-2.5">
-                <div class="text-[12.5px] font-semibold text-ink1 leading-snug mb-2">{{ t('settings.autoRecDef') }}</div>
-                <div class="space-y-2">
-                  <div v-for="p in PLATS" :key="p" class="flex items-center gap-3">
-                    <PlatTag :platform="p" size="sm" />
-                    <n-radio-group v-model:value="form.autoRecordDefault[p]" size="small">
-                      <n-radio-button :value="false">{{ t('settings.autoRecOff') }}</n-radio-button>
-                      <n-radio-button :value="true">{{ t('settings.autoRecOn') }}</n-radio-button>
-                    </n-radio-group>
-                    <span class="text-[11px] text-ink3">{{ t('settings.autoRecOver', { n: autoRecOverrides(p) }) }}</span>
-                  </div>
-                  <p class="text-[10.5px] text-ink3 leading-relaxed">{{ t('settings.autoRecDefD') }}</p>
-                </div>
               </div>
             </div>
           </div>
@@ -726,50 +682,14 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
           </div>
         </section>
 
-        <!-- 通知与行为 -->
-        <section data-sec="notify" class="mb-5">
+        <!-- 推送与行为: 通道(Telegram)与窗口行为是两平台共用的; 各平台的通知格在平台节里 -->
+        <section data-sec="push" class="mb-5">
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
             <h2 class="sec-h">{{ t('settings.notify') }}</h2>
             <span class="text-[11px] text-ink3 ml-auto">{{ t('settings.notifyDesc') }}</span>
           </div>
           <div class="bg-card rounded-card shadow-card overflow-hidden">
-            <!-- 通知矩阵(D4): 行 = 平台 × 事件, 列 = 系统通知 / Telegram / 声音。
-                 声音列只在开播行给开关 —— 其余行挂了也没人听, 与其摆个假开关不如标「—」 -->
-            <div class="flex items-center gap-2 px-4 pt-3.5 pb-1">
-              <span class="grp-h">{{ t('settings.nmTitle') }}</span>
-              <!-- 整块开/关: 静音全部是真实诉求(逐格点 16 下不是) -->
-              <div class="ml-auto flex items-center gap-1.5">
-                <n-button size="tiny" tertiary @click="setNotifyAll(true)">{{ t('settings.nmAllOn') }}</n-button>
-                <n-button size="tiny" tertiary @click="setNotifyAll(false)">{{ t('settings.nmAllOff') }}</n-button>
-              </div>
-            </div>
-            <div class="px-4 pb-2 text-[10.5px] text-ink3 leading-relaxed">{{ t('settings.nmDesc') }}</div>
-            <table class="w-full text-[12.5px] px-4 pb-2">
-              <thead>
-                <tr class="text-[11px] text-ink3">
-                  <th class="text-left font-medium py-1.5">{{ t('settings.nmEvent') }}</th>
-                  <th class="w-[92px] font-medium text-center">{{ t('settings.nmSystem') }}</th>
-                  <th class="w-[92px] font-medium text-center">{{ t('settings.nmTg') }}</th>
-                  <th class="w-[92px] font-medium text-center">{{ t('settings.nmSound') }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <template v-for="p in PLATS" :key="p">
-                  <tr v-for="e in notifyEvents" :key="p + e.key" class="border-t border-line/40">
-                    <td class="py-1.5 text-ink1">
-                      <PlatTag :platform="p" size="sm" class="mr-1.5" />{{ e.label }}
-                    </td>
-                    <td class="text-center"><n-switch size="small" :value="form.notify[p][e.key].system" @update:value="(v: boolean) => setNotify(p, e.key, 'system', v)" /></td>
-                    <td class="text-center"><n-switch size="small" :value="form.notify[p][e.key].telegram" @update:value="(v: boolean) => setNotify(p, e.key, 'telegram', v)" /></td>
-                    <td class="text-center">
-                      <n-switch v-if="e.key === 'live'" size="small" v-model:value="form.notify[p].live.sound" />
-                      <span v-else class="text-deco">—</span>
-                    </td>
-                  </tr>
-                </template>
-              </tbody>
-            </table>
-            <div class="grid grid-cols-3 gap-2.5 px-4 py-3 border-t border-line/40">
+            <div class="grid grid-cols-1 gap-2.5 px-4 py-3">
               <div :class="tileCls" role="switch" :aria-checked="form.closeToTray" tabindex="0" @click="tileClick($event, 'closeToTray')" @keydown.space.prevent="tileKey('closeToTray')" @keydown.enter="tileKey('closeToTray')">
                 <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.closeToTray') }}</div>
@@ -780,7 +700,7 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
             </div>
 
             <!-- Telegram 推送 -->
-            <div class="px-4 pb-3.5">
+            <div class="px-4 pb-3.5 pt-3 border-t border-line/40">
               <div class="rounded-ctl bg-fill px-3.5 py-3">
                 <div class="text-[12.5px] font-semibold text-ink1 mb-2">{{ t('settings.tgTitle') }}</div>
                 <div class="grid grid-cols-2 gap-2.5">
@@ -839,6 +759,202 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
                 <div class="text-[10.5px] text-ink3 mt-0.5">{{ t('settings.logsMeta') }}</div>
                 <n-button size="tiny" secondary class="mt-2.5" @click="openLogsDir">{{ t('settings.openLogs') }}</n-button>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Panda: 平台专属项自成一节 —— 检测模式、源保活、开播自录默认、通知矩阵 -->
+        <section data-sec="panda" class="mb-5">
+          <div class="flex items-baseline gap-2.5 px-1 pb-2">
+            <h2 class="sec-h">{{ platformName('pandalive') }}</h2>
+            <span class="text-[11px] text-ink3 ml-auto">{{ t('settings.pandaDesc') }}</span>
+          </div>
+          <div class="bg-card rounded-card shadow-card overflow-hidden">
+            <div class="px-4 pt-3.5 pb-1 grp-h">{{ t('settings.grpCollect') }}</div>
+            <div class="flex items-center justify-between gap-4 px-4 py-3">
+              <div>
+                <div class="text-[13px] font-medium text-ink1">{{ t('settings.watchMode') }}</div>
+                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.watchModeDesc') }}</div>
+              </div>
+              <Seg
+                v-model="form.watchMode"
+                :options="[
+                  { value: 'list', label: t('settings.modeList') },
+                  { value: 'per-anchor', label: t('settings.modePer') }
+                ]"
+              />
+            </div>
+            <div class="grid grid-cols-1 gap-2.5 px-4 py-3 border-t border-line/40">
+              <div :class="tileCls" role="switch" :aria-checked="form.keepaliveStream" tabindex="0" @click="tileClick($event, 'keepaliveStream')" @keydown.space.prevent="tileKey('keepaliveStream')" @keydown.enter="tileKey('keepaliveStream')">
+                <div class="min-w-0 flex-1">
+                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.keepalive') }}</div>
+                  <div class="text-[10.5px] text-ink3">{{ t('settings.keepaliveD') }}</div>
+                </div>
+                <n-switch size="small" v-model:value="form.keepaliveStream" />
+              </div>
+            </div>
+
+            <div class="px-4 pt-3.5 pb-1 grp-h border-t border-line/40">{{ t('settings.grpAutoRec') }}</div>
+            <div class="flex items-center justify-between gap-4 px-4 py-3">
+              <div class="min-w-0">
+                <div class="text-[13px] font-medium text-ink1">{{ t('settings.autoRecDef') }}</div>
+                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.autoRecDefD') }}</div>
+              </div>
+              <div class="flex items-center gap-2.5 shrink-0">
+                <span class="text-[11px] text-ink3">{{ t('settings.autoRecOver', { n: autoRecOverrides('pandalive') }) }}</span>
+                <Seg
+                  v-model="form.autoRecordDefault.pandalive"
+                  :options="[
+                    { value: false, label: t('settings.autoRecOff') },
+                    { value: true, label: t('settings.autoRecOn') }
+                  ]"
+                />
+              </div>
+            </div>
+
+            <!-- 通知矩阵(D4)按平台拆节: 行 = 事件, 列 = 系统通知 / Telegram / 声音。
+                 承载面是 bg-fill 圆角面板而不是裸 table —— 卡片里直接摆表格会长出通栏细线与悬空表头,
+                 全站没有第二处这么写(瓷片/面板才是「一组同类控件」的既有语言)。
+                 声音列只在开播行给开关 —— 其余行挂了也没人听, 与其摆个假开关不如标「—」 -->
+            <div class="flex items-center gap-2 px-4 pt-3.5 pb-2 border-t border-line/40">
+              <span class="grp-h">{{ t('settings.nmTitle') }}</span>
+              <!-- 整块开/关按平台走: 静音一个平台不该把另一个也哑掉 -->
+              <div class="ml-auto flex items-center gap-1.5">
+                <n-button size="tiny" tertiary @click="setNotifyAll('pandalive', true)">{{ t('settings.nmAllOn') }}</n-button>
+                <n-button size="tiny" tertiary @click="setNotifyAll('pandalive', false)">{{ t('settings.nmAllOff') }}</n-button>
+              </div>
+            </div>
+            <div class="px-4 pb-3.5">
+              <div data-nm="pandalive" class="rounded-ctl bg-fill overflow-hidden">
+                <div class="grid grid-cols-[minmax(0,1fr)_repeat(3,68px)] items-center px-3 pt-2 pb-1.5">
+                  <span class="text-[10.5px] text-ink3">{{ t('settings.nmEvent') }}</span>
+                  <span class="text-[10.5px] text-ink3 text-center">{{ t('settings.nmSystem') }}</span>
+                  <span class="text-[10.5px] text-ink3 text-center">{{ t('settings.nmTg') }}</span>
+                  <span class="text-[10.5px] text-ink3 text-center">{{ t('settings.nmSound') }}</span>
+                </div>
+                <div
+                  v-for="e in notifyEvents"
+                  :key="e.key"
+                  data-nm-row
+                  class="grid grid-cols-[minmax(0,1fr)_repeat(3,68px)] items-center px-3 py-2 border-t border-line/40 transition-colors hover:bg-fillh"
+                >
+                  <div class="min-w-0 pr-2">
+                    <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ e.label }}</div>
+                    <div class="text-[10.5px] text-ink3 mt-0.5">{{ e.desc }}</div>
+                  </div>
+                  <div class="grid place-items-center">
+                    <n-switch size="small" :value="form.notify.pandalive[e.key].system" @update:value="(v: boolean) => setNotify('pandalive', e.key, 'system', v)" />
+                  </div>
+                  <div class="grid place-items-center">
+                    <n-switch size="small" :value="form.notify.pandalive[e.key].telegram" @update:value="(v: boolean) => setNotify('pandalive', e.key, 'telegram', v)" />
+                  </div>
+                  <div class="grid place-items-center">
+                    <n-switch v-if="e.key === 'live'" size="small" v-model:value="form.notify.pandalive.live.sound" />
+                    <span v-else class="text-deco text-[12px]">—</span>
+                  </div>
+                </div>
+              </div>
+              <div class="pt-2 text-[10.5px] text-ink3 leading-relaxed">{{ t('settings.nmDesc') }}</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SOOP: 采集链是只读事实(设计稿 S6 读状态不给假开关), 可写的只有自录默认与通知矩阵 -->
+        <section data-sec="soop" class="mb-5">
+          <div class="flex items-baseline gap-2.5 px-1 pb-2">
+            <h2 class="sec-h">{{ platformName('soop') }}</h2>
+            <span class="text-[11px] text-ink3 ml-auto">{{ t('settings.soopDesc') }}</span>
+          </div>
+          <div class="bg-card rounded-card shadow-card overflow-hidden">
+            <div class="px-4 pt-3.5 pb-1 grp-h">{{ t('settings.grpCollect') }}</div>
+            <div class="flex items-center justify-between gap-4 px-4 py-3">
+              <div>
+                <div class="text-[13px] font-medium text-ink1">{{ t('settings.soopChain') }}</div>
+                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.soopChainD') }}</div>
+              </div>
+              <div class="text-right shrink-0">
+                <div class="text-[12px] font-semibold text-ink1">{{ t('settings.soopChainFixed') }}</div>
+                <div v-if="soopStatus" class="text-[11px] text-ink3 mt-0.5 tabular-nums">
+                  {{ t('settings.soopRound', { ms: soopStatus.roundMs, n: soopStatus.monitored, at: soopStatus.lastRoundAt ? roundTime(soopStatus.lastRoundAt) : '—' }) }}
+                </div>
+              </div>
+            </div>
+            <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-line/40">
+              <div>
+                <div class="text-[13px] font-medium text-ink1">{{ t('settings.soopLogin') }}</div>
+                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.soopLoginD') }}</div>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <span class="text-[12px]" :class="soopAccount?.realLogin ? 'text-okink' : 'text-warnink'">
+                  {{ soopAccount?.realLogin ? t('settings.soopLoginOn', { id: soopAccount.loginId || soopAccount.nick || '—' }) : t('settings.soopLoginOff') }}
+                </span>
+                <n-button size="tiny" secondary @click="router.push({ name: 'account', query: { plat: 'soop' } })">{{ t('settings.goAccount') }}</n-button>
+              </div>
+            </div>
+            <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-line/40">
+              <div>
+                <div class="text-[13px] font-medium text-ink1">{{ t('settings.soopNa') }}</div>
+                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.soopNaD') }}</div>
+              </div>
+              <span class="text-[12px] text-deco shrink-0">{{ t('settings.na') }}</span>
+            </div>
+
+            <div class="px-4 pt-3.5 pb-1 grp-h border-t border-line/40">{{ t('settings.grpAutoRec') }}</div>
+            <div class="flex items-center justify-between gap-4 px-4 py-3">
+              <div class="min-w-0">
+                <div class="text-[13px] font-medium text-ink1">{{ t('settings.autoRecDef') }}</div>
+                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.soopAutoRecD') }}</div>
+              </div>
+              <div class="flex items-center gap-2.5 shrink-0">
+                <span class="text-[11px] text-ink3">{{ t('settings.autoRecOver', { n: autoRecOverrides('soop') }) }}</span>
+                <Seg
+                  v-model="form.autoRecordDefault.soop"
+                  :options="[
+                    { value: false, label: t('settings.autoRecOff') },
+                    { value: true, label: t('settings.autoRecOn') }
+                  ]"
+                />
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2 px-4 pt-3.5 pb-2 border-t border-line/40">
+              <span class="grp-h">{{ t('settings.nmTitle') }}</span>
+              <div class="ml-auto flex items-center gap-1.5">
+                <n-button size="tiny" tertiary @click="setNotifyAll('soop', true)">{{ t('settings.nmAllOn') }}</n-button>
+                <n-button size="tiny" tertiary @click="setNotifyAll('soop', false)">{{ t('settings.nmAllOff') }}</n-button>
+              </div>
+            </div>
+            <div class="px-4 pb-3.5">
+              <div data-nm="soop" class="rounded-ctl bg-fill overflow-hidden">
+                <div class="grid grid-cols-[minmax(0,1fr)_repeat(3,68px)] items-center px-3 pt-2 pb-1.5">
+                  <span class="text-[10.5px] text-ink3">{{ t('settings.nmEvent') }}</span>
+                  <span class="text-[10.5px] text-ink3 text-center">{{ t('settings.nmSystem') }}</span>
+                  <span class="text-[10.5px] text-ink3 text-center">{{ t('settings.nmTg') }}</span>
+                  <span class="text-[10.5px] text-ink3 text-center">{{ t('settings.nmSound') }}</span>
+                </div>
+                <div
+                  v-for="e in notifyEvents"
+                  :key="e.key"
+                  data-nm-row
+                  class="grid grid-cols-[minmax(0,1fr)_repeat(3,68px)] items-center px-3 py-2 border-t border-line/40 transition-colors hover:bg-fillh"
+                >
+                  <div class="min-w-0 pr-2">
+                    <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ e.label }}</div>
+                    <div class="text-[10.5px] text-ink3 mt-0.5">{{ e.desc }}</div>
+                  </div>
+                  <div class="grid place-items-center">
+                    <n-switch size="small" :value="form.notify.soop[e.key].system" @update:value="(v: boolean) => setNotify('soop', e.key, 'system', v)" />
+                  </div>
+                  <div class="grid place-items-center">
+                    <n-switch size="small" :value="form.notify.soop[e.key].telegram" @update:value="(v: boolean) => setNotify('soop', e.key, 'telegram', v)" />
+                  </div>
+                  <div class="grid place-items-center">
+                    <n-switch v-if="e.key === 'live'" size="small" v-model:value="form.notify.soop.live.sound" />
+                    <span v-else class="text-deco text-[12px]">—</span>
+                  </div>
+                </div>
+              </div>
+              <div class="pt-2 text-[10.5px] text-ink3 leading-relaxed">{{ t('settings.nmDesc') }}</div>
             </div>
           </div>
         </section>
