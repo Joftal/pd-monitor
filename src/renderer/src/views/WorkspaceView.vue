@@ -488,8 +488,12 @@ watch(
           @click="toggleFilter('goneOnly')"
         >{{ t('ws.goneChip', { n: goneCount }) }}</button>
       </template>
-      <div class="flex-1"></div>
-      <span class="text-[12px] text-ink3 shrink-0">{{ kw ? t('ws.searchResult', { kw: store.searchKeyword.trim() }) : t('ws.memoryHint') }}</span>
+      <!-- 右端只在真有搜索词时出声: 「排序与页码在本视图内记忆」那句常驻说明已撤(2026-10-01),
+           没有可推的东西就别摆 flex-1 -->
+      <template v-if="kw">
+        <div class="flex-1"></div>
+        <span class="text-[12px] text-ink3 shrink-0">{{ t('ws.searchResult', { kw: store.searchKeyword.trim() }) }}</span>
+      </template>
     </div>
 
     <!-- 正文区(只换这一块: 顶栏 / 在播坞 / 分段完全不动) -->

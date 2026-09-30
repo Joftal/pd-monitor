@@ -63,7 +63,6 @@ export default {
     onlyFan: 'Fan rooms only',
     hideStale: 'Hide 90+ days {n}',
     hideStaleShort: '90+ days idle',
-    memoryHint: 'Sort and page are remembered per view',
     searchResult: 'Results for "{kw}"',
     clearKw: 'Clear search',
     clearFilters: 'Clear filters',

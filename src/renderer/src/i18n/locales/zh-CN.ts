@@ -66,7 +66,6 @@ export default {
     onlyFan: '仅看粉丝房',
     hideStale: '隐藏 90 天未播 {n}',
     hideStaleShort: '90 天未播',
-    memoryHint: '排序与页码在本视图内记忆',
     searchResult: '「{kw}」的搜索结果',
     clearKw: '清除搜索',
     clearFilters: '取消筛选',
