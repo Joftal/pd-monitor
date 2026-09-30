@@ -490,26 +490,35 @@ async function manualRefresh() {
             </div>
           </template>
           <div class="flex-1"></div>
-          <n-button size="small" secondary type="primary" :disabled="manualRefreshing" @click="manualRefresh" class="!min-w-[72px]">
+          <span class="w-px h-5 bg-line/70"></span>
+          <!-- 操作三枚按「这一页上谁最重要」分轻重, 不是按上线顺序:
+               录制是本页的核心动作 → 实心; 关注是可逆的收藏 → 描边; 刷新是随手可点的辅助 → 幽灵。
+               此前刷新穿 primary secondary(淡蓝底)看着像禁用, 关注却是全排最响的实心, 核心动作反而最弱。
+               宽度只给下限(!min-w-*), 长译文自己撑开。 -->
+          <n-button size="small" quaternary type="primary" :disabled="manualRefreshing" @click="manualRefresh" class="!min-w-[72px]">
             <span class="inline-flex items-center justify-center gap-1"><SpinIcon v-if="manualRefreshing" :size="12" />{{ t('player.refresh') }}</span>
           </n-button>
           <!-- 取关是这一排唯一的破坏性动作, 不能穿中性灰: 卡片菜单与离线行的取关都是红字, 同一动作在第四处不能反过来最不像它 -->
-          <n-button size="small" :secondary="following" :type="following ? 'error' : 'primary'" @click="toggleFollow">
+          <n-button size="small" secondary :type="following ? 'error' : 'primary'" @click="toggleFollow" class="!min-w-[76px]">
             {{ following ? t('player.unfollow') : t('player.follow') }}
           </n-button>
-          <n-button v-if="!isVod" size="small" type="error" :secondary="!recording" @click="toggleRecord">
+          <!-- 录制按钮恒实心: 点下去之后若退回淡底, 这一排最要紧的动作反而在生效后最不明显。
+               开关态由文案自己的 ⏺/■ 承担(画面里再补一枚呼吸点就是重复标记), 底色不再参与编码
+               (naive error 档 = liveink 6.52:1, 可承载白字) -->
+          <n-button v-if="!isVod" size="small" type="error" @click="toggleRecord" class="!min-w-[92px]">
             {{ recording ? t('player.stopRec') : t('player.startRec') }}
           </n-button>
-          <n-button v-else size="small" type="primary" @click="toggleRecord">
+          <n-button v-else size="small" type="primary" @click="toggleRecord" class="!min-w-[92px]">
             {{ recording ? t('player.stopRec') : t('player.dlVod') }}
           </n-button>
         </div>
       </div>
 
-      <!-- ⑤ 侧栏(300px) -->
-      <aside class="w-[300px] shrink-0 flex flex-col gap-3 overflow-y-auto">
+      <!-- ⑤ 侧栏(300px): 面板一律 shrink-0 —— flex 列里默认会被压扁, 而 .panel 是 overflow:hidden,
+           压扁的结果不是出滚动条而是把尾部几行就地裁掉且永远滚不到(实机: 「上次失效」「开播自动录制」两行消失) -->
+      <aside class="w-[300px] shrink-0 min-h-0 flex flex-col gap-3 overflow-y-auto">
         <!-- ① 房间信息卡(设计稿 S5「房间信息」并入主播卡: 两处各列一遍观众数会互相打脸) -->
-        <div class="panel">
+        <div class="panel shrink-0">
           <img v-if="thumb" :src="thumb" class="w-full aspect-video object-cover" referrerpolicy="no-referrer" />
           <div class="flex items-center gap-2.5 px-3.5 pt-3 pb-2.5">
             <img v-if="userImg" :src="userImg" class="w-[42px] h-[42px] rounded-full object-cover shrink-0" referrerpolicy="no-referrer" />
@@ -547,7 +556,7 @@ async function manualRefresh() {
         </div>
 
         <!-- ② 播放源卡 -->
-        <div class="panel">
+        <div class="panel shrink-0">
           <div class="panel-h">
             <span class="panel-t">{{ t('player.curSource') }}</span>
             <button class="text-[11px] text-ink3 hover:text-brand hover:bg-brand/[0.10] rounded-md px-1.5 py-0.5 transition-colors" @click="copyUrl">{{ t('player.copy') }}</button>
@@ -585,12 +594,14 @@ async function manualRefresh() {
               <span class="kv-k">{{ t('player.autoRetry') }}</span>
               <span :class="retryCls">{{ retryText }}</span>
             </div>
+            <!-- 用法说明并到这一卡的脚注: 它讲的正是「源失效/卡顿怎么办」, 单占一枚蓝色大卡既抢视线又把侧栏顶出屏 -->
+            <p class="text-[10.5px] text-ink3 mt-1.5 leading-relaxed">{{ t('player.tips') }}</p>
           </div>
         </div>
 
         <!-- ③ 本房间录制参数: 一期没有 per-房间覆盖设置面, 所以这里如实标「跟随全局设置」,
              只有「开播自动录制」是本主播身上的开关(与设计稿原文的差别已记进 8.1 订正 B) -->
-        <div class="panel">
+        <div class="panel shrink-0">
           <div class="panel-h">
             <span class="panel-t">{{ t('player.recParams') }}</span>
             <span class="panel-x">{{ t('player.recParamsNote') }}</span>
@@ -613,12 +624,6 @@ async function manualRefresh() {
               <span class="kv-v" :class="autoRecHere ? 'text-okink' : 'text-ink3'">{{ t(autoRecHere ? 'player.recAutoOn' : 'player.recAutoOff') }}</span>
             </div>
           </div>
-        </div>
-
-        <!-- 提示卡: 这是「怎么用」的说明, 不是异常 → 信息承载面(brand 淡底 + brand 字, 设计稿 .banner.info)。
-             此前用 live 红底 80% 红字, 把一句普通说明染成了告警色, 且 11.5px 红字压淡红不达标 -->
-        <div class="rounded-ctl bg-brand/[0.07] border border-brand/[0.18] p-3.5 text-[11.5px] text-brand leading-relaxed">
-          {{ t('player.tips') }}
         </div>
       </aside>
     </div>
