@@ -309,12 +309,13 @@ const savePath = computed(() => store.settings?.savePath || '')
               </div>
               <div class="text-[10.5px] text-ink3 mt-1">{{ task.vod ? t('rec.rateVod') : t('rec.rateLive') }}</div>
             </div>
-            <!-- 操作 -->
-            <div class="flex flex-col gap-1.5 shrink-0 ml-2">
-              <n-button size="small" tertiary class="!w-[88px]" @click="enterRoom(task)">{{ t(task.vod ? 'rec.enterVod' : 'rec.enterRoom') }}</n-button>
-              <n-button v-if="task.vod" size="small" type="error" secondary class="!w-[88px]" @click="stop(task)">{{ t('rec.stopVod') }}</n-button>
-              <n-button v-else size="small" type="error" class="!w-[88px]" @click="stop(task)">{{ t('rec.stop') }}</n-button>
-              <n-button size="small" tertiary class="!w-[88px]" @click="openFolder(task.dirPath)">{{ t('rec.dir') }}</n-button>
+            <!-- 操作: 下限放在列上而不是每枚按钮上 —— 竖排按钮等宽才不参差, 又留出译文自己撑开的余量。
+                 96 是英文最长档「Open replay」的实测宽: 定在 88 会让在录行 88 / 回放行 96, 同一列两行左边缘错开 8px -->
+            <div class="flex flex-col gap-1.5 shrink-0 ml-2 !min-w-[96px]">
+              <n-button size="small" tertiary @click="enterRoom(task)">{{ t(task.vod ? 'rec.enterVod' : 'rec.enterRoom') }}</n-button>
+              <n-button v-if="task.vod" size="small" type="error" secondary @click="stop(task)">{{ t('rec.stopVod') }}</n-button>
+              <n-button v-else size="small" type="error" @click="stop(task)">{{ t('rec.stop') }}</n-button>
+              <n-button size="small" tertiary @click="openFolder(task.dirPath)">{{ t('rec.dir') }}</n-button>
             </div>
           </div>
           <!-- 底部: 管线阶段指示(任务跑在哪一棒、还剩几棒; 收尾期不再像卡死) -->

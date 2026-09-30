@@ -477,7 +477,7 @@ async function manualRefresh() {
             </div>
           </template>
           <div class="flex-1"></div>
-          <n-button size="small" secondary type="primary" :disabled="manualRefreshing" @click="manualRefresh" class="!w-[72px]">
+          <n-button size="small" secondary type="primary" :disabled="manualRefreshing" @click="manualRefresh" class="!min-w-[72px]">
             <span class="inline-flex items-center justify-center gap-1"><SpinIcon v-if="manualRefreshing" :size="12" />{{ t('player.refresh') }}</span>
           </n-button>
           <!-- 取关是这一排唯一的破坏性动作, 不能穿中性灰: 卡片菜单与离线行的取关都是红字, 同一动作在第四处不能反过来最不像它 -->

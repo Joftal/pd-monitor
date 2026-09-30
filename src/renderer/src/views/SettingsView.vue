@@ -1043,8 +1043,8 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
           <div class="flex items-center gap-2.5 bg-card/90 rounded-ctl px-3.5 py-[9px] shadow-[0_4px_16px_rgba(0,0,0,.06)] backdrop-blur">
             <span class="text-[11.5px]" :class="dirty ? 'text-warnink' : 'text-ink3'">{{ dirty ? t('settings.dirtyTextN', { n: dirtyKeys.size }) : t('settings.cleanText') }}</span>
             <div class="flex-1"></div>
-            <n-button secondary :disabled="!dirty" @click="resetForm" class="!w-[128px]">{{ t('settings.discard') }}</n-button>
-            <n-button type="primary" :disabled="!dirty || saving" @click="save" class="!w-[128px]">
+            <n-button secondary :disabled="!dirty" @click="resetForm" class="!min-w-[128px]">{{ t('settings.discard') }}</n-button>
+            <n-button type="primary" :disabled="!dirty || saving" @click="save" class="!min-w-[128px]">
               <span class="inline-flex items-center justify-center gap-1.5"><SpinIcon v-if="saving" />{{ t('settings.saveBtn') }}</span>
             </n-button>
           </div>

@@ -566,8 +566,8 @@ watch(
           <template v-else>{{ t('monitor.recognizeFail') }}</template>
         </div>
         <div class="flex justify-end gap-2 pt-1">
-          <n-button class="!w-[88px]" @click="showAdd = false">{{ t('monitor.cancel') }}</n-button>
-          <n-button type="primary" :disabled="!addParsed || addLoading" @click="addAnchor" class="!w-[88px]">
+          <n-button class="!min-w-[88px]" @click="showAdd = false">{{ t('monitor.cancel') }}</n-button>
+          <n-button type="primary" :disabled="!addParsed || addLoading" @click="addAnchor" class="!min-w-[88px]">
             <span class="inline-flex items-center justify-center gap-1.5"><SpinIcon v-if="addLoading" />{{ t('monitor.confirmFollow') }}</span>
           </n-button>
         </div>
