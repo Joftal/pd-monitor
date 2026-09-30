@@ -36,6 +36,7 @@
 //   D25 设置保存链: 提交载荷先脱代理; 脏判定的基线是进页快照; 拒绝出声; 闸门/代理/窗口底色三处生效动作在案
 //   D26 关于页身份: 作者/仓库/日志目录一律由 appInfo 下发, 渲染层不得写死(唯一定义处是 shared/appmeta.ts)
 //   D27 段标题一档: 段标题只用 .sec-h, 卡内分组只用 .grp-h; 模板不得手搓 13px bold tracking-wide
+//   D28 按钮宽度只锁下限: 按钮禁 !w-[Npx](定宽裁翻译), 下限 !min-w-[Npx]; 例外仅限表单列宽与弹窗宽
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -836,6 +837,34 @@ checkWithAllowlist(
     const used = views.filter((f) => new RegExp(`\\b${cls}\\b`).test(fs.readFileSync(f, 'utf8'))).length
     assert(used >= 1, `D27c .${cls} 至少被一个视图使用(定义了没人用 = 死令牌)`, `${used} 个视图`)
   }
+}
+
+// ============================================================================
+// D28 按钮宽度只锁下限: !min-w-[Npx] 允许, !w-[Npx] 禁止
+//   实测漏网: 账号页「打开登录窗口」定宽 112px 在中文下刚好, 切英文被裁成「Open login wind」——
+//   定宽锁的是「这一档视觉」, 却顺手裁掉了翻译。下限保住对齐的最小宽度, 长译文自己撑开。
+//   例外必须是「布局盒」而不是「文案盒」: 表单输入框与对话框的宽是列宽, 与翻译无关, 走白名单。
+// ============================================================================
+{
+  const vues = RENDERER.filter((f) => f.endsWith('.vue'))
+  const hard = []
+  eachLine(vues, (f, n, l) => {
+    if (isCommentLine(l)) return
+    if (/<(n-button|button)\b/.test(l) && /!w-\[\d+px\]/.test(l)) hard.push(`${loc(f, n)} ${l.trim().slice(0, 110)}`)
+  })
+  assert(hard.length === 0, 'D28 按钮不用定宽(裁掉的是翻译; 中文永远看不出问题)', hard.slice(0, 8).join('\n         '))
+
+  const LAYOUT_W = [
+    { where: 'AccountView.vue', re: /<n-input\b[^>]*!w-\[180px\]/, why: '托管账密的账号输入框是列宽' },
+    { where: 'WorkspaceView.vue', re: /<n-modal\b[^>]*!w-\[460px\]/, why: '添加房间对话框的弹窗宽' }
+  ]
+  for (const e of LAYOUT_W) {
+    const hit = vues.filter((f) => f.endsWith(e.where)).some((f) => e.re.test(fs.readFileSync(f, 'utf8')))
+    assert(hit, `D28b 定宽例外仍成立: ${e.where} 的 ${e.why}(例外不再命中任何行=该作废, 按仓库规矩直接 FAIL)`)
+  }
+
+  const floors = vues.reduce((a, f) => a + (fs.readFileSync(f, 'utf8').match(/!min-w-\[\d+px\]/g) || []).length, 0)
+  assert(floors >= 8, `D28c 下限写法覆盖面 ≥8 处(全应用按钮档位; 计数归零说明这条规则被静默拆除)`, `${floors} 处`)
 }
 
 // ============================================================================
