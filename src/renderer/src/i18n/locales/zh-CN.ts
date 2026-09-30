@@ -219,7 +219,6 @@ export default {
     liveSince: '开播于 {t}',
     srcOk: '源状态 · 正常',
     srcDead: '源状态 · 失效',
-    viewers: '观众',
     liveDur: '开播时长',
     labels: '标签',
     likes: '点赞',

@@ -399,10 +399,8 @@ async function manualRefresh() {
               <span class="w-1.5 h-1.5 rounded-full bg-live animate-breathe"></span>REC
             </span>
           </div>
-          <div v-if="m3u8 && viewers" class="absolute top-3 right-3 badge badge-sm bg-onimg text-white tabular-nums">
-            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5c-5 0-9 3.5-10.5 7C3 15.5 7 19 12 19s9-3.5 10.5-7C21 8.5 17 5 12 5zm0 11.5a4.5 4.5 0 110-9 4.5 4.5 0 010 9zm0-7.5a3 3 0 100 6 3 3 0 000-6z"/></svg>
-            {{ viewers }}
-          </div>
+          <!-- 观众数不在画面上再挂一枚: 这一屏只留标题元信息行那一个读数。
+               角标只随播放态出现, 源失效/密码房时它会连同自己那份上下文一起消失 -->
           <!-- 非播放态: 加载/密码房/错误 遮罩 -->
           <div v-if="!m3u8" class="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/95">
             <template v-if="loading">
@@ -533,10 +531,6 @@ async function manualRefresh() {
             <div class="kv">
               <span class="kv-k">{{ t('player.labels') }}</span>
               <span class="kv-v" :class="labelList ? 'text-ink1' : 'text-ink3'">{{ labelList || '—' }}</span>
-            </div>
-            <div class="kv">
-              <span class="kv-k">{{ t('player.viewers') }}</span>
-              <span class="kv-v">{{ viewers || '—' }}</span>
             </div>
             <div class="kv">
               <span class="kv-k">{{ t('player.liveDur') }}</span>

@@ -216,7 +216,6 @@ export default {
     liveSince: 'On air since {t}',
     srcOk: 'Source · OK',
     srcDead: 'Source · dead',
-    viewers: 'Viewers',
     liveDur: 'On-air time',
     labels: 'Tags',
     likes: 'Likes',
