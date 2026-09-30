@@ -39,7 +39,7 @@ const model = computed<LiveCardModel>(() => {
 
 async function setAuto(v: boolean): Promise<void> {
   await api.anchorsSetAuto(props.anchor.platform, props.anchor.userId, v)
-  store.anchors = await api.anchorsList()
+  await store.reloadAnchors()
 }
 </script>
 
@@ -57,12 +57,13 @@ async function setAuto(v: boolean): Promise<void> {
             <span>{{ t('monitor.autoRecTitle') }}</span>
             <n-switch size="small" :value="props.anchor.autoRecord" @update:value="setAuto" />
           </div>
-          <div class="px-3 py-2 text-[12.5px] text-ink2 hover:bg-fillh cursor-pointer" @click="api.openExternal(roomUrl(model.platform, model.userId))">
+          <!-- 菜单里的动作一律 button: 用 div+cursor-pointer 装按钮, 键盘 Tab 到不了, 而「取消关注」在离线行上本来是可聚焦的按钮 -->
+          <button class="w-full px-3 py-2 text-left text-[12.5px] text-ink2 hover:bg-fillh transition-colors" @click="api.openExternal(roomUrl(model.platform, model.userId))">
             {{ t('monitor.openInBrowser') }}
-          </div>
-          <div class="px-3 py-2 text-[12.5px] text-red-500 hover:bg-red-50 cursor-pointer" @click="emit('remove', model.platform, model.userId)">
+          </button>
+          <button class="w-full px-3 py-2 text-left text-[12.5px] text-liveink hover:bg-live/10 transition-colors" @click="emit('remove', model.platform, model.userId)">
             {{ t('card.unfollow') }}
-          </div>
+          </button>
         </div>
       </n-popover>
     </template>

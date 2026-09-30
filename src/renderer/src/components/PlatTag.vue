@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { type Platform } from '@shared/types'
+import { platformName, type Platform } from '@shared/types'
 
 // 全应用唯一的平台身份标记(设计稿 docs/design/dual-platform-ui-v2.html 第②屏)
 // 识别由文字承担, 色点只是余光强化: 转灰度/色觉障碍下不失效
 const props = withDefaults(
   defineProps<{
     platform: Platform
-    /** lg=页头/卡头, md=列表与缩略图, sm=行内与设置项 */
-    size?: 'sm' | 'md' | 'lg'
+    /** R2 两档: sm=卡片墙与列表行, md=页头与卡头(同一视野只允许一档) */
+    size?: 'sm' | 'md'
     /** onimg=压在封面上, onsurf=贴在卡面/列表上; 两档只差底色, 文字与形状一致 */
     surface?: 'onimg' | 'onsurf'
   }>(),
@@ -19,7 +19,7 @@ const cls = computed(() => [`pt--${props.size}`, `pt--${props.surface}`, props.p
 </script>
 
 <template>
-  <span class="plat-tag" :class="cls"><i class="plat-tag__dot"></i>{{ platform === 'soop' ? 'SOOP' : 'PandaLive' }}</span>
+  <span class="plat-tag" :class="cls"><i class="plat-tag__dot"></i>{{ platformName(platform) }}</span>
 </template>
 
 <style scoped>
@@ -27,7 +27,7 @@ const cls = computed(() => [`pt--${props.size}`, `pt--${props.surface}`, props.p
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  border-radius: 7px;
+  border-radius: 6px;
   font-weight: 800;
   white-space: nowrap;
   letter-spacing: 0.01em;
@@ -48,11 +48,6 @@ const cls = computed(() => [`pt--${props.size}`, `pt--${props.surface}`, props.p
   box-shadow: 0 0 0 1.5px rgba(255, 212, 0, 0.3);
 }
 
-.pt--lg {
-  height: 24px;
-  padding: 0 9px;
-  font-size: 11.5px;
-}
 .pt--md {
   height: 21px;
   padding: 0 7px;
@@ -62,7 +57,7 @@ const cls = computed(() => [`pt--${props.size}`, `pt--${props.surface}`, props.p
   height: 18px;
   padding: 0 6px;
   font-size: 10.5px;
-  border-radius: 6px;
+  border-radius: 5px;
   gap: 4px;
 }
 .pt--sm .plat-tag__dot {

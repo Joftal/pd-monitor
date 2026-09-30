@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NButton, useMessage } from 'naive-ui'
+import { NButton, NEmpty, useMessage } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { api } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useI18n } from 'vue-i18n'
-import { baseName, fmtBytes, fmtDur, fmtDurHMS } from '@/utils/media'
-import PlatFilter from '@/components/PlatFilter.vue'
+import { baseName, fmtBytes, fmtClock, fmtDur, fmtDurHMS } from '@/utils/media'
+import LibrarySection from '@/components/LibrarySection.vue'
 import PlatTag from '@/components/PlatTag.vue'
-import { roomKey, type Platform, type RecTask } from '@shared/types'
+import { platformName, roomKey, type Platform, type RecTask } from '@shared/types'
+import { resolveWorkspace } from '@/workspace'
 
 const { t } = useI18n()
 const store = useAppStore()
@@ -33,6 +34,9 @@ onUnmounted(() => {
 // ---- 实时码率/下载速度: 复用 2s 任务推送做字节差分(纯前端, 零请求) ----
 const rates = ref<Record<string, number>>({}) // 房间主键 -> bytes/s
 let prevSnap: Record<string, { bytes: number; at: number }> = {}
+// 差分窗口只能按「字节真的长了」推进: bytes 由主进程每 2s stat 一次, 推送却按状态变更随时发。
+// 按推送间隔算, 同一 stat 窗口内的两次推送读出 0 Mbps、跨两个窗口的读出双倍 —— 实测 8.4 Mbps
+// 的稳流会在 0.0 / 8.4 / 17.8 / 26.1 之间跳, 读数全是采样噪声
 watch(
   () => store.recordings,
   (list) => {
@@ -42,10 +46,17 @@ watch(
     for (const task of list) {
       const k = roomKey(task.platform, task.userId)
       const p = prevSnap[k]
-      if (p && now > p.at) {
-        out[k] = Math.max(0, (task.bytes - p.bytes) / ((now - p.at) / 1000))
-      }
-      next[k] = { bytes: task.bytes, at: now }
+      if (p) {
+        if (task.bytes > p.bytes) {
+          out[k] = (task.bytes - p.bytes) / ((now - p.at) / 1000)
+          next[k] = { bytes: task.bytes, at: now }
+        } else {
+          // 三个 stat 周期(6s)都没长字节才是真的没在写; 窗口未满则沿用上一读数, 不拿 0 冒充停播
+          if (now - p.at >= 6000) out[k] = 0
+          else if (k in rates.value) out[k] = rates.value[k]
+          next[k] = p
+        }
+      } else next[k] = { bytes: task.bytes, at: now } // 首帧只记基线, 读数留 '—'
     }
     prevSnap = next
     rates.value = out
@@ -61,9 +72,12 @@ function fmtRate(task: RecTask): string {
 const fmtDurSec = fmtDurHMS
 
 // ---- 概览 ----
-// 平台筛选(与视频库同一口径): 两平台任务混排时, 同名主播只看卡面分不出来
-const platFilter = ref<'all' | Platform>('all')
-const active = computed(() => store.activeRecs.filter((x) => platFilter.value === 'all' || x.platform === platFilter.value))
+// 这一页没有平台 tab: 录制是跨平台的资源页(磁盘闸门与字节总量都是应用级的), 而且它没有
+// 「在播/发现/离线」那种视图, 少一层筛选反而少一种"上面的筛选只管上面"的歧义。
+// 平台身份由每张卡的 PlatTag 与下方监控总览的分行承担。
+// props.plat 只往下传给「库」分段用: 库有自己的一方筛选, 与本页的在录列表不是同一口径。
+const props = defineProps<{ plat?: string }>()
+const active = computed(() => store.activeRecs)
 const activeBytes = computed(() => store.activeRecs.reduce((s, task) => s + (task.bytes || 0), 0))
 const diskLow = computed(() => diskFree.value < (store.settings?.diskLimitGb ?? 1) * 2)
 const diskCaption = computed(() => {
@@ -78,10 +92,16 @@ function vodTotalLabel(task: RecTask): string {
   if (!task.vodTotalSec) return ''
   return task.vodTotalSec < 3600 ? `~${Math.round(task.vodTotalSec / 60)} ${t('common.min')}` : `~${fmtDurSec(task.vodTotalSec)}`
 }
+/** 下载完成度(0-100): 分母是 m3u8 清单算出的估算全长, 不是猜的 —— vodTotalSec 拉取失败为 0,
+ *  那种任务画一条永远不动的 0% 空条比不画更骗人, 所以返回 null 让调用方退回文字 */
+function vodPct(task: RecTask): number | null {
+  if (!task.vodTotalSec) return null
+  return Math.min(100, Math.round(((task.vodDoneSec || 0) / task.vodTotalSec) * 100))
+}
 
 /** 跳转到任务对应的直播间/回放间(PlayerView 自治拉源; 录制中的源已在缓存, 秒开零请求; 与录制进程互不影响) */
 function enterRoom(task: RecTask): void {
-  void router.push({ name: 'player', params: { platform: task.platform, userId: task.userId } })
+  void router.push({ name: 'player', params: { plat: task.platform, userId: task.userId } })
 }
 
 // ---- 管线阶段指示: 告诉用户任务在"哪一棒"、还有多少棒要跑(替代裸进度条, 收尾期不再像卡死) ----
@@ -93,7 +113,7 @@ interface PipeStage {
 function pipeStages(task: RecTask): PipeStage[] {
   const st = store.settings
   const out: PipeStage[] = [
-    { key: 'fetch', label: t('rec.pipeFetch') },
+    { key: 'fetch', label: t(task.vod ? 'rec.pipeFetchVod' : 'rec.pipeFetch') },
     { key: 'recording', label: t(task.vod ? 'rec.pipeDownload' : 'rec.pipeRecord') },
     { key: 'stopping', label: t('rec.pipeStop') }
   ]
@@ -114,55 +134,119 @@ async function stop(task: RecTask) {
 async function openFolder(dir: string) {
   await api.recOpenFolder(dir)
 }
+
+// ---- 监控总览(页头三件事之一) ----
+// 「为什么没录上」的根因绝大多数在监控侧(没在轮询/登录失效/撞风控), 只报录制数字会让人以为软件坏了。
+// 两平台各自一行: 轮询节奏与覆盖面对方完全不同, 合并成一个数字等于不说。
+const watchRows = computed(() =>
+  (['pandalive', 'soop'] as Platform[]).map((p) => {
+    const w = store.watcher?.byPlatform?.[p]
+    return {
+      plat: p,
+      monitored: w?.monitored ?? 0,
+      // 在播取关注列表的实况(anchors.isLive)而不是本轮探测数: 后者只在轮询那一刻为真
+      live: store.anchors.filter((a) => a.platform === p && a.isLive).length,
+      at: w?.lastRoundAt ? fmtClock(w.lastRoundAt) : '—',
+      running: !!w?.running,
+      cooling: !!w?.circuitOpen,
+      // 与顶栏胶囊同一判据: 这一站在跑但整轮看不见(拉取连续失败)。页头继续亮红心跳点+时间戳,
+      // 就等于同一屏上顶栏说「本轮失败」、这里说一切正常
+      failed: !!w?.message && !w.circuitOpen
+    }
+  })
+)
+
+// ---- 快捷入口: 这一页做不了的事(挑房间开录)与随时要够得到的东西(保存目录/录制参数) ----
+const qPlat = computed<Platform>(() => resolveWorkspace())
+const savePath = computed(() => store.settings?.savePath || '')
 </script>
 
 <template>
   <div class="h-full flex flex-col">
     <div class="flex-1 min-h-0 overflow-y-auto px-7 pb-6">
-      <!-- ① 页头 + 概览条 -->
-      <div class="flex items-end gap-4 pt-5">
-        <div class="shrink-0">
-          <h1 class="text-[21px] font-extrabold text-ink1 tracking-tight">{{ t('rec.title') }}</h1>
+      <!-- 撑满视口的列: 无数据时这一页只有「进行中」一只空盒子, 让它长到铺满剩余高度,
+           下半屏大片留白看起来才像「这一栏是空的」而不是「页面坏了」(㉘) -->
+      <div class="min-h-full flex flex-col">
+      <!-- ① 页头: 与直播页同一几何 —— 标题在左、概览与入口在右, 监控总览贴在标题下方(同一阅读起点)。
+           数字只在概览条出现一次: 副行原来复读「N 路进行中 · 已写入 X」, 与概览条同屏两套同样的人话。 -->
+      <div class="flex items-start gap-6 pt-5 pb-1">
+        <div class="flex-1 min-w-0">
+          <h1 class="page-h">{{ t('rec.title') }}</h1>
+          <!-- 刷新口径写在页头: 这一页的数字全是 2s 推送 + 前端差分, 不说清就会被当成秒级实况 -->
+          <p class="page-sub">{{ t('rec.pageSub') }}</p>
+          <!-- 磁盘不够是「这一页接下来会失败」的前置原因, 必须常驻页头: 这句告警原本只出现在任务行脚注里, 而没有任务在录时那一行根本不存在(设计稿 7.2) -->
+          <div v-if="diskLow" class="flex items-center gap-2 mt-2">
+            <span class="badge badge-md bg-warn/[0.14] text-warnink">{{ diskCaption }}</span>
+          </div>
+          <!-- 监控总览: 两平台各一行(轮询节奏与覆盖面对方完全不同, 合成一个数字等于不说) -->
+          <div class="mt-2.5 flex flex-col gap-1">
+            <div v-for="r in watchRows" :key="r.plat" class="text-[11.5px] text-ink3 flex items-center gap-1.5 tabular-nums">
+              <span
+                class="w-[7px] h-[7px] rounded-full shrink-0"
+                :class="!r.running ? 'bg-deco' : r.cooling || r.failed ? 'bg-warn' : 'bg-live'"
+              ></span>
+              <span class="text-ink2 font-semibold">{{ platformName(r.plat) }}</span>
+              <span>{{ t('rec.monN', { n: r.monitored }) }}</span>
+              <span class="text-ink3/50">·</span>
+              <span>{{ t('rec.monLiveN', { n: r.live }) }}</span>
+              <span class="text-ink3/50">·</span>
+              <span :class="r.cooling || r.failed ? 'text-warnink' : ''">
+                {{ !r.running ? t('rec.monStopped') : r.cooling ? t('rec.monCooling') : r.at }}
+              </span>
+              <template v-if="r.failed">
+                <span class="text-ink3/50">·</span>
+                <span class="text-warnink">{{ t('nav.wFailed') }}</span>
+              </template>
+            </div>
+          </div>
         </div>
-        <div class="ml-auto flex items-stretch bg-card rounded-2xl shadow-card overflow-hidden divide-x divide-line/70">
-          <div class="px-5 py-2 min-w-[100px]">
-            <div class="text-[11px] text-ink3 flex items-center gap-1.5">
-              <!-- 概览恒为全局口径: 不随下面的平台筛选缩小(已写字节总量也是全局的) -->
-              <span class="w-[7px] h-[7px] rounded-full bg-red-500" :class="store.activeRecs.length ? 'animate-breathe' : ''"></span>{{ t('rec.ovActive') }}
+        <div class="shrink-0 flex flex-col items-end gap-2">
+          <!-- 概览条: 恒为全局口径(已写字节总量与磁盘闸门是应用级的, 不随下面的平台筛选缩小) -->
+          <div class="flex items-stretch bg-card rounded-card shadow-card overflow-hidden divide-x divide-line/70">
+            <div class="px-5 py-2 min-w-[100px]">
+              <div class="text-[11px] text-ink3 flex items-center gap-1.5">
+                <span class="w-[7px] h-[7px] rounded-full bg-live" :class="store.activeRecs.length ? 'animate-breathe' : ''"></span>{{ t('rec.ovActive') }}
+              </div>
+              <div class="text-[19px] font-extrabold leading-tight tabular-nums" :class="store.activeRecs.length ? 'text-liveink' : 'text-ink1'">
+                {{ t('rec.ovActiveN', { n: store.activeRecs.length }) }}
+              </div>
             </div>
-            <div class="text-[19px] font-extrabold leading-tight tabular-nums" :class="store.activeRecs.length ? 'text-red-500' : 'text-ink1'">
-              {{ t('rec.ovActiveN', { n: store.activeRecs.length }) }}
+            <div class="px-5 py-2 min-w-[100px]">
+              <div class="text-[11px] text-ink3">{{ t('rec.ovBytes') }}</div>
+              <div class="text-[19px] font-extrabold leading-tight tabular-nums text-ink1">{{ fmtBytes(activeBytes) }}</div>
+            </div>
+            <div class="px-5 py-2 min-w-[100px]">
+              <div class="text-[11px] text-ink3">{{ t('rec.ovDisk') }}</div>
+              <div class="text-[19px] font-extrabold leading-tight tabular-nums" :class="diskLow ? 'text-warnink' : 'text-ink1'">
+                {{ diskFree.toFixed(1) }}<span class="text-[11px] font-medium text-ink3 ml-1">GB</span>
+              </div>
             </div>
           </div>
-          <div class="px-5 py-2 min-w-[100px]">
-            <div class="text-[11px] text-ink3">{{ t('rec.ovBytes') }}</div>
-            <div class="text-[19px] font-extrabold leading-tight tabular-nums text-ink1">{{ fmtBytes(activeBytes) }}</div>
-          </div>
-          <div class="px-5 py-2 min-w-[100px]">
-            <div class="text-[11px] text-ink3">{{ t('rec.ovDisk') }}</div>
-            <div class="text-[19px] font-extrabold leading-tight tabular-nums" :class="diskLow ? 'text-red-500' : 'text-ink1'">
-              {{ diskFree.toFixed(1) }}<span class="text-[11px] font-medium text-ink3 ml-1">GB</span>
-            </div>
+          <!-- 快捷入口: 这一页不能挑房间开录, 但必须能一步够到直播页/落盘目录/录制参数 -->
+          <div class="flex items-center gap-2">
+            <n-button size="small" tertiary @click="router.push({ name: 'live', params: { plat: qPlat } })">{{ t('rec.qLive') }}</n-button>
+            <!-- 没设目录时这一枚不去"打开"一个不存在的路径, 而是把人带去能设它的地方: 禁用按钮是死路, 不是提示 -->
+            <n-button size="small" tertiary @click="savePath ? openFolder(savePath) : router.push({ name: 'settings' })">{{ t('rec.openSaveDir') }}</n-button>
+            <n-button size="small" tertiary @click="router.push({ name: 'settings' })">{{ t('rec.qSettings') }}</n-button>
           </div>
         </div>
       </div>
 
       <!-- ② 进行中 · 大卡片 -->
-      <div class="flex items-center gap-2 mt-6 mb-3 px-0.5">
-        <h2 class="text-[14.5px] font-extrabold text-ink1 flex items-center gap-2">
-          <span class="w-2 h-2 rounded-full bg-red-500" :class="active.length ? 'animate-breathe' : ''"></span>{{ t('rec.secActive') }}
-          <span class="text-[11.5px] font-medium text-ink3">{{ t('rec.secActiveN', { n: active.length }) }}</span>
+      <div class="sec-bar">
+        <h2 class="sec-h">
+          <span class="w-2 h-2 rounded-full bg-live" :class="active.length ? 'animate-breathe' : ''"></span>{{ t('rec.secActive') }}
+          <span class="sec-n">{{ active.length }}</span>
         </h2>
         <span class="w-px h-4 bg-line mx-0.5"></span>
-        <PlatFilter :model-value="platFilter" @update:model-value="(v: string) => (platFilter = v as 'all' | Platform)" />
-        <span class="ml-auto text-[11.5px] text-ink3">{{ t('rec.rateNote') }}</span>
+        <span class="sec-tools">{{ t('rec.segInfo', { min: splitMin }) }} · {{ diskCaption }}</span>
       </div>
 
       <div v-if="active.length" class="space-y-3.5">
         <div
           v-for="task in active"
           :key="task.id"
-          class="relative bg-card rounded-2xl shadow-card hover:shadow-card-hover transition-all duration-200 px-5 pt-[18px] pb-4 overflow-hidden animate-pop"
+          class="relative bg-card rounded-card border border-line shadow-card hover:shadow-card-hover transition-shadow duration-150 px-5 pt-[18px] pb-4 overflow-hidden"
         >
           <div class="flex items-center gap-4">
             <!-- 直播间封面 + 呼吸点(无封面时回退昵称首字) -->
@@ -170,37 +254,39 @@ async function openFolder(dir: string) {
               <img
                 v-if="task.thumbUrl"
                 :src="task.thumbUrl"
-                class="block w-14 h-14 rounded-2xl object-cover"
+                class="block w-14 h-14 rounded-ctl object-cover"
                 referrerpolicy="no-referrer"
               />
               <div
                 v-else
-                class="w-14 h-14 rounded-2xl grid place-items-center text-[21px] font-bold"
-                :class="task.vod ? 'bg-[#f0a020]/10 text-[#d98a08]' : 'bg-live/10 text-live'"
+                class="w-14 h-14 rounded-ctl grid place-items-center text-[21px] font-bold"
+                :class="task.vod ? 'bg-brand/[0.10] text-brand' : 'bg-live/10 text-liveink'"
               >
                 {{ Array.from(task.nick)[0] }}
               </div>
               <span
                 class="absolute -right-[3px] -bottom-[3px] w-3.5 h-3.5 rounded-full ring-[2.5px] ring-card animate-breathe"
-                :class="task.vod ? 'bg-[#f0a020]' : 'bg-red-500'"
+                :class="task.vod ? 'bg-brand' : 'bg-live'"
               ></span>
             </div>
             <!-- 信息列 -->
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2">
                 <span class="text-[16px] font-extrabold text-ink1 truncate">{{ task.nick }}</span>
-                <span v-if="task.vod" class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#f0a020]/[0.14] text-[#d98a08]">{{ t('rec.tagVod') }}</span>
-                <span v-else class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-red-500/10 text-red-500">{{ t('rec.tagLive') }}</span>
-                <span v-if="task.auto" class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-sky-500/10 text-sky-600">{{ t('rec.tagAuto') }}</span>
-                <!-- 平台徽标: 两平台主播可能同名, 卡面只有昵称会录错人(封面仅 56px 方形放不下文字徽标, 留在卡头) -->
-                <PlatTag :platform="task.platform" size="lg" surface="onsurf" />
+                <span v-if="task.vod" class="badge badge-sm bg-brand/[0.10] text-brand">{{ t('rec.tagVod') }}</span>
+                <span v-else class="badge badge-sm bg-live/10 text-liveink">{{ t('rec.tagLive') }}</span>
+                <!-- 自动触发不是异常也不是状态机一档: 用中性徽标(设计稿 S4 草图的「自动」格), 不占状态色 -->
+                <span v-if="task.auto" class="badge badge-sm bg-fill text-ink2 border border-line">{{ t('rec.tagAuto') }}</span>
+                <!-- 平台徽标: 两平台主播可能同名, 卡面只有昵称会录错人(封面仅 56px 方形放不下文字徽标, 留在卡头)。
+                     整行统一 sm 档 —— R2「同一视野只允许一档」, 与左侧状态徽标同高 -->
+                <PlatTag :platform="task.platform" size="sm" surface="onsurf" />
               </div>
               <div class="text-[12.5px] text-ink2 truncate mt-1" :title="task.title">{{ task.title || '—' }}</div>
               <div class="text-[11px] text-ink3 truncate mt-0.5 font-mono">{{ baseName(task.dirPath) }}/{{ baseName(task.currentFile) || '…' }}</div>
             </div>
             <!-- 指标簇 -->
             <div class="text-right shrink-0 tabular-nums">
-              <div class="text-[22px] font-extrabold leading-none" :class="task.vod ? 'text-[#d98a08]' : 'text-red-500'">
+              <div class="text-[22px] font-extrabold leading-none" :class="task.vod ? 'text-brand' : 'text-liveink'">
                 <!-- tick>=0 恒真仅作秒级刷新依赖(prevent 首秒渲染裸 0) -->
                 {{ task.vod && task.vodDoneSec ? fmtDurSec(task.vodDoneSec) : tick >= 0 && fmtDur(task.startedAt, null) }}
               </div>
@@ -218,10 +304,10 @@ async function openFolder(dir: string) {
             </div>
             <!-- 操作 -->
             <div class="flex flex-col gap-1.5 shrink-0 ml-2">
-              <n-button size="small" tertiary round class="!w-[88px]" @click="enterRoom(task)">{{ t(task.vod ? 'rec.enterVod' : 'rec.enterRoom') }}</n-button>
-              <n-button v-if="task.vod" size="small" type="error" secondary round class="!w-[88px]" @click="stop(task)">{{ t('rec.stopVod') }}</n-button>
-              <n-button v-else size="small" type="error" round class="!w-[88px]" @click="stop(task)">{{ t('rec.stop') }}</n-button>
-              <n-button size="small" tertiary round class="!w-[88px]" @click="openFolder(task.dirPath)">{{ t('rec.dir') }}</n-button>
+              <n-button size="small" tertiary class="!w-[88px]" @click="enterRoom(task)">{{ t(task.vod ? 'rec.enterVod' : 'rec.enterRoom') }}</n-button>
+              <n-button v-if="task.vod" size="small" type="error" secondary class="!w-[88px]" @click="stop(task)">{{ t('rec.stopVod') }}</n-button>
+              <n-button v-else size="small" type="error" class="!w-[88px]" @click="stop(task)">{{ t('rec.stop') }}</n-button>
+              <n-button size="small" tertiary class="!w-[88px]" @click="openFolder(task.dirPath)">{{ t('rec.dir') }}</n-button>
             </div>
           </div>
           <!-- 底部: 管线阶段指示(任务跑在哪一棒、还剩几棒; 收尾期不再像卡死) -->
@@ -236,31 +322,42 @@ async function openFolder(dir: string) {
                   <span
                     v-if="i === pipeCur(task)"
                     class="inline-block w-1.5 h-1.5 rounded-full align-[1px] mr-1 animate-breathe"
-                    :class="task.vod ? 'bg-[#f0a020]' : 'bg-live'"
+                    :class="task.vod ? 'bg-brand' : 'bg-live'"
                   ></span>{{ s.label }}<span v-if="i === pipeCur(task) && task.stageTotal" class="text-ink3 tabular-nums font-normal"> {{ task.stageCur }}/{{ task.stageTotal }}</span>
                 </span>
                 <span v-if="i < pipeStages(task).length - 1" class="text-ink3/30 select-none">→</span>
               </template>
             </div>
-            <div class="text-[11px] text-ink3 shrink-0 tabular-nums ml-auto">
+            <div class="text-[11px] text-ink3 shrink-0 tabular-nums ml-auto flex items-center gap-2.5">
+              <!-- 直播任务这一栏不留全局参数(分段/磁盘已经上移到段标题, 每张卡复读一遍是噪声);
+                   回放留真实完成度: 估算全长来自 m3u8 清单(vodTotalSec), 不是猜的百分比,
+                   清单拉不到全长时才退回纯文字, 免得画一条永远 0% 的假条 -->
               <template v-if="task.vod">
+                <span v-if="vodPct(task) !== null" class="w-[88px] meter" :title="`${vodPct(task)}%`"><i :style="{ width: `${vodPct(task)}%` }"></i></span>
                 {{ t('rec.vodCap', { done: fmtDurSec(task.vodDoneSec || 0), total: vodTotalLabel(task) }) }}
-              </template>
-              <template v-else>
-                {{ t('rec.segInfo', { min: splitMin }) }} · <b class="font-semibold" :class="diskLow ? 'text-red-500' : 'text-ink2'">{{ diskCaption }}</b> · {{ t('rec.collecting') }}
               </template>
             </div>
           </div>
         </div>
       </div>
-      <div v-else class="rounded-2xl border border-dashed border-line py-10 grid place-items-center bg-card/40">
-        <div class="text-center">
-          <div class="text-3xl mb-2">🎬</div>
-          <p class="text-[13px] text-ink3">{{ t('rec.emptyActive') }}</p>
-          <p class="text-[11.5px] text-ink3/70 mt-1">{{ t('rec.emptyActiveHint') }}</p>
-        </div>
+      <!-- 撑满视口的空槽: 内容贴顶而不是居中 —— 居中的小字飘在 570px 的框正中, 与 ㉕ 反对的
+           「整屏一行小字」只是隔了一层边框; 贴顶才读作「这一栏在等任务进来」 -->
+      <div v-else class="flex-1 min-h-[200px] rounded-card border border-dashed border-line pt-12 grid items-start justify-center bg-card/40">
+        <n-empty :description="t('rec.emptyActive')" size="small" class="text-ink3">
+          <template #extra>
+            <!-- 空态的下一步要能点: 原来这里只有一句「到直播页点 ⏺」的文字描述, 动作本身在页头另一侧 -->
+            <div class="flex flex-col items-center gap-2">
+              <span class="text-[11.5px] text-ink3">{{ t('rec.emptyActiveHint') }}</span>
+              <n-button size="small" secondary @click="router.push({ name: 'live', params: { plat: qPlat } })">{{ t('rec.qLive') }}</n-button>
+            </div>
+          </template>
+        </n-empty>
       </div>
 
+      <!-- ③ 库: 录完的落地结果就是库, 不再另立「历史任务」这个概念 —— 同一批数据两套说法、两套筛选是自我打脸。
+           库也不另立页面: 录制页是它的唯一入口, 地址里的平台段作为库的初始筛选往下传。 -->
+      <LibrarySection :plat="props.plat" />
+      </div>
     </div>
   </div>
 </template>

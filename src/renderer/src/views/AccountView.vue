@@ -43,28 +43,39 @@ const acc = computed(() => {
   const a = store.accounts
   if (!a) return null
   return isSoop.value
-    ? { realLogin: a.soop.realLogin, held: a.soop.hasCookies, netFail: a.soop.netFail, adult: false, idx: null as number | null, id: a.soop.loginId }
-    : { realLogin: a.pandalive.realLogin, held: a.pandalive.loggedIn, netFail: a.pandalive.netFail, adult: a.pandalive.isAdult, idx: a.pandalive.userIdx, id: '' }
+    ? { realLogin: a.soop.realLogin, held: a.soop.hasCookies, netFail: a.soop.netFail, adult: false, idx: null as number | null, id: a.soop.loginId, verifyAt: a.soop.lastVerifyAt }
+    : { realLogin: a.pandalive.realLogin, held: a.pandalive.loggedIn, netFail: a.pandalive.netFail, adult: a.pandalive.isAdult, idx: a.pandalive.userIdx, id: '', verifyAt: a.pandalive.lastVerifyAt }
 })
 
 const status = computed(() => {
   const a = acc.value
-  if (a?.realLogin) {
+  // 态还没回来只能是「正在校验」: 冷启动不再等官方接口, 把 null 报成未登录会凭空吓人去重登
+  if (!a) {
+    return {
+      mode: 'checking' as const,
+      title: t('account.stChecking'),
+      dot: 'bg-deco',
+      tile: 'bg-fill text-deco',
+      desc: t('account.checkingDesc'),
+      badge: null
+    }
+  }
+  if (a.realLogin) {
     return {
       mode: 'ok' as const,
       title: t('account.stOk'),
-      dot: 'bg-emerald-500 animate-breathe',
-      tile: 'bg-live/10 text-live',
+      dot: 'bg-ok animate-breathe',
+      tile: 'bg-ok/10 text-okink',
       desc: isSoop.value ? t('account.soopDescOk', { id: a.id }) : a.adult ? t('account.descOkAdult') : t('account.descOkNoAdult'),
       badge: !isSoop.value && a.adult ? t('account.badgeAdult') : null
     }
   }
-  if (a?.held) {
+  if (a.held) {
     return {
       mode: 'warn' as const,
       title: t('account.stWarn'),
-      dot: 'bg-amber-500 animate-breathe',
-      tile: 'bg-amber-500/10 text-amber-600',
+      dot: 'bg-warn animate-breathe',
+      tile: 'bg-warnbg text-warnink',
       desc: a.netFail ? t('account.netFailTip') : isSoop.value ? t('account.soopDescWarn') : t('account.descWarn'),
       badge: null
     }
@@ -72,8 +83,8 @@ const status = computed(() => {
   return {
     mode: 'none' as const,
     title: t('account.stNone'),
-    dot: 'bg-ink3',
-    tile: 'bg-fill text-ink3',
+    dot: 'bg-deco',
+    tile: 'bg-fill text-deco',
     desc: isSoop.value ? t('account.soopDescNone') : t('account.descNone'),
     badge: null
   }
@@ -83,17 +94,46 @@ async function refresh(): Promise<void> {
   store.accounts = await api.authState()
 }
 
-/** 分段按钮上的状态点: 绿=官方校验通过, 琥珀=本地存着会话但没过官方校验, 灰=从没登录过 */
-function platDot(p: Platform): string {
+/** 分段按钮上的登录态: 色点 + 短标签双通道(设计稿 S9) —— 纯色点时「琥珀」会被读成「已登录」 */
+function platState(p: Platform): { dot: string; text: string } {
   const a = store.accounts
-  if (!a) return 'bg-ink3'
+  if (!a) return { dot: 'bg-deco', text: t('nav.checking') }
   const s = p === 'soop' ? { live: a.soop.realLogin, held: a.soop.hasCookies } : { live: a.pandalive.realLogin, held: a.pandalive.loggedIn }
-  return s.live ? 'bg-emerald-500' : s.held ? 'bg-amber-500' : 'bg-ink3'
+  return s.live
+    ? { dot: 'bg-ok', text: t('account.segOk') }
+    : s.held
+      ? { dot: 'bg-warn', text: t('account.segWarn') }
+      : { dot: 'bg-deco', text: t('account.segNone') }
 }
 
-/** 分段右侧状态点: 绿=官方校验通过, 琥珀=有 Cookie 未过校验, 灰=未登录 */
-const platDots = computed(() => ({ pandalive: platDot('pandalive'), soop: platDot('soop') }))
+const platStates = computed(() => ({ pandalive: platState('pandalive'), soop: platState('soop') }))
 const platSegOptions: Platform[] = ['pandalive', 'soop']
+
+/** 「上次校验 MM-DD HH:mm」: 官方最后一次真实答复的时刻, 不是"页面最后刷新时刻" */
+const lastVerifyText = computed(() => {
+  const ms = acc.value?.verifyAt || 0
+  if (!ms) return ''
+  const d = new Date(ms)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+})
+
+const recheckLoading = ref(false)
+
+/** 立即向官方重发一次校验(绕过主进程结果缓存), 三态之一如实回显 */
+async function recheck() {
+  recheckLoading.value = true
+  try {
+    store.accounts = await api.authRecheck(plat.value)
+    // netFail 时既不是"已登录"也不是"会话未认证" —— 请求本身没成, 报状态会把它读成服务端判死
+    const outcome = acc.value?.netFail ? t('account.recheckNetFail') : status.value.title
+    message.info(t('account.recheckResult', { state: outcome }))
+  } catch (e) {
+    message.error(String((e as Error).message || e))
+  } finally {
+    recheckLoading.value = false
+  }
+}
 
 async function loginByWindow() {
   winLoading.value = true
@@ -184,40 +224,60 @@ async function clearCredentials() {
       <!-- 页头 -->
       <div class="flex items-start">
         <div>
-          <h1 class="text-[20px] font-extrabold text-ink1 tracking-tight">{{ t('account.title') }}</h1>
+          <h1 class="page-h">{{ t('account.title') }}</h1>
           <div class="text-[12px] text-ink3 mt-0.5">{{ t('account.sub') }}</div>
         </div>
         <!-- 平台分段: 两套会话彼此独立, 一次只看一方(与监控墙/录制/视频库同一 chip) -->
         <div class="ml-auto">
-          <PlatFilter :values="platSegOptions" :model-value="plat" :dots="platDots" @update:model-value="(v: string) => (plat = v as Platform)" />
+          <PlatFilter :values="platSegOptions" :model-value="plat" :states="platStates" @update:model-value="(v: string) => (plat = v as Platform)" />
         </div>
       </div>
 
-      <!-- ① 状态横幅(hero + 状态条二合一) -->
-      <div class="mt-4 bg-card rounded-[14px] shadow-card px-[18px] py-4 flex items-center gap-3.5">
-        <div class="w-10 h-10 rounded-xl grid place-items-center shrink-0 transition-colors" :class="status.tile">
-          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 12a4.4 4.4 0 100-8.8 4.4 4.4 0 000 8.8zM4.5 20.4c1-4.1 4.2-6.1 7.5-6.1s6.5 2 7.5 6.1a.9.9 0 01-.88 1.1H5.38a.9.9 0 01-.88-1.1z"/>
-          </svg>
-        </div>
-        <div class="min-w-0">
-          <div class="flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full shrink-0" :class="status.dot"></span>
-            <span class="text-[15px] font-bold text-ink1">{{ status.title }}</span>
-            <span v-if="status.mode === 'ok' && acc?.idx" class="text-[12px] text-ink3">uid {{ acc.idx }}</span>
-            <span v-else-if="status.mode === 'ok' && acc?.id" class="text-[12px] text-ink3">{{ acc.id }}</span>
+      <!-- 密钥降级: 页顶阻断式告警(设计稿 S9 ④)。原先埋在 SOOP 方式 C 的第三行小字里,
+           而那句"凭据经系统安全存储加密"在降级态就是假话, 必须在看到假话之前先看到更正 -->
+      <div v-if="store.settings && !store.settings.secretsEncrypted" class="mt-4 rounded-ctl border border-warn/45 bg-warnbg px-[14px] py-3 flex items-start gap-2.5">
+        <svg class="w-[17px] h-[17px] text-warnink shrink-0 mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.6 2.9 20h18.2z"/><path stroke-linecap="round" d="M12 10v4.2M12 17.2h.01"/></svg>
+        <div class="text-[12px] text-warnink leading-relaxed min-w-0">{{ t('account.vaultDown') }}</div>
+      </div>
+
+      <!-- ① 状态横幅(hero + 状态条 + 校验轨三合一; 校验轨单独一行, 窄窗口不把按钮挤掉) -->
+      <div class="mt-4 bg-card rounded-card shadow-card px-[18px] py-4 flex flex-col gap-3">
+        <div class="flex items-center gap-3.5">
+          <div class="w-10 h-10 rounded-xl grid place-items-center shrink-0 transition-colors" :class="status.tile">
+            <svg v-if="status.mode === 'warn'" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.6 2.9 20h18.2z"/><path stroke-linecap="round" d="M12 10v4.2M12 17.2h.01"/></svg>
+            <svg v-else-if="status.mode !== 'ok'" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M6.5 12h11"/></svg>
+            <svg v-else class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 12a4.4 4.4 0 100-8.8 4.4 4.4 0 000 8.8zM4.5 20.4c1-4.1 4.2-6.1 7.5-6.1s6.5 2 7.5 6.1a.9.9 0 01-.88 1.1H5.38a.9.9 0 01-.88-1.1z"/>
+            </svg>
           </div>
-          <div class="text-[12px] text-ink3 mt-0.5">{{ status.desc }}</div>
+          <div class="min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full shrink-0" :class="status.dot"></span>
+              <span class="text-[15px] font-bold text-ink1">{{ status.title }}</span>
+              <span v-if="status.mode === 'ok' && acc?.idx" class="text-[12px] text-ink3">uid {{ acc.idx }}</span>
+              <span v-else-if="status.mode === 'ok' && acc?.id" class="text-[12px] text-ink3">{{ acc.id }}</span>
+            </div>
+            <div class="text-[12px] text-ink3 mt-0.5">{{ status.desc }}</div>
+          </div>
+          <div class="ml-auto flex items-center gap-2 shrink-0">
+            <span v-if="status.badge" class="badge badge-md bg-ok/10 text-okink">{{ status.badge }}</span>
+            <span v-if="!isSoop && store.accounts?.pandalive.encrypted" class="badge badge-md bg-fill text-ink2">{{ t('account.badgeEnc') }}</span>
+            <!-- 退出只在「确实有会话」时给: 校验中或确实未登录时摆一枚红色退出按钮是空承诺 -->
+            <n-popconfirm v-if="status.mode === 'ok' || status.mode === 'warn'" @positive-click="logout">
+              <template #trigger>
+                <n-button size="small" tertiary type="error">{{ t('account.logout') }}</n-button>
+              </template>
+              {{ isSoop ? t('account.logoutConfirmSoop') : t('account.logoutConfirm') }}
+            </n-popconfirm>
+          </div>
         </div>
-        <div class="ml-auto flex items-center gap-2 shrink-0">
-          <span v-if="status.badge" class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#2fad5f]/[0.12] text-emerald-600">{{ status.badge }}</span>
-          <span v-if="!isSoop && store.accounts?.pandalive.encrypted" class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#61666d]/10 text-ink2">{{ t('account.badgeEnc') }}</span>
-          <n-popconfirm v-if="status.mode !== 'none'" @positive-click="logout">
-            <template #trigger>
-              <n-button size="small" tertiary type="error">{{ t('account.logout') }}</n-button>
-            </template>
-            {{ isSoop ? t('account.logoutConfirmSoop') : t('account.logoutConfirm') }}
-          </n-popconfirm>
+        <!-- 校验轨: 「会话未认证」与「已登录」的差别全靠这行的时刻 + 复检按钮说清 -->
+        <div v-if="status.mode !== 'none'" class="flex items-center gap-2">
+          <span v-if="lastVerifyText" class="badge badge-md bg-fill text-ink2">{{ t('account.lastVerify', { time: lastVerifyText }) }}</span>
+          <span v-else class="text-[11px] text-ink3">{{ t('account.neverVerified') }}</span>
+          <n-button size="small" secondary :disabled="recheckLoading" @click="recheck" class="ml-auto !w-[104px]">
+            <span class="inline-flex items-center justify-center gap-1"><SpinIcon v-if="recheckLoading" :size="12" />{{ t('account.recheck') }}</span>
+          </n-button>
         </div>
       </div>
 
@@ -228,24 +288,24 @@ async function clearCredentials() {
       </div>
 
       <!-- 方式 A: 网页登录 -->
-      <section class="bg-card rounded-[14px] shadow-card px-[18px] py-4 flex flex-col">
+      <section class="bg-card rounded-card shadow-card px-[18px] py-4 flex flex-col">
         <div class="flex items-center gap-2.5">
-          <span class="w-[30px] h-[30px] rounded-[9px] grid place-items-center text-ink2 bg-[#9499a0]/10 shrink-0">
+          <span class="w-[30px] h-[30px] rounded-ctl grid place-items-center text-ink2 bg-fill shrink-0">
             <svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" d="M3 12h18M12 3c2.5 2.6 3.8 5.7 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.7-3.8-9S9.5 5.6 12 3z"/></svg>
           </span>
           <h3 class="text-[14px] font-bold text-ink1">{{ t('account.mB') }}</h3>
-          <span class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-live/[0.12] text-brand-dark">{{ t('account.mARec') }}</span>
+          <span class="badge badge-md bg-brand/[0.10] text-brand">{{ t('account.mARec') }}</span>
         </div>
         <p class="text-[12px] text-ink3 leading-relaxed mt-2">{{ t('account.mBDesc') }}</p>
         <div class="mt-2.5 space-y-1.5 flex-1">
           <div class="flex items-center gap-1.5 text-[11.5px] text-ink2">
-            <svg class="w-3 h-3 text-emerald-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>{{ t('account.mBT1') }}
+            <svg class="w-3 h-3 text-okink shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>{{ t('account.mBT1') }}
           </div>
           <div class="flex items-center gap-1.5 text-[11.5px] text-ink2">
-            <svg class="w-3 h-3 text-emerald-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>{{ t('account.mBT2') }}
+            <svg class="w-3 h-3 text-okink shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>{{ t('account.mBT2') }}
           </div>
           <div class="flex items-center gap-1.5 text-[11.5px] text-ink2">
-            <svg class="w-3 h-3 text-emerald-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>{{ t('account.mBT3') }}
+            <svg class="w-3 h-3 text-okink shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>{{ t('account.mBT3') }}
           </div>
         </div>
         <div class="flex items-center gap-2.5 mt-3.5">
@@ -257,30 +317,30 @@ async function clearCredentials() {
       </section>
 
       <!-- 方式 B: Cookie 导入 -->
-      <section class="bg-card rounded-[14px] shadow-card px-[18px] py-4 mt-3.5">
+      <section class="bg-card rounded-card shadow-card px-[18px] py-4 mt-3.5">
         <div class="flex items-center gap-2.5">
-          <span class="w-[30px] h-[30px] rounded-[9px] grid place-items-center text-ink2 bg-[#9499a0]/10 shrink-0">
+          <span class="w-[30px] h-[30px] rounded-ctl grid place-items-center text-ink2 bg-fill shrink-0">
             <svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="4" width="14" height="17" rx="2.5"/><path stroke-linecap="round" d="M9 4.5V3h6v1.5M9 10h6M9 13.5h6M9 17h4"/></svg>
           </span>
           <h3 class="text-[14px] font-bold text-ink1">{{ t('account.mC') }}</h3>
-          <span class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#2fad5f]/[0.12] text-emerald-600">{{ t('account.mCStable') }}</span>
+          <span class="badge badge-md bg-ok/10 text-okink">{{ t('account.mCStable') }}</span>
         </div>
         <div class="grid md:grid-cols-[46%_1fr] gap-4 mt-3">
           <ol class="space-y-2">
             <li class="flex gap-2.5 items-start">
-              <span class="w-[18px] h-[18px] rounded-full grid place-items-center text-[10.5px] font-bold text-brand-dark bg-live/[0.12] shrink-0 mt-px">1</span>
-              <span class="text-[12px] text-ink2 leading-relaxed">{{ t('account.mCS1a') }}<span class="text-live font-semibold">{{ isSoop ? 'sooplive.com' : 'pandalive.co.kr' }}</span>{{ t('account.mCS1b') }}</span>
+              <span class="w-[18px] h-[18px] rounded-full grid place-items-center text-[10.5px] font-bold text-brand bg-brand/[0.10] shrink-0 mt-px">1</span>
+              <span class="text-[12px] text-ink2 leading-relaxed">{{ t('account.mCS1a') }}<span class="text-brand font-semibold">{{ isSoop ? 'sooplive.com' : 'pandalive.co.kr' }}</span>{{ t('account.mCS1b') }}</span>
             </li>
             <li class="flex gap-2.5 items-start">
-              <span class="w-[18px] h-[18px] rounded-full grid place-items-center text-[10.5px] font-bold text-brand-dark bg-live/[0.12] shrink-0 mt-px">2</span>
-              <span class="text-[12px] text-ink2 leading-relaxed">{{ t('account.mCS2a') }}<code class="bg-fill border border-line rounded px-1 text-[11px] font-mono text-brand-dark">F12</code>{{ t('account.mCS2b') }}</span>
+              <span class="w-[18px] h-[18px] rounded-full grid place-items-center text-[10.5px] font-bold text-brand bg-brand/[0.10] shrink-0 mt-px">2</span>
+              <span class="text-[12px] text-ink2 leading-relaxed">{{ t('account.mCS2a') }}<code class="bg-fill border border-line rounded px-1 text-[11px] font-mono text-brand">F12</code>{{ t('account.mCS2b') }}</span>
             </li>
             <li class="flex gap-2.5 items-start">
-              <span class="w-[18px] h-[18px] rounded-full grid place-items-center text-[10.5px] font-bold text-brand-dark bg-live/[0.12] shrink-0 mt-px">3</span>
-              <span class="text-[12px] text-ink2 leading-relaxed">{{ t('account.mCS3a') }}<code class="bg-fill border border-line rounded px-1 text-[11px] font-mono text-brand-dark">document.cookie</code>{{ t('account.mCS3b') }}</span>
+              <span class="w-[18px] h-[18px] rounded-full grid place-items-center text-[10.5px] font-bold text-brand bg-brand/[0.10] shrink-0 mt-px">3</span>
+              <span class="text-[12px] text-ink2 leading-relaxed">{{ t('account.mCS3a') }}<code class="bg-fill border border-line rounded px-1 text-[11px] font-mono text-brand">document.cookie</code>{{ t('account.mCS3b') }}</span>
             </li>
             <li class="flex gap-2.5 items-start">
-              <span class="w-[18px] h-[18px] rounded-full grid place-items-center text-[10.5px] font-bold text-brand-dark bg-live/[0.12] shrink-0 mt-px">4</span>
+              <span class="w-[18px] h-[18px] rounded-full grid place-items-center text-[10.5px] font-bold text-brand bg-brand/[0.10] shrink-0 mt-px">4</span>
               <span class="text-[12px] text-ink2 leading-relaxed">{{ isSoop ? t('account.mCS4Soop') : t('account.mCS4') }}</span>
             </li>
           </ol>
@@ -302,13 +362,13 @@ async function clearCredentials() {
       </section>
 
       <!-- 方式 C: 账密自动重登(SOOP 专有, 与 Panda"只留网页登录/Cookie"的取向刻意不同) -->
-      <section v-if="isSoop" class="bg-card rounded-[14px] shadow-card px-[18px] py-4 mt-3.5">
+      <section v-if="isSoop" class="bg-card rounded-card shadow-card px-[18px] py-4 mt-3.5">
         <div class="flex items-center gap-2.5">
-          <span class="w-[30px] h-[30px] rounded-[9px] grid place-items-center text-ink2 bg-[#9499a0]/10 shrink-0">
+          <span class="w-[30px] h-[30px] rounded-ctl grid place-items-center text-ink2 bg-fill shrink-0">
             <svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M15 7a4 4 0 10-3.9 4H7.5A3.5 3.5 0 004 14.5V17a3 3 0 003 3h9a3 3 0 003-3v-.5"/><path stroke-linecap="round" d="M17 7h.01"/></svg>
           </span>
           <h3 class="text-[14px] font-bold text-ink1">{{ t('account.mD') }}</h3>
-          <span v-if="managed" class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#2fad5f]/[0.12] text-emerald-600">{{ t('account.mDManaged', { id: managedUser }) }}</span>
+          <span v-if="managed" class="badge badge-md bg-ok/10 text-okink">{{ t('account.mDManaged', { id: managedUser }) }}</span>
         </div>
         <p class="text-[12px] text-ink3 leading-relaxed mt-2">{{ t('account.mDDesc') }}</p>
         <div class="flex items-center gap-2.5 mt-3">

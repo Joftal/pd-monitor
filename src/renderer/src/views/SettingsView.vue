@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, toRaw, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { NButton, NInput, NInputNumber, NSwitch, NRadioGroup, NRadioButton, useMessage } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api'
-import type { AppInfo, Settings, UpdateCheckResult } from '@shared/types'
+import type { AppInfo, NotifyEvent, NotifyRow, Platform, Settings, UpdateCheckResult } from '@shared/types'
 import SpinIcon from '@/components/SpinIcon.vue'
 import PlatTag from '@/components/PlatTag.vue'
 import { useI18n } from 'vue-i18n'
@@ -11,6 +12,7 @@ import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
 
 const store = useAppStore()
+const router = useRouter()
 const message = useMessage()
 const form = ref<Settings | null>(null)
 const saving = ref(false)
@@ -51,15 +53,17 @@ const defaultRecPath = computed(() => {
 watch(
   () => store.settings,
   (s) => {
-    if (s && !form.value) form.value = { ...s }
+    if (s && !form.value) form.value = clone(s)
   },
   { immediate: true }
 )
 
-// 未保存脏标记(form 与已持久化 settings 值不一致)
+// 未保存脏标记(form 与已持久化 settings 值不一致)。
+// Token 草稿必须计入: 它走独立通道(不进 form/settings 投影), 只看 form 比对会让
+// "只填了 token"这一种最常见的保存动作永远点不动 —— 用户只能靠"测试"按钮顺手持久化
 const dirty = computed(() => {
   if (!form.value || !store.settings) return false
-  return JSON.stringify(form.value) !== JSON.stringify(store.settings)
+  return JSON.stringify(form.value) !== JSON.stringify(store.settings) || tgTokenDraft.value.trim() !== ''
 })
 
 function clampNum(v: unknown, min: number, max: number, fallback: number): number {
@@ -104,7 +108,7 @@ async function save() {
       tgTokenDraft.value = ''
     }
     // 脏标记按 JSON 键序比对, 手工重组 form 键序必翻车 —— 一律从持久化投影回拷
-    if (store.settings) form.value = { ...store.settings }
+    if (store.settings) form.value = clone(store.settings)
     message.success(t('settings.saved'))
   } finally {
     saving.value = false
@@ -156,8 +160,8 @@ async function tgClearToken() {
   tgTokenDraft.value = ''
 }
 
-function resetForm() {
-  if (store.settings) form.value = { ...store.settings }
+function resetForm(): void {
+  if (store.settings) form.value = clone(store.settings)
 }
 
 /** 主题特殊通道: 点按即切换并立即持久化(不走"保存设置"批处理), 与页内文案"立即生效"一致 */
@@ -219,6 +223,61 @@ function onScroll(): void {
 // 开关磁贴公共样式(label+desc 左, NSwitch 右; 无边框, 浅填充)
 const tileCls =
   'flex items-center gap-2.5 rounded-xl px-3 py-2.5 cursor-pointer transition-colors bg-fill hover:bg-fillh'
+
+/** 磁贴里能被翻的布尔项。全部是 Settings 顶层 boolean, 所以一次成型而不是一堆专用 handler */
+type BoolKey =
+  | 'prefetchStream'
+  | 'keepaliveStream'
+  | 'autoMp4'
+  | 'deleteTs'
+  | 'mergeMp4'
+  | 'mergeDeleteSegments'
+  | 'autoRetryRecord'
+  | 'closeToTray'
+
+/** 整块磁贴即命中区(设计稿 3.4: 40px 的开关不该是唯一能点中的地方)。
+ *  点开关本身会冒泡到这里 —— 不排除就是"开关翻一次 + 这里再翻一次", 表现为点了没反应 */
+function tileClick(e: MouseEvent, key: BoolKey): void {
+  if ((e.target as HTMLElement | null)?.closest('.n-switch')) return
+  const f = form.value
+  if (f) f[key] = !f[key]
+}
+
+// ---- 嵌套设置的深拷贝 ----
+// form 必须是深拷贝: 浅拷贝({...s})会让 notify 矩阵与 store 里那份持久化对象共用引用,
+// 于是"改一格"直接改到了已保存态上 —— 脏标记比对相等, 保存按钮永远点不动。
+// toRaw 不是保险丝而是必需: store.settings 是 Pinia 的响应式代理, structuredClone 吃代理会
+// 抛 DataCloneError, 而它发生在 setup 的 immediate watch 里 —— 整个设置页直接白屏。
+function clone(s: Settings): Settings {
+  return structuredClone(toRaw(s))
+}
+
+// ---- 通知矩阵(D4): 平台 × 事件 × 通道 ----
+const PLATS: Platform[] = ['pandalive', 'soop']
+const notifyEvents = computed<{ key: NotifyEvent; label: string }[]>(() => [
+  { key: 'live', label: t('settings.nmLive') },
+  { key: 'offline', label: t('settings.nmOffline') },
+  { key: 'record', label: t('settings.nmRecord') },
+  { key: 'alert', label: t('settings.nmAlert') }
+])
+
+/** 「已单独覆盖 N 位」: 自录默认值只管新关注, 存量主播以观感为准给个数量提示 */
+function autoRecOverrides(p: Platform): number {
+  const f = form.value
+  if (!f) return 0
+  return store.anchors.filter((a) => a.platform === p && a.autoRecord !== f.autoRecordDefault[p]).length
+}
+
+/** 矩阵单元格写入。模板内联 `form.notify[p][e.key].x = v` 会丢掉 form 的窄化,
+ *  且 live 行是 NotifyLiveRow(多一个 sound)与其余 NotifyRow 的联合 —— 收敛到这里一次成型 */
+function setNotify(p: Platform, e: NotifyEvent, ch: 'system' | 'telegram', v: boolean): void {
+  const row = form.value?.notify[p][e]
+  if (row) (row as NotifyRow)[ch] = v
+}
+
+// SOOP 采集节是"读状态不给开关"(设计稿 S6 判据): 这里只取本平台轮询态与登录态
+const soopStatus = computed(() => store.watcher?.byPlatform?.soop ?? null)
+const soopAccount = computed(() => store.accounts?.soop ?? null)
 </script>
 
 <template>
@@ -226,12 +285,12 @@ const tileCls =
     <!-- 页头 -->
     <div class="px-7 pt-5 pb-4 shrink-0 flex items-center gap-3">
       <div>
-        <h1 class="text-[20px] font-extrabold text-ink1 tracking-tight">{{ t('settings.title') }}</h1>
+        <h1 class="page-h">{{ t('settings.title') }}</h1>
         <div class="text-[12px] text-ink3 mt-0.5">{{ t('settings.sub') }}</div>
       </div>
       <span
         v-if="dirty"
-        class="ml-auto shrink-0 h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#f0a020]/[0.14] text-[#d98a08] animate-pop"
+        class="ml-auto shrink-0 badge badge-md bg-warn/[0.14] text-warnink"
       >{{ t('settings.dirtyChip') }}</span>
     </div>
 
@@ -241,21 +300,21 @@ const tileCls =
         <button
           v-for="n in navs"
           :key="n.key"
-          class="flex items-center gap-2.5 w-full px-3 py-2 rounded-[9px] text-[13px] transition-colors text-left"
+          class="flex items-center gap-2.5 w-full px-3 py-2 rounded-ctl text-[13px] transition-colors text-left"
           :class="activeNav === n.key
             ? 'bg-card text-ink1 font-semibold shadow-card'
             : 'text-ink2 hover:text-ink1 hover:bg-fillh'"
           @click="scrollToSec(n.key)"
         >
-          <svg v-if="n.key === 'monitor'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-live' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="2.2"/><path stroke-linecap="round" d="M12 6.5a5.5 5.5 0 015.5 5.5M12 2.8a9.2 9.2 0 019.2 9.2"/></svg>
-          <svg v-else-if="n.key === 'record'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-live' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="3.5"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/></svg>
-          <svg v-else-if="n.key === 'network'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-live' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" d="M3 12h18M12 3c2.5 2.6 3.8 5.7 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.7-3.8-9S9.5 5.6 12 3z"/></svg>
-          <svg v-else-if="n.key === 'notify'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-live' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2a2 2 0 01-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1"/></svg>
-          <svg v-else-if="n.key === 'storage'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-live' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="6" rx="8" ry="3"/><path stroke-linecap="round" d="M4 6v6c0 1.66 3.58 3 8 3s8-1.34 8-3V6M4 12v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg>
-          <svg v-else class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-live' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" d="M12 16v-5m0-3.5h.01"/></svg>
+          <svg v-if="n.key === 'monitor'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="2.2"/><path stroke-linecap="round" d="M12 6.5a5.5 5.5 0 015.5 5.5M12 2.8a9.2 9.2 0 019.2 9.2"/></svg>
+          <svg v-else-if="n.key === 'record'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="3.5"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/></svg>
+          <svg v-else-if="n.key === 'network'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" d="M3 12h18M12 3c2.5 2.6 3.8 5.7 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.7-3.8-9S9.5 5.6 12 3z"/></svg>
+          <svg v-else-if="n.key === 'notify'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2a2 2 0 01-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1"/></svg>
+          <svg v-else-if="n.key === 'storage'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="6" rx="8" ry="3"/><path stroke-linecap="round" d="M4 6v6c0 1.66 3.58 3 8 3s8-1.34 8-3V6M4 12v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg>
+          <svg v-else class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" d="M12 16v-5m0-3.5h.01"/></svg>
           {{ n.label }}
         </button>
-        <div class="mt-3.5 px-3 text-[11px] text-ink3 tabular-nums">PandaLive Monitor v{{ info?.version || '…' }}</div>
+        <div class="mt-3.5 px-3 text-[11px] text-ink3 tabular-nums">SODALive Monitor v{{ info?.version || '…' }}</div>
       </nav>
 
       <!-- 内容滚动区 -->
@@ -266,42 +325,46 @@ const tileCls =
             <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">{{ t('settings.appearance') }}</h2>
             <span class="text-[11px] text-ink3 ml-auto">{{ t('settings.appearanceDesc') }}</span>
           </div>
-          <div class="bg-card rounded-[14px] shadow-card overflow-hidden">
+          <div class="bg-card rounded-card shadow-card overflow-hidden">
             <div class="grid grid-cols-2 gap-2.5 px-4 py-3">
-              <div
-                class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 cursor-pointer transition-colors"
+              <button
+                type="button"
+                class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 cursor-pointer transition-colors text-left"
                 :class="form.theme === 'light' ? 'bg-fill' : 'hover:bg-fill'"
                 @click="applyTheme('light')"
               >
-                <svg class="w-4 h-4 shrink-0" :class="form.theme === 'light' ? 'text-live' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path stroke-linecap="round" d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4l1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+                <svg class="w-4 h-4 shrink-0" :class="form.theme === 'light' ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path stroke-linecap="round" d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4l1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
                 <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.lightTheme') }}</div>
                   <div class="text-[10.5px] text-ink3">{{ t('settings.lightDesc') }}</div>
                 </div>
+                <!-- 选中态归 brand(订正①: 红色退出「选中」语义)。实心红底白勾在浅色下只有 3.91:1,
+                     而深色主题 brand 提亮到 #7fa6e0 后实心底白字更不行 —— 淡底 + brand 勾是两主题都达标的写法 -->
                 <span
                   class="w-[18px] h-[18px] rounded-full grid place-items-center shrink-0"
-                  :class="form.theme === 'light' ? 'bg-live' : 'border border-line/60'"
+                  :class="form.theme === 'light' ? 'bg-brand/[0.14] ring-1 ring-inset ring-brand/45' : 'border border-line/60'"
                 >
-                  <svg v-if="form.theme === 'light'" class="w-2.5 h-2.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                  <svg v-if="form.theme === 'light'" class="w-2.5 h-2.5 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
                 </span>
-              </div>
-              <div
-                class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 cursor-pointer transition-colors"
+              </button>
+              <button
+                type="button"
+                class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 cursor-pointer transition-colors text-left"
                 :class="form.theme === 'dark' ? 'bg-fill' : 'hover:bg-fill'"
                 @click="applyTheme('dark')"
               >
-                <svg class="w-4 h-4 shrink-0" :class="form.theme === 'dark' ? 'text-live' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z"/></svg>
+                <svg class="w-4 h-4 shrink-0" :class="form.theme === 'dark' ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z"/></svg>
                 <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.darkTheme') }}</div>
                   <div class="text-[10.5px] text-ink3">{{ t('settings.darkDesc') }}</div>
                 </div>
                 <span
                   class="w-[18px] h-[18px] rounded-full grid place-items-center shrink-0"
-                  :class="form.theme === 'dark' ? 'bg-live' : 'border border-line/60'"
+                  :class="form.theme === 'dark' ? 'bg-brand/[0.14] ring-1 ring-inset ring-brand/45' : 'border border-line/60'"
                 >
-                  <svg v-if="form.theme === 'dark'" class="w-2.5 h-2.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                  <svg v-if="form.theme === 'dark'" class="w-2.5 h-2.5 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
                 </span>
-              </div>
+              </button>
             </div>
             <div class="flex items-center justify-between gap-4 px-4 pb-3 border-t border-line/40 pt-3">
               <div>
@@ -316,13 +379,40 @@ const tileCls =
           </div>
         </section>
 
-        <!-- 监控 -->
+        <!-- 监控: 全局一条时间轴 + 两平台各自的采集面 -->
         <section data-sec="monitor" class="mb-5">
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
             <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">{{ t('settings.monitor') }}</h2>
             <span class="text-[11px] text-ink3 ml-auto">{{ t('settings.monitorDesc') }}</span>
           </div>
-          <div class="bg-card rounded-[14px] shadow-card overflow-hidden">
+
+          <div class="text-[11px] font-bold text-ink3 tracking-wide px-1 pb-1.5">{{ t('settings.grpGlobal') }}</div>
+          <div class="bg-card rounded-card shadow-card overflow-hidden mb-4">
+            <div class="flex items-center justify-between gap-4 px-4 py-3">
+              <div>
+                <div class="text-[13px] font-medium text-ink1">{{ t('settings.pollSec') }}</div>
+                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.pollSecDesc') }}</div>
+              </div>
+              <n-input-number v-model:value="form.pollIntervalSec" :min="5" :max="600" size="small" class="!w-28" />
+            </div>
+            <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-line/40">
+              <div>
+                <div class="text-[13px] font-medium text-ink1">{{ t('settings.defaultWs') }}</div>
+                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.defaultWsD') }}</div>
+              </div>
+              <n-radio-group v-model:value="form.defaultWorkspace" size="small">
+                <n-radio-button value="remember">{{ t('settings.wsRemember') }}</n-radio-button>
+                <n-radio-button value="pandalive">Panda</n-radio-button>
+                <n-radio-button value="soop">SOOP</n-radio-button>
+              </n-radio-group>
+            </div>
+          </div>
+
+          <div class="flex items-baseline gap-2 px-1 pb-1.5">
+            <span class="text-[11px] font-bold text-ink3 tracking-wide">{{ t('settings.grpPanda') }}</span>
+            <span class="text-[10.5px] font-normal text-ink3">{{ t('settings.grpPandaD') }}</span>
+          </div>
+          <div class="bg-card rounded-card shadow-card overflow-hidden mb-4">
             <div class="flex items-center justify-between gap-4 px-4 py-3">
               <div>
                 <div class="flex items-center gap-2">
@@ -339,17 +429,67 @@ const tileCls =
             </div>
             <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-line/40">
               <div>
-                <div class="text-[13px] font-medium text-ink1">{{ t('settings.pollSec') }}</div>
-                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.pollSecDesc') }}</div>
-              </div>
-              <n-input-number v-model:value="form.pollIntervalSec" :min="5" :max="600" size="small" class="!w-28" />
-            </div>
-            <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-line/40">
-              <div>
                 <div class="text-[13px] font-medium text-ink1">{{ t('settings.gapMs') }}</div>
                 <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.gapMsDesc') }}</div>
               </div>
               <n-input-number v-model:value="form.requestGapMs" :min="300" :max="10000" :step="100" size="small" class="!w-28" />
+            </div>
+            <div class="grid grid-cols-2 gap-2.5 px-4 py-3 border-t border-line/40">
+              <div :class="tileCls" @click="tileClick($event, 'prefetchStream')">
+                <div class="min-w-0 flex-1">
+                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.prefetch') }}</div>
+                  <div class="text-[10.5px] text-ink3">{{ t('settings.prefetchD') }}</div>
+                </div>
+                <n-switch size="small" v-model:value="form.prefetchStream" />
+              </div>
+              <div :class="tileCls" @click="tileClick($event, 'keepaliveStream')">
+                <div class="min-w-0 flex-1">
+                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.keepalive') }}</div>
+                  <div class="text-[10.5px] text-ink3">{{ t('settings.keepaliveD') }}</div>
+                </div>
+                <n-switch size="small" v-model:value="form.keepaliveStream" />
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-baseline gap-2 px-1 pb-1.5">
+            <span class="text-[11px] font-bold text-ink3 tracking-wide">{{ t('settings.grpSoop') }}</span>
+            <span class="text-[10.5px] font-normal text-ink3">{{ t('settings.grpSoopD') }}</span>
+          </div>
+          <div class="bg-card rounded-card shadow-card overflow-hidden">
+            <div class="flex items-center justify-between gap-4 px-4 py-3">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="text-[13px] font-medium text-ink1">{{ t('settings.soopChain') }}</span>
+                  <PlatTag platform="soop" size="sm" />
+                </div>
+                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.soopChainD') }}</div>
+              </div>
+              <div class="text-right shrink-0">
+                <div class="text-[12px] font-semibold text-ink1">{{ t('settings.soopChainFixed') }}</div>
+                <div v-if="soopStatus" class="text-[11px] text-ink3 mt-0.5 tabular-nums">
+                  {{ t('settings.soopRound', { ms: soopStatus.roundMs, n: soopStatus.monitored, at: soopStatus.lastRoundAt ? new Date(soopStatus.lastRoundAt).toLocaleTimeString() : '—' }) }}
+                </div>
+              </div>
+            </div>
+            <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-line/40">
+              <div>
+                <div class="text-[13px] font-medium text-ink1">{{ t('settings.soopLogin') }}</div>
+                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.soopLoginD') }}</div>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <span class="text-[12px]" :class="soopAccount?.realLogin ? 'text-okink' : 'text-warnink'">
+                  {{ soopAccount?.realLogin ? t('settings.soopLoginOn', { id: soopAccount.loginId || soopAccount.nick || '—' }) : t('settings.soopLoginOff') }}
+                </span>
+                <n-button size="tiny" secondary @click="router.push({ name: 'account', query: { plat: 'soop' } })">{{ t('settings.goAccount') }}</n-button>
+              </div>
+            </div>
+            <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-line/40">
+              <div>
+                <div class="text-[13px] font-medium text-ink1">{{ t('settings.soopNa') }}</div>
+                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.soopNaD') }}</div>
+              </div>
+              <span class="text-[12px] text-deco shrink-0">{{ t('settings.na') }}</span>
             </div>
           </div>
         </section>
@@ -360,7 +500,7 @@ const tileCls =
             <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">{{ t('settings.record') }}</h2>
             <span class="text-[11px] text-ink3 ml-auto">{{ t('settings.recordDesc') }}</span>
           </div>
-          <div class="bg-card rounded-[14px] shadow-card overflow-hidden">
+          <div class="bg-card rounded-card shadow-card overflow-hidden">
             <div class="flex items-center justify-between gap-4 px-4 py-3">
               <div class="min-w-0">
                 <div class="text-[13px] font-medium text-ink1">{{ t('settings.saveDir') }}</div>
@@ -386,28 +526,28 @@ const tileCls =
 
             <div class="px-4 pt-3.5 pb-1 text-[11px] font-bold text-ink3 tracking-wide border-t border-line/40">{{ t('settings.outProc') }}</div>
             <div class="grid grid-cols-2 gap-2.5 px-4 py-3">
-              <div :class="tileCls">
+              <div :class="tileCls" @click="tileClick($event, 'autoMp4')">
                 <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.autoMp4') }}</div>
                   <div class="text-[10.5px] text-ink3">{{ t('settings.autoMp4D') }}</div>
                 </div>
                 <n-switch size="small" v-model:value="form.autoMp4" />
               </div>
-              <div :class="tileCls" v-if="form.autoMp4">
+              <div :class="tileCls" v-if="form.autoMp4" @click="tileClick($event, 'deleteTs')">
                 <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.deleteTs') }}</div>
                   <div class="text-[10.5px] text-ink3">{{ t('settings.deleteTsD') }}</div>
                 </div>
                 <n-switch size="small" v-model:value="form.deleteTs" />
               </div>
-              <div :class="tileCls" v-if="form.autoMp4">
+              <div :class="tileCls" v-if="form.autoMp4" @click="tileClick($event, 'mergeMp4')">
                 <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.mergeMp4') }}</div>
                   <div class="text-[10.5px] text-ink3">{{ t('settings.mergeMp4D') }}</div>
                 </div>
                 <n-switch size="small" v-model:value="form.mergeMp4" />
               </div>
-              <div :class="tileCls" v-if="form.autoMp4 && form.mergeMp4">
+              <div :class="tileCls" v-if="form.autoMp4 && form.mergeMp4" @click="tileClick($event, 'mergeDeleteSegments')">
                 <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.mergeDel') }}</div>
                   <div class="text-[10.5px] text-ink3">{{ t('settings.mergeDelD') }}</div>
@@ -418,37 +558,27 @@ const tileCls =
 
             <div class="px-4 pt-3.5 pb-1 text-[11px] font-bold text-ink3 tracking-wide border-t border-line/40">{{ t('settings.automation') }}</div>
             <div class="grid grid-cols-2 gap-2.5 px-4 py-3">
-              <div :class="tileCls">
-                <div class="min-w-0 flex-1">
-                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.prefetch') }}</div>
-                  <div class="text-[10.5px] text-ink3">{{ t('settings.prefetchD') }}</div>
-                </div>
-                <n-switch size="small" v-model:value="form.prefetchStream" />
-              </div>
-              <div :class="tileCls">
-                <div class="min-w-0 flex-1">
-                  <div class="flex items-center gap-1.5 flex-wrap">
-                    <span class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.keepalive') }}</span>
-                    <PlatTag platform="pandalive" size="sm" />
-                  </div>
-                  <div class="text-[10.5px] text-ink3">{{ t('settings.keepaliveD') }}</div>
-                </div>
-                <n-switch size="small" v-model:value="form.keepaliveStream" />
-              </div>
-              <div :class="tileCls">
-                <div class="min-w-0 flex-1">
-                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.autoRec') }}</div>
-                  <div class="text-[10.5px] text-ink3">{{ t('settings.autoRecD') }}</div>
-                </div>
-                <n-switch size="small" v-model:value="form.autoRecordDefault" />
-              </div>
-              <div :class="tileCls">
+              <div :class="tileCls" @click="tileClick($event, 'autoRetryRecord')">
                 <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.autoRetry') }}</div>
                   <div class="text-[10.5px] text-ink3">{{ t('settings.autoRetryD') }}</div>
                 </div>
                 <n-switch size="small" v-model:value="form.autoRetryRecord" />
               </div>
+            </div>
+
+            <!-- 开播自动录制的默认值按平台各留一档(SOOP 有 19+/限区房, 默认全开会撞进拉不到源的录制) -->
+            <div class="px-4 pt-3.5 pb-1 text-[11px] font-bold text-ink3 tracking-wide border-t border-line/40">{{ t('settings.autoRecDef') }}</div>
+            <div class="px-4 py-3 space-y-2.5">
+              <div v-for="p in PLATS" :key="p" class="flex items-center gap-3">
+                <PlatTag :platform="p" size="sm" />
+                <n-radio-group v-model:value="form.autoRecordDefault[p]" size="small">
+                  <n-radio-button :value="false">{{ t('settings.autoRecOff') }}</n-radio-button>
+                  <n-radio-button :value="true">{{ t('settings.autoRecOn') }}</n-radio-button>
+                </n-radio-group>
+                <span class="text-[11.5px] text-ink3">{{ t('settings.autoRecOver', { n: autoRecOverrides(p) }) }}</span>
+              </div>
+              <p class="text-[10.5px] text-ink3 leading-relaxed">{{ t('settings.autoRecDefD') }}</p>
             </div>
           </div>
         </section>
@@ -459,7 +589,7 @@ const tileCls =
             <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">{{ t('settings.network') }}</h2>
             <span class="text-[11px] text-ink3 ml-auto">{{ t('settings.networkDesc') }}</span>
           </div>
-          <div class="bg-card rounded-[14px] shadow-card overflow-hidden">
+          <div class="bg-card rounded-card shadow-card overflow-hidden">
             <div class="flex items-center justify-between gap-4 px-4 py-3">
               <div>
                 <div class="text-[13px] font-medium text-ink1">{{ t('settings.proxy') }}</div>
@@ -475,23 +605,38 @@ const tileCls =
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
             <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">{{ t('settings.notify') }}</h2>
           </div>
-          <div class="bg-card rounded-[14px] shadow-card overflow-hidden">
-            <div class="grid grid-cols-3 gap-2.5 px-4 py-3">
-              <div :class="tileCls">
-                <div class="min-w-0 flex-1">
-                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.notifySys') }}</div>
-                  <div class="text-[10.5px] text-ink3">{{ t('settings.notifySysD') }}</div>
-                </div>
-                <n-switch size="small" v-model:value="form.notifySystem" />
-              </div>
-              <div :class="tileCls">
-                <div class="min-w-0 flex-1">
-                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.notifySound') }}</div>
-                  <div class="text-[10.5px] text-ink3">{{ t('settings.notifySoundD') }}</div>
-                </div>
-                <n-switch size="small" v-model:value="form.notifySound" />
-              </div>
-              <div :class="tileCls">
+          <div class="bg-card rounded-card shadow-card overflow-hidden">
+            <!-- 通知矩阵(D4): 行 = 平台 × 事件, 列 = 系统通知 / Telegram / 声音。
+                 声音列只在开播行给开关 —— 其余行挂了也没人听, 与其摆个假开关不如标「—」 -->
+            <div class="px-4 pt-3.5 pb-1 text-[11px] font-bold text-ink3 tracking-wide">{{ t('settings.nmTitle') }}</div>
+            <div class="px-4 pb-2 text-[10.5px] text-ink3 leading-relaxed">{{ t('settings.nmDesc') }}</div>
+            <table class="w-full text-[12.5px] px-4 pb-2">
+              <thead>
+                <tr class="text-[11px] text-ink3">
+                  <th class="text-left font-medium py-1.5">{{ t('settings.nmEvent') }}</th>
+                  <th class="w-[92px] font-medium text-center">{{ t('settings.nmSystem') }}</th>
+                  <th class="w-[92px] font-medium text-center">{{ t('settings.nmTg') }}</th>
+                  <th class="w-[92px] font-medium text-center">{{ t('settings.nmSound') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template v-for="p in PLATS" :key="p">
+                  <tr v-for="e in notifyEvents" :key="p + e.key" class="border-t border-line/40">
+                    <td class="py-1.5 text-ink1">
+                      <PlatTag :platform="p" size="sm" class="mr-1.5" />{{ e.label }}
+                    </td>
+                    <td class="text-center"><n-switch size="small" :value="form.notify[p][e.key].system" @update:value="(v: boolean) => setNotify(p, e.key, 'system', v)" /></td>
+                    <td class="text-center"><n-switch size="small" :value="form.notify[p][e.key].telegram" @update:value="(v: boolean) => setNotify(p, e.key, 'telegram', v)" /></td>
+                    <td class="text-center">
+                      <n-switch v-if="e.key === 'live'" size="small" v-model:value="form.notify[p].live.sound" />
+                      <span v-else class="text-deco">—</span>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+            <div class="grid grid-cols-3 gap-2.5 px-4 py-3 border-t border-line/40">
+              <div :class="tileCls" @click="tileClick($event, 'closeToTray')">
                 <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.closeToTray') }}</div>
                   <div class="text-[10.5px] text-ink3">{{ t('settings.closeToTrayD') }}</div>
@@ -506,7 +651,7 @@ const tileCls =
                 <div class="text-[12.5px] font-semibold text-ink1 mb-2">{{ t('settings.tgTitle') }}</div>
                 <div class="grid grid-cols-2 gap-2.5">
                   <div class="min-w-0">
-                    <div class="text-[11px] text-ink3 mb-1">{{ t('settings.tgToken') }}<span v-if="form.tgTokenSet" class="text-live"> · {{ t('settings.tgTokenSaved') }}</span></div>
+                    <div class="text-[11px] text-ink3 mb-1">{{ t('settings.tgToken') }}<span v-if="form.tgTokenSet && form.secretsEncrypted" class="text-okink"> · {{ t('settings.tgTokenSaved') }}</span><span v-else-if="form.tgTokenSet" class="text-warnink"> · {{ t('settings.tgTokenPlain') }}</span></div>
                     <n-input
                       v-model:value="tgTokenDraft"
                       type="password"
@@ -525,16 +670,16 @@ const tileCls =
                   </div>
                 </div>
                 <div class="flex items-center gap-3 mt-3 flex-wrap">
-                  <span class="text-[11px] text-ink3">{{ t('settings.tgEvents') }}</span>
-                  <div class="flex items-center gap-1.5 text-[11.5px] text-ink1"><n-switch size="small" v-model:value="form.tgLive" />{{ t('settings.tgEvLive') }}</div>
-                  <div class="flex items-center gap-1.5 text-[11.5px] text-ink1"><n-switch size="small" v-model:value="form.tgOffline" />{{ t('settings.tgEvOffline') }}</div>
-                  <div class="flex items-center gap-1.5 text-[11.5px] text-ink1"><n-switch size="small" v-model:value="form.tgRecord" />{{ t('settings.tgEvRecord') }}</div>
-                  <div class="flex items-center gap-1.5 text-[11.5px] text-ink1"><n-switch size="small" v-model:value="form.tgError" />{{ t('settings.tgEvError') }}</div>
+                  <span class="text-[11px] text-ink3">{{ t('settings.tgEventsHint') }}</span>
                   <div class="ml-auto flex items-center gap-2">
                     <n-button v-if="form.tgTokenSet" size="tiny" tertiary @click="tgClearToken">{{ t('settings.tgClear') }}</n-button>
                     <n-button size="tiny" secondary @click="tgTest">{{ t('settings.tgTest') }}</n-button>
                   </div>
                 </div>
+                <!-- 保险箱降级必须由界面说, 不能只躺在日志里: 这里存的是 bot token 与 SOOP 托管密码 -->
+                <p v-if="!form.secretsEncrypted" class="text-[11px] text-warnink leading-relaxed mt-2.5">
+                  {{ t('settings.vaultPlainWarn') }}
+                </p>
               </div>
             </div>
           </div>
@@ -546,7 +691,7 @@ const tileCls =
             <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">{{ t('settings.storage') }}</h2>
             <span class="text-[11px] text-ink3 ml-auto">{{ t('settings.storageDesc') }}</span>
           </div>
-          <div class="bg-card rounded-[14px] shadow-card overflow-hidden">
+          <div class="bg-card rounded-card shadow-card overflow-hidden">
             <div class="grid grid-cols-2 gap-2.5 px-4 py-3.5">
               <div class="rounded-xl bg-fill px-3.5 py-3 min-w-0">
                 <div class="text-[12.5px] font-semibold text-ink1">{{ t('settings.dataDir') }}</div>
@@ -569,9 +714,10 @@ const tileCls =
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
             <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">{{ t('settings.about') }}</h2>
           </div>
-          <div class="rounded-[14px] shadow-card overflow-hidden bg-card">
-            <!-- 品牌横幅(头像灰度背景) -->
-            <div class="relative overflow-hidden text-white" style="background: linear-gradient(115deg, #f0567f 0%, #fb7299 55%, #ffa4bc 100%)">
+          <div class="rounded-card shadow-card overflow-hidden bg-card">
+            <!-- 品牌横幅(头像灰度背景)。底色用应用主色阶而非 Panda 粉:
+                 原则 0.2「平台色只表身份」—— 这块横幅表的是「本应用」, 用平台色会把 SODALive 读成 Panda -->
+            <div class="relative overflow-hidden text-white" style="background: linear-gradient(115deg, #243a5e 0%, #2f4b7c 55%, #3a5c96 100%)">
               <img
                 src="https://github.com/Joftal.png"
                 alt=""
@@ -580,8 +726,8 @@ const tileCls =
               />
               <div class="relative z-10 px-5 py-[18px]">
                 <div class="flex items-center gap-2">
-                  <span class="text-[16px] font-extrabold tracking-wide">PandaLive Monitor</span>
-                  <span class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-white/20 text-white tabular-nums">v{{ info?.version || '…' }}</span>
+                  <span class="text-[16px] font-extrabold tracking-wide">SODALive Monitor</span>
+                  <span class="badge badge-md bg-white/20 text-white tabular-nums">v{{ info?.version || '…' }}</span>
                 </div>
                 <div class="text-[11.5px] text-white/85 mt-1">{{ t('settings.aboutSub') }}</div>
               </div>
@@ -610,12 +756,12 @@ const tileCls =
                 <span class="inline-flex items-center justify-center gap-1.5"><SpinIcon v-if="checking" :size="12" />{{ t('settings.checkUpdate') }}</span>
               </n-button>
               <template v-if="upd">
-                <span v-if="!upd.ok" class="text-[11.5px] text-red-500">{{ upd.error || t('settings.checkFail') }}</span>
+                <span v-if="!upd.ok" class="text-[11.5px] text-liveink">{{ upd.error || t('settings.checkFail') }}</span>
                 <template v-else-if="upd.hasUpdate">
-                  <span class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#f0a020]/[0.14] text-[#d98a08] tabular-nums">{{ t('settings.hasUpdate', { v: upd.latest }) }}</span>
+                  <span class="badge badge-md bg-warn/[0.14] text-warnink tabular-nums">{{ t('settings.hasUpdate', { v: upd.latest }) }}</span>
                   <n-button size="tiny" type="primary" @click="openRelease">{{ t('settings.goDownload') }}</n-button>
                 </template>
-                <span v-else class="h-[22px] inline-flex items-center px-[9px] rounded-[7px] text-[11px] font-semibold bg-[#2fad5f]/[0.12] text-emerald-600">{{ t('settings.newest') }}</span>
+                <span v-else class="badge badge-md bg-ok/10 text-okink">{{ t('settings.newest') }}</span>
               </template>
             </div>
             <p class="px-4 pb-3.5 text-[10.5px] text-ink3/80 leading-relaxed">
@@ -627,7 +773,7 @@ const tileCls =
         <!-- 悬浮吸底操作条(sticky 于内容滚动区底部) -->
         <div class="sticky bottom-0 pt-2" style="background: linear-gradient(rgb(var(--c-page) / 0), rgb(var(--c-page) / 0.96) 35%)">
           <div class="flex items-center gap-2.5 bg-card/90 rounded-xl px-3.5 py-[9px] shadow-[0_4px_16px_rgba(0,0,0,.06)] backdrop-blur">
-            <span class="text-[11.5px]" :class="dirty ? 'text-[#d98a08]' : 'text-ink3'">{{ dirty ? t('settings.dirtyText') : t('settings.cleanText') }}</span>
+            <span class="text-[11.5px]" :class="dirty ? 'text-warnink' : 'text-ink3'">{{ dirty ? t('settings.dirtyText') : t('settings.cleanText') }}</span>
             <div class="flex-1"></div>
             <n-button secondary :disabled="!dirty" @click="resetForm">{{ t('settings.discard') }}</n-button>
             <n-button type="primary" :disabled="!dirty || saving" @click="save" class="!w-[128px]">

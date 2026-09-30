@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { type Platform } from '@shared/types'
+import { platformName, type Platform } from '@shared/types'
 
-// 全应用唯一的"选平台"控件: 监控墙筛选 / 录制 / 视频库 / 账号页 / 关注弹窗共用同一形态
+// 全应用唯一的"选平台"控件: 监控墙筛选 / 库 / 账号页 / 关注弹窗共用同一形态
 // (设计稿第②屏 P4: 一个控件一个长相)
 type Opt = 'all' | 'auto' | Platform
 
@@ -12,8 +12,9 @@ const props = withDefaults(
     values?: Opt[]
     /** 传了就渲染计数, 与选项同位 */
     counts?: Record<string, number>
-    /** 选项右侧状态点(账号页用它标登录态), 值为背景色 class */
-    dots?: Record<string, string>
+    /** 选项右侧登录态(账号页专用): 色点 + 短标签双通道。
+     *  设计稿 S9: 纯色点会被读成同一个意思, 状态必须能用文字念出来(原则 R3) */
+    states?: Record<string, { dot: string; text: string }>
   }>(),
   { values: () => ['all', 'pandalive', 'soop'] }
 )
@@ -24,7 +25,7 @@ const { t } = useI18n()
 function label(v: Opt): string {
   if (v === 'all') return t('monitor.platAll')
   if (v === 'auto') return t('monitor.platAuto')
-  return v === 'soop' ? 'SOOP' : 'PandaLive'
+  return platformName(v)
 }
 
 /** 色点承担平台身份, 与 PlatTag 同源; 浅色底给一层描边环 —— #ffd400 压白卡几乎看不见(约 1.4:1) */
@@ -45,7 +46,9 @@ function platColor(v: Opt): string {
       <i v-if="v === 'pandalive' || v === 'soop'" class="pf__dot" :style="{ background: platColor(v) }"></i>
       <span>{{ label(v) }}</span>
       <span v-if="counts" class="pf__n">{{ counts[v] ?? 0 }}</span>
-      <i v-if="dots && dots[v]" class="pf__state" :class="dots[v]"></i>
+      <span v-if="states && states[v]" class="pf__state-wrap">
+        <i class="pf__state" :class="states[v].dot"></i>{{ states[v].text }}
+      </span>
     </button>
   </div>
 </template>
@@ -89,6 +92,15 @@ function platColor(v: Opt): string {
 .pf__n {
   font-size: 11px;
   opacity: 0.65;
+}
+.pf__state-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgb(var(--c-ink2));
+  margin-left: 1px;
 }
 .pf__state {
   width: 6px;

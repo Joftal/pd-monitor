@@ -5,6 +5,8 @@ import { useAppStore } from '@/stores/app'
 import { api } from '@/api'
 import { NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
+import { isPlatform, platformName, type Platform } from '@shared/types'
+import { resolveWorkspace } from '@/workspace'
 
 const { t } = useI18n()
 
@@ -12,71 +14,83 @@ const route = useRoute()
 const router = useRouter()
 const store = useAppStore()
 
+/** 当前工作区归属一律以地址里的 :plat 段为准(地址可分享/可收藏), 地址里没有平台段才回落默认工作区 */
+const plat = computed<Platform>(() => (isPlatform(route.params.plat) ? route.params.plat : resolveWorkspace()))
+
+const PLATS: { key: Platform; label: string }[] = (['pandalive', 'soop'] as Platform[]).map((key) => ({ key, label: platformName(key) }))
+
+/** 分段徽标 = 该平台「关注在播」数(与「直播」页默认视图同一口径), 0 位不占位。
+ *  有新开播未读时换成实心呼吸徽标: 取代旧的"开播自动跳 tab"——提示要有, 但不抢走用户正在看的页面 */
+function liveCount(p: Platform): number {
+  return store.anchors.reduce((n, a) => n + (a.platform === p && a.isLive ? 1 : 0), 0)
+}
+
+/** 切平台 = 换平台、留页面: 在录制页切到 SOOP 仍留在录制页, 不把用户甩回直播页 */
+function switchPlat(target: Platform): void {
+  if (target === plat.value) return
+  const keep = ['live', 'recordings'].includes(String(route.name))
+  if (keep) router.push({ name: String(route.name), params: { ...route.params, plat: target }, query: route.query })
+  else router.push({ name: 'live', params: { plat: target } })
+}
+
 const tabs = computed(() => [
-  { name: 'explore', label: t('nav.explore') },
-  { name: 'monitor', label: t('nav.monitor') },
-  { name: 'recordings', label: t('nav.recordings') },
-  { name: 'library', label: t('nav.library') }
+  { name: 'live', label: t('nav.live') },
+  { name: 'recordings', label: t('nav.recordings') }
 ])
 
 function tabActive(name: string): boolean {
   if (route.name === name) return true
-  if (name === 'explore' && route.name === 'player') return true
+  // 播放页属于「直播」: 从在播墙点进去再返回, 顶栏不该出现两处高亮搬家
+  if (name === 'live' && route.name === 'player') return true
   return false
 }
 
+function tabBadge(name: string): number {
+  if (name === 'recordings') return store.activeRecs.filter((r) => r.platform === plat.value).length
+  return 0
+}
+
+/** 监控态胶囊: 每平台各说各话 —— Panda 熔断不遮掉 SOOP 的正常心跳, 反之亦然(状态结构见设计稿 8.2 B) */
 const watcherState = computed(() => {
-  const w = store.watcher
-  if (!w) return { cls: 'bg-ink3', text: '—', tip: t('nav.wUnknown'), tone: 'idle' }
-  if (w.circuitOpen) return { cls: 'bg-red-400', text: t('nav.wCooling'), tip: w.message, tone: 'bad' }
-  if (!w.running) return { cls: 'bg-ink3', text: t('nav.wStopped'), tip: t('nav.wStoppedTip'), tone: 'idle' }
+  const w = store.watcher?.byPlatform?.[plat.value]
+  if (!w) return { tone: 'idle', text: '—', tip: t('nav.wUnknown') }
   const interval = store.settings?.pollIntervalSec ?? '?'
   const cost = w.roundMs < 1000 ? `${w.roundMs} ${t('common.ms')}` : `${(w.roundMs / 1000).toFixed(1)} ${t('common.sec')}`
   const heartbeat = t('nav.wTip', { sec: interval, cost })
-  // message 非空但没熔断 = 轮询在跑、某一侧已经瞎掉(SOOP 整轮全灭 / Panda 冷却): 绿点呼吸就是骗人
-  if (w.message) return { cls: 'bg-amber-400', text: t('nav.wWarn'), tip: `${w.message} · ${heartbeat}`, tone: 'warn' }
-  return { cls: 'bg-live', text: t('nav.liveN', { n: w.liveCount }), tip: heartbeat, tone: 'ok' }
+  if (w.circuitOpen) return { tone: 'bad', text: t('nav.wCooling'), tip: `${w.message} · ${heartbeat}` }
+  if (!w.running) return { tone: 'idle', text: t('nav.wStopped'), tip: t('nav.wStoppedTip') }
+  if (!w.monitored) return { tone: 'idle', text: t('nav.wIdle'), tip: t('nav.wIdleTip') }
+  // message 非空但没熔断 = 这一站在跑但整轮看不见(拉取连续失败): 绿点继续呼吸就是骗人。
+  // 胶囊只写「本轮失败」四字: 完整错误码既读不完也会把顶栏撑破最小窗宽
+  if (w.message) return { tone: 'warn', text: t('nav.wFailed'), tip: `${w.message} · ${heartbeat}` }
+  return { tone: 'ok', text: t('nav.wHeart', { sec: interval, cost }), tip: heartbeat }
 })
 
 const keyword = computed({
   get: () => store.searchKeyword,
   set: (v: string) => {
     store.searchKeyword = v
-    if (v && route.name !== 'explore') router.push({ name: 'explore' })
+    // 搜索只在「直播」页有落点: 打字时把人带到当前平台的直播页, 但不换平台(跨平台同名房间会混进结果)
+    if (v && route.name !== 'live') router.push({ name: 'live', params: { plat: plat.value } })
   }
 })
 
-/** 两套登录态彼此独立: 一枚头像只代表一边, 点哪枚就在账号页打开哪一方
- *  状态文字直接摆在头像旁(B4): 合并口径的"已登录"会让人以为两边都稳, 而 tooltip 在截图与触屏里不存在 */
-const avatars = computed(() => {
+/** 回车/放大镜与打字同一条落点规则: 已在直播页就别再把人甩走 */
+function runSearch(): void {
+  if (route.name !== 'live') router.push({ name: 'live', params: { plat: plat.value } })
+}
+
+/** 头像只代表当前平台(平台身份已由分段给出)。状态文字直接摆在旁边(B4):
+ *  tooltip 在截图与触屏里不存在, 而合并口径的"已登录"会让人以为两边都稳 */
+const account = computed(() => {
   const a = store.accounts
-  const p = a?.pandalive
-  const s = a?.soop
-  return [
-    {
-      key: 'pandalive' as const,
-      short: 'P',
-      live: !!p?.realLogin,
-      held: !!p?.loggedIn,
-      stateText: p?.realLogin ? t('nav.loggedIn') : p?.loggedIn ? t('nav.unverified') : t('nav.notLoggedIn'),
-      tip: !p
-        ? t('nav.wUnknown')
-        : p.realLogin
-          ? p.isAdult
-            ? t('account.descOkAdult')
-            : t('account.descOkNoAdult')
-          : p.netFail
-            ? t('account.netFailTip')
-            : p.loggedIn
-              ? t('account.descWarn')
-              : t('account.descNone')
-    },
-    {
-      key: 'soop' as const,
+  if (plat.value === 'soop') {
+    const s = a?.soop
+    return {
       short: 'S',
       live: !!s?.realLogin,
       held: !!s?.hasCookies,
-      stateText: s?.realLogin ? t('nav.loggedIn') : s?.hasCookies ? t('nav.unverified') : t('nav.notLoggedIn'),
+      stateText: !s ? t('nav.checking') : s.realLogin ? t('nav.loggedIn') : s.hasCookies ? t('nav.unverified') : t('nav.notLoggedIn'),
       tip: !s
         ? t('nav.wUnknown')
         : s.realLogin
@@ -87,54 +101,88 @@ const avatars = computed(() => {
               ? t('account.soopDescWarn')
               : t('account.soopDescNone')
     }
-  ]
+  }
+  const p = a?.pandalive
+  return {
+    short: 'P',
+    live: !!p?.realLogin,
+    held: !!p?.loggedIn,
+    stateText: !p ? t('nav.checking') : p.realLogin ? t('nav.loggedIn') : p.loggedIn ? t('nav.unverified') : t('nav.notLoggedIn'),
+    tip: !p
+      ? t('nav.wUnknown')
+      : p.realLogin
+        ? p.isAdult
+          ? t('account.descOkAdult')
+          : t('account.descOkNoAdult')
+        : p.netFail
+          ? t('account.netFailTip')
+          : p.loggedIn
+            ? t('account.descWarn')
+            : t('account.descNone')
+  }
 })
 </script>
 
 <template>
-  <header class="drag-region h-[64px] shrink-0 flex items-center bg-card border-b border-line relative z-40 select-none px-5">
+  <header class="drag-region h-[64px] shrink-0 flex items-center bg-card border-b border-line relative z-40 select-none px-4 xl:px-5">
     <!-- logo(纯文字标) -->
-    <div class="flex items-center gap-2.5 shrink-0 cursor-pointer" @click="router.push({ name: 'explore' })">
+    <div class="flex items-center gap-2.5 shrink-0 cursor-pointer" @click="router.push({ name: 'live', params: { plat } })">
       <div class="leading-tight">
-        <div class="text-[16px] font-bold text-ink1 tracking-wide">PandaLive</div>
+        <div class="text-[16px] font-bold text-ink1 tracking-wide">SODALive</div>
         <div class="text-[10px] text-ink3 tracking-[0.2em] -mt-0.5 font-medium">MONITOR</div>
       </div>
     </div>
 
-    <!-- 导航 tabs -->
-    <nav class="no-drag flex items-stretch self-stretch ml-8 gap-1">
+    <div class="w-px h-6 bg-line mx-4 shrink-0"></div>
+
+    <!-- 平台分段(一级导航): 一个平台一套工作区, 徽标是该平台关注在播数 -->
+    <div class="no-drag platseg shrink-0">
+      <button
+        v-for="p in PLATS"
+        :key="p.key"
+        class="platbtn"
+        :class="[plat === p.key ? 'is-on' : '', p.key === 'soop' ? 'is-soop' : 'is-panda']"
+        :title="store.newLiveCount(p.key) ? t('nav.newLiveTip', { n: store.newLiveCount(p.key), plat: p.label }) : t('nav.platTip', { plat: p.label })"
+        @click="switchPlat(p.key)"
+      >
+        <i class="platdot" :class="p.key === 'soop' ? 'dot-soop' : 'dot-panda'"></i>
+        <span>{{ p.label }}</span>
+        <span v-if="liveCount(p.key)" class="platn tnum" :class="store.newLiveCount(p.key) ? 'is-new' : ''">{{ liveCount(p.key) }}</span>
+      </button>
+    </div>
+
+    <!-- 两条页面: 直播工作区 + 录制(库在录制页里, 不另立 tab) -->
+    <nav class="no-drag flex items-stretch self-stretch ml-6 gap-1">
       <button
         v-for="tab in tabs"
         :key="tab.name"
         class="nav-tab px-4 text-[14px] font-medium transition-colors flex items-center"
         :class="tabActive(tab.name) ? 'active text-ink1 font-semibold' : 'text-ink2 hover:text-ink1'"
-        @click="router.push({ name: tab.name })"
+        @click="router.push({ name: tab.name, params: { plat } })"
       >
         {{ tab.label }}
         <span
-          v-if="tab.name === 'monitor' && store.liveAnchors.length"
-          class="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-live/15 text-live text-[11px] font-bold"
-        >{{ store.liveAnchors.length }}</span>
-        <span
-          v-if="tab.name === 'recordings' && store.activeRecs.length"
-          class="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-red-500/10 text-red-500 text-[11px] font-bold"
-        >{{ store.activeRecs.length }}</span>
+          v-if="tabBadge(tab.name)"
+          class="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-live/15 text-liveink text-[11px] font-bold tnum"
+        >{{ tabBadge(tab.name) }}</span>
       </button>
     </nav>
 
-    <!-- 居中搜索 -->
-    <div class="no-drag flex-1 flex justify-center px-6">
-      <div class="relative w-full max-w-[420px] group">
+    <!-- 居中搜索: min-w 不是装饰 —— 右侧是 shrink-0 的固定段(状态胶囊/账号/窗口控制),
+         没有下限的话最小窗宽下被压扁的是搜索框, 溢出的是整条 header -->
+    <div class="no-drag flex-1 min-w-[96px] flex justify-center px-3 xl:px-6">
+      <div class="relative w-full max-w-[420px]">
         <input
+          id="global-search"
           v-model="keyword"
           type="text"
-          :placeholder="t('nav.searchPh')"
-          class="w-full h-10 pl-4 pr-11 rounded-full bg-page text-[13px] text-ink1 placeholder:text-ink3 outline-none border-2 border-transparent focus:border-live/60 focus:bg-card transition-all"
-          @keyup.enter="router.push({ name: 'explore' })"
+          :placeholder="t('nav.searchPhPlat', { plat: platformName(plat) })"
+          class="w-full h-10 pl-4 pr-11 rounded-full bg-page text-[13px] text-ink1 placeholder:text-ink3 outline-none border-2 border-transparent focus:border-brand/60 focus:bg-card transition-all"
+          @keyup.enter="runSearch"
         />
         <button
-          class="absolute right-1.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full grid place-items-center text-ink3 hover:text-live hover:bg-live/10 transition-colors"
-          @click="router.push({ name: 'explore' })"
+          class="absolute right-1.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full grid place-items-center text-ink3 hover:text-brand hover:bg-brand/10 transition-colors"
+          @click="runSearch"
         >
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
             <circle cx="11" cy="11" r="7" />
@@ -144,53 +192,55 @@ const avatars = computed(() => {
       </div>
     </div>
 
-    <!-- 状态 / 账号 / 设置 / 窗口控制 -->
+    <!-- 监控态 / 账号 / 设置 / 窗口控制 -->
     <div class="no-drag flex items-center gap-1.5 shrink-0">
       <n-tooltip trigger="hover" placement="bottom">
         <template #trigger>
           <div
-            class="flex items-center gap-1.5 h-8 px-3 rounded-full text-[12px] font-semibold cursor-default"
-            :class="watcherState.tone === 'bad' ? 'bg-red-500/10 text-red-600' : watcherState.tone === 'warn' ? 'bg-amber-500/10 text-amber-600' : 'bg-live/10 text-live'"
+            class="flex items-center gap-1.5 h-8 px-3 rounded-full text-[12px] font-semibold cursor-default max-w-[150px]"
+            :class="
+              watcherState.tone === 'bad'
+                ? 'bg-live/[0.12] text-liveink'
+                : watcherState.tone === 'warn'
+                  ? 'bg-warn/[0.14] text-warnink'
+                  : watcherState.tone === 'ok'
+                    ? 'bg-brand/[0.10] text-brand'
+                    : 'bg-fill text-ink3'
+            "
           >
-            <span class="w-2 h-2 rounded-full" :class="[watcherState.cls, watcherState.cls === 'bg-live' ? 'animate-breathe' : '']"></span>
-            <span>{{ watcherState.text }}</span>
+            <span
+              class="w-2 h-2 rounded-full shrink-0"
+              :class="watcherState.tone === 'bad' ? 'bg-live' : watcherState.tone === 'warn' ? 'bg-warn' : watcherState.tone === 'ok' ? 'bg-brand animate-breathe' : 'bg-ink3'"
+            ></span>
+            <span class="truncate">{{ watcherState.text }}</span>
           </div>
         </template>
         {{ watcherState.tip }}
       </n-tooltip>
 
-      <!-- 双平台登录态: 两套会话互不影响, 各一枚头像 + 各自状态文字 -->
+      <!-- 当前平台登录态: 点头像进账号页并定位到这一方 -->
       <button
         class="h-9 pl-1 pr-2.5 rounded-full flex items-center gap-2 hover:bg-page transition-colors"
-        @click="router.push({ name: 'account' })"
         :title="t('account.title')"
+        @click="router.push({ name: 'account', query: { plat } })"
       >
-        <template v-for="(av, i) in avatars" :key="av.key">
-          <span v-if="i" class="w-px h-4 bg-line shrink-0"></span>
-          <span class="flex items-center gap-1.5">
-            <n-tooltip trigger="hover" placement="bottom">
-              <template #trigger>
-                <span
-                  class="relative w-8 h-8 shrink-0 cursor-pointer"
-                  @click.stop="router.push({ name: 'account', query: { plat: av.key } })"
-                >
-                  <span
-                    class="w-8 h-8 rounded-full grid place-items-center ring-2 text-[12px] font-extrabold select-none"
-                    :class="av.live ? (av.key === 'soop' ? 'bg-[#0f1115] text-[#e8ff3a] ring-live/30' : 'bg-gradient-to-br from-live to-fuchsia-400 text-white ring-live/30') : av.held ? 'bg-gradient-to-br from-amber-400 to-amber-500 text-white ring-amber-300/40' : 'bg-fill text-ink3 ring-fill'"
-                  >{{ av.short }}</span>
-                  <!-- 状态点: 已登录绿 / 有 Cookie 但未过官方校验琥珀 -->
-                  <span
-                    v-if="av.live || av.held"
-                    class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full ring-2 ring-card"
-                    :class="av.live ? 'bg-emerald-500' : 'bg-amber-500'"
-                  ></span>
-                </span>
-              </template>
-              {{ av.tip }}
-            </n-tooltip>
-            <span class="text-[11.5px] shrink-0" :class="av.live ? 'text-ink1 font-medium' : av.held ? 'text-amber-600' : 'text-ink3'">{{ av.stateText }}</span>
-          </span>
-        </template>
+        <span class="relative w-8 h-8 shrink-0 cursor-pointer">
+          <n-tooltip trigger="hover" placement="bottom">
+            <template #trigger>
+              <span class="ava" :class="account.live ? (plat === 'soop' ? 'ava-soop' : 'ava-panda') : account.held ? 'ava-held' : 'ava-none'">{{
+                account.short
+                }}</span>
+            </template>
+            {{ account.tip }}
+          </n-tooltip>
+          <!-- 状态点: 已登录绿 / 有 Cookie 但未过官方校验琥珀 -->
+          <span
+            v-if="account.live || account.held"
+            class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full ring-2 ring-card"
+            :class="account.live ? 'bg-okink' : 'bg-warn'"
+          ></span>
+        </span>
+        <span class="text-[11.5px] shrink-0" :class="account.live ? 'text-ink1 font-medium' : account.held ? 'text-warnink' : 'text-ink3'">{{ account.stateText }}</span>
       </button>
 
       <button
@@ -199,8 +249,8 @@ const avatars = computed(() => {
         :title="t('nav.settings')"
       >
         <svg class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/>
-          <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+          <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" />
+          <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" />
         </svg>
       </button>
 
@@ -208,15 +258,120 @@ const avatars = computed(() => {
 
       <div class="flex items-center">
         <button class="w-10 h-8 grid place-items-center text-ink3 hover:bg-page rounded-md transition-colors" @click="api.winControl('min')">
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/></svg>
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14" /></svg>
         </button>
         <button class="w-10 h-8 grid place-items-center text-ink3 hover:bg-page rounded-md transition-colors" @click="api.winControl('max')">
-          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="5" width="14" height="14" rx="2" /></svg>
         </button>
-        <button class="w-10 h-8 grid place-items-center text-ink3 hover:bg-red-500 hover:text-white rounded-md transition-colors" @click="api.winControl('close')">
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        <button class="w-10 h-8 grid place-items-center text-ink3 hover:bg-liveink hover:text-white rounded-md transition-colors" @click="api.winControl('close')">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18" /></svg>
         </button>
       </div>
     </div>
   </header>
 </template>
+
+<style scoped>
+/* 平台分段: 整条是胶囊轨道, 选中项抬卡面底 + 一级阴影。
+   选中态的文字用平台身份深色(--plat-*-ink), 不是"当前项"高亮色:
+   选 SOOP 时显示 Panda 粉等于用 A 平台的颜色代表 B 平台(设计稿 0.2 判定)。 */
+.platseg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgb(var(--c-fill));
+}
+.platbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 13px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: rgb(var(--c-ink2));
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+  white-space: nowrap;
+}
+.platbtn:hover {
+  color: rgb(var(--c-ink1));
+}
+.platbtn.is-on {
+  background: rgb(var(--c-card));
+  box-shadow: 0 1px 2px var(--shadow-card);
+}
+.platbtn.is-on.is-panda {
+  color: var(--plat-panda-ink);
+}
+.platbtn.is-on.is-soop {
+  color: var(--plat-soop-ink);
+}
+.platdot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  /* 描边环: SOOP 黄压白卡只有 1.43:1, 用 ink3 勾边(浅底 3.06:1 / 深底 4.1:1) */
+  box-shadow: 0 0 0 1px rgb(var(--c-ink3));
+}
+.dot-panda {
+  background: var(--plat-panda);
+}
+.dot-soop {
+  background: var(--plat-soop-accent);
+}
+.platn {
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: rgb(var(--c-live) / 0.14);
+  color: rgb(var(--c-live-ink));
+  font-size: 10.5px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* 新开播未读: 淡底徽标撑不起"该看点什么"的分量, 这里改实心 + 呼吸(与卡片「直播中」同一语言)。
+   实心底取 live-ink 而非 live: 白字压 #e5484d 只有 3.91:1, 10.5px 数字不达标; 压 #b02a31/#c4333a = 6.5/5.4:1 */
+.platn.is-new {
+  background: rgb(var(--c-live-ink));
+  color: #fff;
+  animation: breathe 1.6s ease-in-out infinite;
+}
+/* 头像底是平台身份色且两主题不换值, 所以字形墨色恒定(白字压 #fb7299 只有约 2.75:1) */
+.ava {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 800;
+  user-select: none;
+  box-shadow: 0 0 0 2px rgb(var(--c-card)), 0 0 0 3px rgb(var(--c-line));
+}
+.ava-panda {
+  background: var(--plat-panda);
+  color: #171a1f;
+}
+.ava-soop {
+  background: var(--plat-soop);
+  color: var(--plat-soop-accent);
+}
+.ava-held {
+  background: rgb(var(--c-warn));
+  color: #171a1f;
+}
+.ava-none {
+  background: rgb(var(--c-fill));
+  color: rgb(var(--c-ink3));
+}
+</style>

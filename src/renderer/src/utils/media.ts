@@ -1,6 +1,6 @@
 import type { RecHistoryItem } from '@shared/types'
 
-// ============ 录制产物判定与格式化(视频库/影院浮层/录制页共用) ============
+// ============ 录制产物判定与格式化(库/影院浮层/录制页共用) ============
 
 export function fmtBytes(n: number): string {
   if (n >= 1024 ** 3) return (n / 1024 ** 3).toFixed(2) + ' GB'
@@ -25,6 +25,14 @@ export function fmtDur(start: number, end: number | null): string {
 /** 文件基名(去目录) */
 export function baseName(p: string): string {
   return p.split(/[\\/]/).pop() || p
+}
+
+/** 时刻 → 本地 HH:mm:ss: 「上次轮询/上次收尾」这类钟面在全应用至少四处出现,
+ *  各自 toLocaleString 会得到 4 种格式(带不带秒、上午下午), 收在一处 */
+export function fmtClock(ms: number): string {
+  const d = new Date(ms)
+  const p = (n: number): string => String(n).padStart(2, '0')
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
 /** 错误串清洗: 去掉前缀 "xxx Error: " */
