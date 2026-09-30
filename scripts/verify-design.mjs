@@ -39,6 +39,7 @@
 //   D28 按钮宽度只锁下限: 按钮禁 !w-[Npx](定宽裁翻译), 下限 !min-w-[Npx]; 例外仅限表单列宽与弹窗宽
 //   D29 筛选条不能被自己筛掉: 出现条件看基数(三视图同口径「词已生效 · chip 未生效」), 筛空的墙必带「取消筛选」
 //   D30 空态文案与出口同一判据: 墙上的归因由 emptyAction 单点决定, 点到搜索词就必须给出「清除搜索」
+//   D31 播放页返回从哪来回哪去: 读历史栈落回 ?view= / 录制页, 栈空或跨平台才兜底本平台直播页, 文案与目的地同源
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -895,6 +896,24 @@ checkWithAllowlist(
   assert(/if \(view\.value === 'discover'\) \{\s*if \(kw\.value\) return 'clearKw'/.test(wsSrc), 'D30b 发现段判据里 kw 排在「缺前提」之前 —— 有词时该清除搜索, 不该跳登录')
   assert(/v-if="emptyAction" class="flex gap-2 justify-center mt-2"/.test(wsSrc) && /emptyAction === 'clearKw'/.test(wsSrc), 'D30c 墙上句子里点到搜索词, 手里就必须有「清除搜索」这枚按钮')
   assert(!/v-else-if="kw" size="small" secondary class="mt-2"/.test(wsSrc), 'D30d 出口不得再退回视图分支里的散写(与文案不同判据即失败)')
+}
+
+// ============================================================================
+// D31 播放页返回 = 从哪来回哪去, 且不跨平台
+//   实机(2026-10-01): 此前 goBack() 写死 router.push({name:'live'}), 于是从站内发现(甚至从录制页)
+//   进房后点返回, 一律被甩到「在播关注」—— 用户的话是"不要跨域, 这样体验非常不好"。
+//   现读历史栈: 上一站是同平台的直播页/录制页就 router.back()(连 ?view= 与滚动位一起带回),
+//   栈空(TG 推送/收藏直链)或来自对面平台才落本平台直播页。按钮写的就是它会去的地方。
+// ============================================================================
+{
+  const pv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'PlayerView.vue'), 'utf8')
+  assert(/const backTarget = computed<\{ label: string; run: \(\) => void \}>\(\(\) => \{/.test(pv), 'D31a 返回目标由 backTarget 单点决定(目的地与文案同源)')
+  assert(/router\.options\.history\.state\.back/.test(pv), 'D31b 返回读历史栈的上一站, 不是写死直播页')
+  assert(/prev\.startsWith\(`\/\$\{platform\}\/recordings`\)/.test(pv), 'D31c 录制页是一等返回目的地(从库/录制页进房不该被甩去直播)')
+  assert(/new URLSearchParams\(prev\.slice\(prev\.indexOf\('\?'\) \+ 1\)\)\.get\('view'\)/.test(pv), 'D31d 工作区返回按 ?view= 落位, 发现段回来还在发现段')
+  assert((pv.match(/backTarget\.label/g) || []).length === 2, `D31e 两处返回按钮都绑 backTarget.label(模板里再写死一句就是假话)`, `${(pv.match(/backTarget\.label/g) || []).length} 处`)
+  assert((pv.match(/t\('player\.backToLive'/g) || []).length === 1, `D31f 「返回 直播」只剩兜底那一处(栈空/跨平台), 不得再当默认目的地`, `${(pv.match(/t\('player\.backToLive'/g) || []).length} 处`)
+  assert(/run: \(\) => void router\.push\(\{ name: 'live', params: \{ plat: platform \} \}\)/.test(pv), 'D31g 兜底仍旧落本平台直播页(深链直进播放页时 back() 会停在原地)')
 }
 
 // ============================================================================
