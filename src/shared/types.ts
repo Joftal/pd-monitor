@@ -228,17 +228,19 @@ export const DEFAULT_SETTINGS: Settings = {
   proxyUrl: '',
   watchMode: 'list',
   notify: {
+    // 默认全关: 通知是往外发声的通道, 未经用户确认就默认出声 = 拿用户的系统通知栏替应用说话。
+    // 想要哪一格由用户在矩阵里逐格打开(设置页两块面板 + 整块开/关按钮都在平台节内)
     pandalive: {
-      live: { system: true, telegram: true, sound: true },
-      offline: { system: true, telegram: false },
-      record: { system: true, telegram: true },
-      alert: { system: true, telegram: true }
+      live: { system: false, telegram: false, sound: false },
+      offline: { system: false, telegram: false },
+      record: { system: false, telegram: false },
+      alert: { system: false, telegram: false }
     },
     soop: {
-      live: { system: true, telegram: true, sound: true },
-      offline: { system: true, telegram: false },
-      record: { system: true, telegram: true },
-      alert: { system: true, telegram: true }
+      live: { system: false, telegram: false, sound: false },
+      offline: { system: false, telegram: false },
+      record: { system: false, telegram: false },
+      alert: { system: false, telegram: false }
     }
   },
   autoRecordDefault: { pandalive: false, soop: false },

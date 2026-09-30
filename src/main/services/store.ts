@@ -45,12 +45,13 @@ function toRules(raw: unknown, def: NotifyRules): NotifyRules {
 function toMatrix(raw: unknown, legacy: (key: string, def: boolean) => boolean, systemOn: boolean, soundOn: boolean): NotifyMatrix {
   const o = obj(raw)
   if (!o.pandalive && !o.soop) {
-    // 老库: 按旧全局开关展开(缺键时与 DEFAULT_SETTINGS 同值, 全新安装走这条也不会变行为)
+    // 老库: 按旧全局开关展开。带键的老库逐格等价(迁移不是重置); 缺键 = 用户从未配置过,
+    // 回落值与 DEFAULT_SETTINGS 同值(全关) —— 全新安装走这条也不会凭空出声
     const one = (): NotifyRules => ({
-      live: { system: systemOn, telegram: legacy('tgLive', true), sound: soundOn },
+      live: { system: systemOn, telegram: legacy('tgLive', false), sound: soundOn },
       offline: { system: systemOn, telegram: legacy('tgOffline', false) },
-      record: { system: systemOn, telegram: legacy('tgRecord', true) },
-      alert: { system: systemOn, telegram: legacy('tgError', true) }
+      record: { system: systemOn, telegram: legacy('tgRecord', false) },
+      alert: { system: systemOn, telegram: legacy('tgError', false) }
     })
     return { pandalive: one(), soop: one() }
   }
@@ -60,7 +61,7 @@ function toMatrix(raw: unknown, legacy: (key: string, def: boolean) => boolean, 
 function migrateSettings(raw: unknown): Settings {
   const r = obj(raw)
   const s = { ...DEFAULT_SETTINGS, ...r } as Settings
-  s.notify = toMatrix(r.notify, (k, d) => boolOr(r[k], d), r.notifySystem !== false, r.notifySound !== false)
+  s.notify = toMatrix(r.notify, (k, d) => boolOr(r[k], d), boolOr(r.notifySystem, false), boolOr(r.notifySound, false))
   // 旧库的 autoRecordDefault 是单布尔: 铺到两平台同值(新库是 { pandalive, soop })
   const legacyAuto = typeof r.autoRecordDefault === 'boolean' ? r.autoRecordDefault : false
   const a = obj(r.autoRecordDefault)

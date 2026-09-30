@@ -145,12 +145,14 @@ const legacyFull = {
 }
 
 {
+  // 提交的格取非默认值(true): 默认全关后, 提交 false 会让「回落默认」与「整块抹成 false」长得一模一样, 断言失去分辨力
   const { store } = storeWith({
     anchors: [], history: [],
-    settings: { notify: { soop: { live: { system: false } } } }
+    settings: { notify: { soop: { live: { system: true } } } }
   })
   const n = store.getSettings().notify
-  same(n.soop.live, { system: false, telegram: true, sound: true }, 'A7 新库半格矩阵: 缺格回落本事件默认(而非整块覆盖成 false)')
+  same(n.soop.live, { ...DEFAULT_SETTINGS.notify.soop.live, system: true }, 'A7 新库半格矩阵: 缺格回落本事件默认(DEFAULT_SETTINGS), 提交的格照落')
+  same(n.soop.offline, DEFAULT_SETTINGS.notify.soop.offline, 'A7 同平台未提交的事件各自回落自己的默认(不拿别行串台)')
   same(n.pandalive, DEFAULT_SETTINGS.notify.pandalive, 'A7 未提交的平台保持默认(不被半格传染)')
 }
 
@@ -199,9 +201,26 @@ function loadNotify(settings) {
   return loadTsFresh('src/main/services/notify.ts', mocks)
 }
 
-/** 以默认矩阵为底, 按 p.event.channel 路径打补丁 */
+/** B 组底: 显式全开矩阵。B 组验的是「平台 × 事件 × 通道」路由独立性, 底必须自己写死 ——
+ *  拿 DEFAULT_SETTINGS 当底, 改产品默认值(2026-09-30 起全关)会静默改掉一半断言的前提 */
+const ON_MATRIX = {
+  pandalive: {
+    live: { system: true, telegram: true, sound: true },
+    offline: { system: true, telegram: true },
+    record: { system: true, telegram: true },
+    alert: { system: true, telegram: true }
+  },
+  soop: {
+    live: { system: true, telegram: true, sound: true },
+    offline: { system: true, telegram: true },
+    record: { system: true, telegram: true },
+    alert: { system: true, telegram: true }
+  }
+}
+
+/** 以全开矩阵为底, 按 p.event.channel 路径打补丁 */
 function cfg(patch, extra = {}) {
-  const n = JSON.parse(JSON.stringify(DEFAULT_SETTINGS.notify))
+  const n = JSON.parse(JSON.stringify(ON_MATRIX))
   for (const [k, v] of Object.entries(patch)) {
     const [p, e, ch] = k.split('.')
     if (ch) n[p][e][ch] = v
@@ -258,8 +277,8 @@ const toast = (platform, type, title = 't', body = 'b') => ({ platform, type, ti
 
 {
   // 全关: 气泡仍是唯一必达通道
-  const allOff = JSON.parse(JSON.stringify(DEFAULT_SETTINGS.notify))
-  for (const p of ['pandalive', 'soop']) for (const e of ['live', 'offline', 'record', 'alert']) { allOff[p][e].system = false; allOff[p][e].telegram = false }
+  const allOff = JSON.parse(JSON.stringify(ON_MATRIX))
+  for (const p of ['pandalive', 'soop']) for (const e of ['live', 'offline', 'record', 'alert']) { allOff[p][e].system = false; allOff[p][e].telegram = false; if ('sound' in allOff[p][e]) allOff[p][e].sound = false }
   const { sendToast } = loadNotify({ ...DEFAULT_SETTINGS, notify: allOff, tgChatId: world.chatId })
   sendToast(toast('soop', 'error'))
   assert(world.shown.length === 0 && world.pushes.length === 0 && world.sends.length === 1, 'B6 矩阵全关时只有应用内气泡存活')

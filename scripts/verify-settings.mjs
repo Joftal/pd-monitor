@@ -239,11 +239,16 @@ console.log('\n===== C 端到端: 闸门 → store → db.json =====\n')
   assert(JSON.parse(fs.readFileSync(DB, 'utf8')).settings.proxyUrl === '', 'C4 全空白代理清成空串(直连), 不是留着旧值)')
 
   // 半格矩阵落盘: 只改 SOOP 一格, Panda 侧与同事件另一通道都得保住
-  store.setSettings(structuredClone(DEFAULT_SETTINGS))
+  // 底先铺一组「显式开」的格: 产品默认全关后, 拿默认值当底验「没被抹掉」是空转(false 抹成 false 看不出来)
+  const halfBase = structuredClone(DEFAULT_SETTINGS)
+  halfBase.notify.soop.live.system = true
+  halfBase.notify.soop.offline.system = true
+  halfBase.notify.pandalive.live.system = true
+  store.setSettings(halfBase)
   store.setSettings(gate({ notify: { soop: { live: { system: false } } } }).patch)
   const m = JSON.parse(fs.readFileSync(DB, 'utf8')).settings.notify
   assert(m.soop.live.system === false, 'C5 提交的这一格生效')
-  assert(m.soop.live.telegram === true && m.soop.offline.system === true, 'C5b 没提交过的格不被半格提交抹掉(浅合并会把整张表换成这半格)')
+  assert(m.soop.live.telegram === false && m.soop.offline.system === true, 'C5b 没提交过的格不被半格提交抹掉(浅合并会把整张表换成这半格)')
   assert(m.pandalive.live.system === true, 'C5c 另一平台完全不动')
 }
 
@@ -269,9 +274,10 @@ console.log('\n===== D P0 复现: 响应式代理不可进 IPC =====\n')
     threw2 = e.name
   }
   assert(payload && threw2 === '', 'D2 深拷贝后整包可过 IPC(structuredClone 不抛)', `实际: ${threw2 || '未抛错'}`)
-  // ③ 脱代理不能只是"看起来深": 改副本不能碰到持久化那份
-  payload.notify.soop.live.system = false
-  assert(persisted.notify.soop.live.system === true, 'D3 副本改动不回流到 store 那份(否则脏比对恒相等, 保存按钮永远点不动)')
+  // ③ 脱代理不能只是"看起来深": 改副本不能碰到持久化那份(翻转而不是写死 false: 默认全关后写死 false 等于没改)
+  const beforeClone = persisted.notify.soop.live.system
+  payload.notify.soop.live.system = !beforeClone
+  assert(persisted.notify.soop.live.system === beforeClone, 'D3 副本改动不回流到 store 那份(否则脏比对恒相等, 保存按钮永远点不动)')
   // ④ 真实提交形态(差量补丁 + 已脱代理)过闸门零拒收
   const diff = diffOf(payload, structuredClone(DEFAULT_SETTINGS))
   const g = gate(diff)
