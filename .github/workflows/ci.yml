@@ -1,0 +1,40 @@
+name: CI
+
+# 打包前的最低门槛: 类型检查 + 行为回归脚本(纯 Node, 不起 Electron, 无需 xvfb)
+# 发版流水线(release.yml)自带同样两步, 此工作流只为 push/PR 尽早出声
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        # 校验链用 sucrase 现编主进程源码 + 桩替换 electron 模块, 不碰 Electron 运行时:
+        # 跳过那 ~100MB 的 electron 二进制下载。npm ci 照常执行依赖的 postinstall(不拦截),
+        # 所以这里不需要再手动补跑 install.js —— typecheck/verify 谁也不碰 esbuild 的原生二进制
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Verify behaviour scripts
+        run: npm run verify

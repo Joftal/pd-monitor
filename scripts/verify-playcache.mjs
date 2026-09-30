@@ -10,6 +10,8 @@
 //   T4  对照组: 列表内翻转(离线→在播) — onLiveStart 必须触发(作废+通知+预取+自录)
 //   T5  回归: 列表不可见主播经 rotate 复查发现开播 — onLiveStart 必须触发(原被吞 bug)
 //   T6  回归: per-anchor 模式下任意开播 — onLiveStart 必须触发(原被吞 bug)
+//   T24 双平台隔离: SOOP 关注只走 SOOP 链路(替身模块), 不污染 Panda 请求/计数/熔断,
+//       也不被 Panda 冷却/风控连坐 —— 详见该段断言清单
 // ============================================================================
 import { createRequire } from 'module'
 import * as fs from 'fs'
@@ -39,6 +41,9 @@ const world = {
   liveCalls: [],   // /v1/live 分页请求记录(T16 复用性断言)
   bjCalls: [],     // /v1/member/bj 调用记录 [{userId, at}](轮扫覆盖/时刻断言)
   toasts: [],      // sendToast 记录
+  soopMeta: {},    // channel -> Partial<PageMeta>: SOOP 播放页三态替身(Panda 场景用不到, 仅防御)
+  soopThrow: {},   // channel -> bool: SOOP 取页抛错(T24 平台隔离: 单平台故障不得连坐)
+  soopCalls: [],   // 任何落到 SOOP 替身的调用(断言 Panda 场景零越界)
   recStarts: [],   // recorder.start 记录
   recStops: [],    // recorder.stop 记录
   recStartThrow: false, // true 时 recorder.start 抛错(T21 自录失败不伤链路)
@@ -89,12 +94,17 @@ const fakeFetch = async (url, init = {}) => {
 }
 
 // ---------- store mock(关键: listAnchors 返回原数组引用, 复刻 store.ts 语义) ----------
+// 关注表主键是 roomKey(platform,userId): 增删改一律按 (platform,userId) 复合定位,
+// 只按 userId 找会让同号的两平台记录互相串改
 const db = { anchors: [], settings: null, history: [] }
 const store = {
   listAnchors: () => db.anchors,
-  updateAnchor: (userId, patch) => { const a = db.anchors.find((x) => x.userId === userId); if (a) Object.assign(a, patch) },
+  updateAnchor: (platform, userId, patch) => {
+    const a = db.anchors.find((x) => x.platform === platform && x.userId === userId)
+    if (a) Object.assign(a, patch)
+  },
   addAnchor: (a) => { db.anchors.push(a) },
-  removeAnchor: (userId) => { db.anchors = db.anchors.filter((x) => x.userId !== userId) },
+  removeAnchor: (platform, userId) => { db.anchors = db.anchors.filter((x) => !(x.platform === platform && x.userId === userId)) },
   getSettings: () => db.settings,
   setSettings: (p) => { db.settings = { ...db.settings, ...p }; return db.settings },
   flush() {}, listHistory: () => db.history, addHistory() {}
@@ -104,8 +114,10 @@ const DEFAULT_SETTINGS = {
   pollIntervalSec: 3600, // 防止 round finally 的 schedule 在测试窗口内自跑
   requestGapMs: 300, proxyUrl: '', watchMode: 'list',
   notifySystem: false, notifySound: false, autoRecordDefault: false,
-  closeToTray: false, diskLimitGb: 1, prefetchStream: true,
+  closeToTray: false, diskLimitGb: 1, prefetchStream: true, keepaliveStream: false,
   mergeMp4: false, mergeDeleteSegments: true, autoRetryRecord: false,
+  tgLive: false, tgOffline: false, tgRecord: false, tgError: false,
+  tgChatId: '', tgProxy: '', tgTokenSet: false,
   theme: 'light', locale: 'zh-CN'
 }
 
@@ -121,6 +133,42 @@ const mocks = {
   '../i18n': { mt: (k, p) => (p ? `${k}${JSON.stringify(p)}` : k), setMainLocale() {} },
   './store': { store },
   './notify': { sendToast: (t) => world.toasts.push(t) },
+  // SOOP 客户端替身: 本脚本的关注全为 Panda, 只需让 source.ts/watcher.ts 的 import 可解析,
+  // 并让误入的 SOOP 调用留下可见痕迹(soopPlayCalls)而非静默走真网络
+  './soop': {
+    SOOP_SESSION_PARTITION: 'persist:soop',
+    maskLoginId: (id) => String(id || ''),
+    soopApi: {
+      // 关注列表替身: 本脚本一律回"拿不到", 让 roundSoop 走全量逐房探针(与列表化改造前的行为一致)
+      fetchFavorites: async () => {
+        world.soopCalls.push('favorites')
+        return world.soopFavorites ?? null
+      },
+      fetchPageMeta: async (channel) => {
+        world.soopCalls.push('pageMeta:' + channel)
+        if (world.soopThrow[channel]) throw new Error('soop 取页失败(sim)')
+        return {
+          channel,
+          broadNo: null,
+          explicitOffline: false,
+          living: false,
+          hostName: '',
+          roomName: '',
+          thumbUrl: '',
+          ...(world.soopMeta[channel] || {})
+        }
+      },
+      getPlayCached: async (channel) => {
+        world.soopCalls.push('getPlayCached:' + channel)
+        return { ok: false, error: 'soop stub' }
+      },
+      fetchPlay: async (channel) => {
+        world.soopCalls.push('fetchPlay:' + channel)
+        return { ok: false, error: 'soop stub' }
+      },
+      invalidatePlay: (channel) => world.soopCalls.push('invalidatePlay:' + channel)
+    }
+  },
   './recorder': {
     recorder: {
       start: async (opt) => {
@@ -128,8 +176,9 @@ const mocks = {
         world.recStarts.push(opt)
         return { id: 'x' }
       },
-      stop: async (userId) => {
-        world.recStops.push(userId)
+      // 生产签名: stop(platform, userId) —— 录制任务按复合键定位
+      stop: async (platform, userId) => {
+        world.recStops.push({ platform, userId })
         if (world.stopDelayMs) await new Promise((r) => setTimeout(r, world.stopDelayMs))
       },
       list: () => [],
@@ -149,6 +198,7 @@ function loadTs(rel) {
   const localRequire = (id) => {
     if (id in mocks) return mocks[id]
     if (id === './pandalive') return loadTs('src/main/services/pandalive.ts')
+    if (id === './source') return loadTs('src/main/services/source.ts')
     if (id === '../../shared/types') return loadTs('src/shared/types.ts')
     return require(id)
   }
@@ -166,26 +216,32 @@ const check = (name, cond, detail = '') => {
   console.log(`  [${cond ? 'PASS' : 'FAIL'}] ${name}${detail ? ' — ' + detail : ''}`)
 }
 const playCount = (uid) => world.playCalls.filter((c) => c.userId === uid).length
+// 关注记录的主键是 (platform,userId) 复合键(types.ts 跨平台约定), 测试夹具默认 Panda
 const mkAnchor = (userId, over = {}) => ({
-  userId, userIdx: 1, nick: `nick_${userId}`, userImg: '', isLive: false, title: '', tags: null,
+  platform: 'pandalive', userId, userIdx: 1, nick: `nick_${userId}`, userImg: '', isLive: false, title: '', tags: null,
   startTime: '', viewerCount: 0, likes: 0, fans: 0, thumbUrl: '', autoRecord: false,
   addedAt: Date.now(), lastSeenAt: 0, ...over
 })
+const recStopped = (uid) => world.recStops.some((r) => r.platform === 'pandalive' && r.userId === uid)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const waitUntil = async (fn, ms = 1500) => { for (let i = 0; i < ms / 50; i++) { if (fn()) return true; await sleep(50) } return fn() }
 
 async function reset() {
-  // 先断开间隙泵后续轮扫 + 等上一场在飞请求落完, 再清计数 —— 否则残留 bj/play 调用污染下一场断言
+  // 先断开间隙泵/预取泵的后续轮扫 + 等上一场在飞请求落完, 再清计数 —— 否则残留 bj/play/soop 调用污染下一场断言
   watcher.idleQueue = []
-  await waitUntil(() => !watcher.idlePumping && !watcher.roundInFlight, 3000)
+  watcher.prewarmQueue = []
+  await waitUntil(() => !watcher.idlePumping && !watcher.prewarmPumping && !watcher.roundInFlight, 4000)
   // 熔断/冷却状态一并复位(跨场景隔离; pump/round 的熔断语义由 T9/T13 负责触发与观察)
   watcher.errorStreak = 0
   watcher.cooldownUntil = 0
+  watcher.soopFailStreak = 0
+  watcher.lastSoopRoundAt = 0 // SOOP 冷却期节流闸门复位(否则 T24 冷却场景被上一轮的时戳挡住)
   watcher.status.circuitOpen = false
   watcher.status.message = ''
   db.anchors = []
   db.settings = { ...DEFAULT_SETTINGS }
   world.inList = {}; world.bjMedia = {}; world.bj403 = {}; world.bjThrow = {}; world.bjNotFound = {}; world.latency = { liveMs: 0, bjMs: {} }
+  world.soopMeta = {}; world.soopThrow = {}; world.soopCalls.length = 0
   watcher.bjGone?.clear?.() // 查无此人内存集跨场景复位(T23)
   world.playCalls.length = 0; world.liveCalls.length = 0; world.bjCalls.length = 0; world.toasts.length = 0; world.recStarts.length = 0
   world.recStops.length = 0; world.recStartThrow = false; world.stopDelayMs = 0
@@ -384,7 +440,7 @@ world.inList = {}
 world.latency.bjMs = { x1: 400 } // 给取关留时序窗口
 {
   await round()              // 泵 shift x1(飞 400ms)
-  store.removeAnchor('x2')   // 快照生成后取关 x2
+  store.removeAnchor('pandalive', 'x2')   // 快照生成后取关 x2
   await waitUntil(() => !watcher.idlePumping, 4000)
   const idsCalled = world.bjCalls.map((c) => c.userId)
   check('T11-1 已取关的 x2 不再发请求', idsCalled.join(',') === 'x1', idsCalled.join(','))
@@ -397,7 +453,7 @@ world.bjMedia = { x3: liveItem({ userId: 'x3', userNick: 'X3酱' }) }
 world.latency.bjMs = { x3: 400 }
 {
   await round()              // 泵 shift x3(飞 400ms)
-  store.removeAnchor('x3')   // 飞行窗口内取关
+  store.removeAnchor('pandalive', 'x3')   // 飞行窗口内取关
   await waitUntil(() => !watcher.idlePumping, 4000)
   check('T11-2 取关主播开播 toast 被守卫拦下', !world.toasts.some((t) => t.type === 'live'))
   check('T11-3 取关主播自动录制未启动', !world.recStarts.some((r) => r.userId === 'x3'))
@@ -409,7 +465,7 @@ db.anchors = [mkAnchor('z1', { isLive: false }), mkAnchor('z2', { isLive: false 
 world.inList = { z1: true, z2: true } // 双主播同轮开播 → prewarmQueue=[z1,z2]
 {
   await round() // 两个 onLiveStart: 预取泵启动, shift z1 拉源后进入 ~1.2s 节流 sleep
-  store.removeAnchor('z2') // 节流窗口内取关 z2(尚未被 shift)
+  store.removeAnchor('pandalive', 'z2') // 节流窗口内取关 z2(尚未被 shift)
   await waitUntil(() => !watcher.prewarmPumping && !watcher.idlePumping, 6000)
   const pulled = new Set(world.playCalls.map((c) => c.userId))
   check('T11-5 z1(在监控)预取已完成', pulled.has('z1'))
@@ -530,7 +586,7 @@ world.latency.bjMs = { u8: 400 }
 {
   const p = round()          // urgent 循环 await fetchBj(u8)(飞 400ms)
   await sleep(120)           // 确认请求在飞
-  store.removeAnchor('u8')   // 飞行窗口取关
+  store.removeAnchor('pandalive', 'u8')   // 飞行窗口取关
   await p
   await waitUntil(() => !watcher.idlePumping, 3000)
   check('T19-1 取关后下播 toast 被守卫拦下', !world.toasts.some((t) => t.type === 'offline'))
@@ -583,15 +639,15 @@ db.anchors = [mkAnchor('w9', { isLive: false, autoRecord: true })]
 world.inList = { w9: true } // w9 开播中(列表可见)
 world.stopDelayMs = 600
 {
-  store.removeAnchor('w9') // 第一步: 取关落库(ipc 修复后顺序)
+  store.removeAnchor('pandalive', 'w9') // 第一步: 取关落库(ipc 修复后顺序)
   const stopP = (async () => {
-    world.recStops.push('w9') // 第二步: 慢 stop 进行中
+    world.recStops.push({ platform: 'pandalive', userId: 'w9' }) // 第二步: 慢 stop 进行中
     await sleep(world.stopDelayMs)
   })()
   await round() // stop 窗口内的轮询: w9 已不在监控 → 主循环不遍历, 即便翻转也无自录
   await stopP
   check('T22-2 R5时序: stop 窗口内无孤儿录制', !world.recStarts.some((r) => r.userId === 'w9'))
-  check('T22-3 R5时序: stop 已对该主播执行', world.recStops.includes('w9'))
+  check('T22-3 R5时序: stop 已对该主播执行', recStopped('w9'))
   check('T22-4 R5时序: 开播在列表里仍不发通知(守卫)', !world.toasts.some((t) => t.type === 'live'))
 }
 
@@ -613,12 +669,82 @@ world.bjNotFound = { ghost: true }
   check('T23-4 后续轮次不再为其发请求', n1 === 1 && n2 === 1, `ghost bj 请求数恒定=${n2}`)
   check('T23-5 提醒不重复', world.toasts.filter((t) => t.type === 'info').length === 1)
   // T23-6: 解除标记(移除/重加或账号恢复)后可重新探活
-  watcher.unmarkGone('ghost')
+  watcher.unmarkGone('pandalive', 'ghost')
   world.bjNotFound = {}
   world.bjMedia = { ghost: liveItem({ userId: 'ghost' }) } // 账号恢复且在播
   await round()
   const revived = await waitUntil(() => db.anchors[0].isLive === true, 3000)
   check('T23-6 解除标记后重新探活(恢复开播翻转)', revived === true && world.bjCalls.filter((c) => c.userId === 'ghost').length >= 2)
+}
+
+console.log('\n■ T24 双平台隔离: SOOP 关注只走 SOOP 链路, 既不污染 Panda 请求/计数/熔断, 也不被 Panda 故障连坐')
+await reset()
+db.anchors = [mkAnchor('p24', { isLive: true }), mkAnchor('s24', { platform: 'soop', isLive: false, autoRecord: true })]
+world.inList = { p24: true } // Panda 那位在列表可见(零增量 bj); SOOP 同号频道绝不该被当"列表缺失的 Panda 主播"打错站
+world.soopMeta = { s24: { broadNo: 999, living: true, hostName: 'S主播', roomName: 'S标题', thumbUrl: 's.jpg' } }
+{
+  await round()
+  check('T24-1 SOOP 关注零 pandalive 请求(member/bj 与 play 均未越界)', world.bjCalls.every((c) => c.userId !== 's24') && playCount('s24') === 0)
+  check('T24-2 SOOP 开播翻转写回关注卡(昵称/标题/截图同轮落地)', db.anchors[1].isLive === true && db.anchors[1].nick === 'S主播' && db.anchors[1].title === 'S标题' && db.anchors[1].thumbUrl === 's.jpg')
+  const prewarmed = await waitUntil(() => world.soopCalls.includes('getPlayCached:s24'), 3000)
+  check('T24-3 开播链路走 SOOP 契约: 旧源作废 + 预取均落 SOOP', world.soopCalls.includes('invalidatePlay:s24') && prewarmed)
+  check('T24-4 自动录制按复合键起录(platform=soop)', world.recStarts.some((r) => r.platform === 'soop' && r.userId === 's24'))
+  check('T24-5 计数分域: 大厅在播只算 Panda, 关注数含双平台', watcher.status.liveCount === 1 && watcher.status.monitored === 2)
+  check('T24-6 Panda 侧状态未被 SOOP 扰动(p24 仍在播)', db.anchors[0].isLive === true)
+
+  // 第三态: 页面既没场次号也没说下播(风控页/改版) → 本轮不动已知状态
+  world.soopMeta = { s24: {} }
+  const t0 = world.toasts.length
+  await round()
+  check('T24-7 第三态("没读到"≠"已下播"): 状态与通知全保持', db.anchors[1].isLive === true && world.toasts.length === t0)
+
+  // 明确下播: 需连续两轮读数一致才翻转(这一翻要发通知并停自录, 单页抖动无权定罪)
+  world.soopMeta = { s24: { living: false, explicitOffline: true } }
+  await round()
+  check('T24-8a 首轮下播读数: 状态与通知按兵不动(去抖)', db.anchors[1].isLive === true && world.toasts.filter((x) => x.type === 'offline').length === 0)
+  await round()
+  check('T24-8b 次轮确认才判下播: 状态翻转 + offline 通知单发', db.anchors[1].isLive === false && world.toasts.filter((x) => x.type === 'offline').length === 1)
+  check('T24-9 下播即作废 SOOP 源(不留死源骗秒开徽标)', world.soopCalls.filter((c) => c === 'invalidatePlay:s24').length >= 2)
+  world.soopMeta = { s24: { living: true, broadNo: 999, hostName: 'S主播' } }
+  await round()
+  world.soopMeta = { s24: { living: false, explicitOffline: true } }
+  await round()
+  check('T24-9b 复播清零下播计数: 复播后的首轮下播同样不去抖成秒判', db.anchors[1].isLive === true)
+  await round()
+  check('T24-9c 复播后次轮确认: 正常判下播(去抖只延后一轮, 不吞事件)', db.anchors[1].isLive === false)
+
+  // 单平台失明: SOOP 整轮全错不得开 Panda 熔断(连败只属于 SOOP)
+  world.soopThrow = { s24: true }
+  await round()
+  await round()
+  check('T24-10 SOOP 连续全灭: 不开 Panda 熔断、不计 Panda 连败', watcher.status.circuitOpen === false && watcher.errorStreak === 0)
+  check('T24-11 SOOP 失明跨阈值出声一次(顶栏不得假绿)', world.toasts.filter((x) => x.title === 'watcher.soopDownT').length === 1)
+  await round()
+  check('T24-12 连败期间不重复刷屏', world.toasts.filter((x) => x.title === 'watcher.soopDownT').length === 1)
+  world.soopThrow = {}
+  world.soopMeta = { s24: { living: false, explicitOffline: true } }
+  await round()
+  check('T24-13 SOOP 恢复即归零连败(重新武装提醒)', watcher.soopFailStreak === 0)
+
+  // 部分失败(设计稿 7.2「整轮部分失败」): 读不到 1 个房 ≠ 全灭, 也 ≠ 一切正常
+  db.anchors.push(mkAnchor('s24b', { platform: 'soop', isLive: false }))
+  world.soopThrow = { s24b: true }
+  await round()
+  const S24 = watcher.status.byPlatform.soop
+  check('T24-15 部分失败只数读不到的房, 不升格成全灭(streak 不增、不重复出声)',
+    S24.roundFailed === 1 && watcher.soopFailStreak === 0 && world.toasts.filter((x) => x.title === 'watcher.soopDownT').length === 1)
+  check('T24-16 部分失败必须出声: 本平台 message 带条数(顶栏不得假绿)', String(S24.message).startsWith('watcher.soopPartial'))
+  world.soopThrow = {}
+  await round()
+  check('T24-17 下一轮读到了: 计数与正文同时清零(不残留旧告警)', S24.roundFailed === 0 && S24.message === '')
+
+  // 反向连坐: Panda 冷却期 SOOP 探针照常(两套域名/会话, Panda 被风控无权停 SOOP)
+  await reset()
+  db.anchors = [mkAnchor('p24', { isLive: false }), mkAnchor('s24', { platform: 'soop', isLive: false })]
+  world.soopMeta = { s24: { living: true, broadNo: 1, hostName: 'S主播' } }
+  watcher.cooldownUntil = Date.now() + 60_000
+  await round()
+  check('T24-14 Panda 冷却期: Panda 零请求但 SOOP 探针不连坐', world.liveCalls.length === 0 && world.bjCalls.length === 0 && world.soopCalls.includes('pageMeta:s24') && db.anchors[1].isLive === true)
 }
 
 console.log('解读: T1/T2/T3 PASS ⇒ 「大厅轮询刷新会清源缓存」不成立(真实源码+可计数请求实证);')

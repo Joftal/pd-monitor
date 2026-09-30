@@ -1,7 +1,7 @@
 {
   "name": "pandalive-monitor",
   "version": "1.0.7",
-  "description": "PandaLive 直播监控 / 观看 / 录制 一体化桌面应用",
+  "description": "SODALive Monitor —— 直播监控 / 观看 / 录制 一体化桌面应用",
   "author": "Joftal",
   "private": true,
   "main": "./out/main/index.js",
@@ -9,6 +9,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && vue-tsc --noEmit -p tsconfig.web.json",
+    "verify": "node scripts/verify-design.mjs && node scripts/verify-dataroot.mjs && node scripts/verify-playcache.mjs && node scripts/verify-keepalive.mjs && node scripts/verify-p1.mjs && node scripts/verify-follows.mjs && node scripts/verify-deeplink.mjs && node scripts/verify-notify.mjs",
     "pack": "npm run build && electron-builder --win --x64",
     "pack:mac": "npm run build && electron-builder --mac --x64 --arm64",
     "pack:linux": "npm run build && electron-builder --linux --x64",
@@ -33,6 +34,7 @@
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
     "postcss": "^8.4.49",
+    "sucrase": "^3.35.1",
     "tailwindcss": "^3.4.16",
     "typescript": "^5.7.2",
     "vue-tsc": "^2.1.10"

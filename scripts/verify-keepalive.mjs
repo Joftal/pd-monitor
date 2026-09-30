@@ -92,13 +92,13 @@ const fakeFetch = async (url, init = {}) => {
 const db = { anchors: [], settings: null, history: [] }
 const store = {
   listAnchors: () => db.anchors,
-  updateAnchor: (userId, patch) => {
-    const a = db.anchors.find((x) => x.userId === userId)
+  updateAnchor: (platform, userId, patch) => {
+    const a = db.anchors.find((x) => x.platform === platform && x.userId === userId)
     if (a) Object.assign(a, patch)
   },
   addAnchor: (a) => db.anchors.push(a),
-  removeAnchor: (userId) => {
-    db.anchors = db.anchors.filter((x) => x.userId !== userId)
+  removeAnchor: (platform, userId) => {
+    db.anchors = db.anchors.filter((x) => !(x.platform === platform && x.userId === userId))
   },
   getSettings: () => db.settings,
   setSettings: (p) => {
@@ -167,22 +167,25 @@ function resetWorld() {
 const variantCount = (userId) => world.cdnCalls.filter((p) => p.includes(`/${userId}/`) && !p.endsWith('/master.m3u8')).length
 const markCdn = () => world.cdnCalls.length
 const markPlay = () => world.playCalls.length
+// 生产侧缓存出口按复合键 roomKey(platform,userId) 报告(types.ts 的跨平台主键约定), 断言同规约
+const rk = (userId) => `pandalive:${userId}`
+const kaStatus = (userId) => api.keepaliveStatus('pandalive', userId)
 
 console.log('\n===== S1-S12 源保活泵交互验证 =====\n')
 
 // S1 基线 + S7 全档齐养
 resetWorld()
-db.anchors.push({ userId: 'a', isLive: true })
+db.anchors.push({ platform: 'pandalive', userId: 'a', isLive: true })
 await api.getPlayCached('a')
 const apiCallsAtCache = markPlay()
 await tick()
 assert(variantCount('a') === 2, 'S1-1 每 tick 全档齐养: 2 个分档各 1 次心跳')
 assert(markPlay() === apiCallsAtCache, 'S1-2 保活 tick 零 pandalive API 请求(fetchPlay/fetchBj)')
-assert(api.cachedSourceIds().includes('a'), 'S1-3 缓存保持有效')
+assert(api.cachedSourceIds().includes(rk('a')), 'S1-3 缓存保持有效')
 
 // S2 下播跳过
 resetWorld()
-db.anchors.push({ userId: 'a', isLive: true })
+db.anchors.push({ platform: 'pandalive', userId: 'a', isLive: true })
 await api.getPlayCached('a')
 db.anchors[0].isLive = false // 下播
 const c0 = markCdn()
@@ -191,36 +194,36 @@ assert(world.cdnCalls.length === c0, 'S2 已下播主播的缓存源: tick 零�
 
 // S3 网络层失败 ×3 不团灭
 resetWorld()
-db.anchors.push({ userId: 'a', isLive: true })
+db.anchors.push({ platform: 'pandalive', userId: 'a', isLive: true })
 await api.getPlayCached('a')
 world.variantMode = 'network'
 await tick()
 await tick()
 await tick()
-assert(api.cachedSourceIds().includes('a'), 'S3-1 网络层异常 × 3 tick: 缓存不动, 无误收尸')
+assert(api.cachedSourceIds().includes(rk('a')), 'S3-1 网络层异常 × 3 tick: 缓存不动, 无误收尸')
 assert(world.playCalls.filter((u) => u === 'a').length === 1, 'S3-2 网络层异常: 零重铸 API 调用')
 
 // S4 主档 404 单次不误杀
 resetWorld()
-db.anchors.push({ userId: 'a', isLive: true })
+db.anchors.push({ platform: 'pandalive', userId: 'a', isLive: true })
 await api.getPlayCached('a')
 world.variantMode = 'dead404'
 await tick()
-assert(api.cachedSourceIds().includes('a'), 'S4 主档 404 × 1: strike=1, 缓存保留(单次不误杀)')
+assert(api.cachedSourceIds().includes(rk('a')), 'S4 主档 404 × 1: strike=1, 缓存保留(单次不误杀)')
 
 // S5 连续两次真死: 收尸 + 重铸一发
 await tick() // 第二次 dead404
 // 重铸经串行链(含 ~1.2s 抖动间隙)延后执行: 轮询等待实发(上限 3s)
 for (let i = 0; i < 30 && world.playCalls.filter((u) => u === 'a').length < 2; i++) await settle(100)
 assert(world.playCalls.filter((u) => u === 'a').length === 2, 'S5-1 连续 2 次真死: 收尸后重铸 fetchPlay 一发')
-assert(api.cachedSourceIds().includes('a'), 'S5-2 重铸成功(房未满): 缓存复活, 心跳可恢复')
+assert(api.cachedSourceIds().includes(rk('a')), 'S5-2 重铸成功(房未满): 缓存复活, 心跳可恢复')
 world.variantMode = 'ok'
 await tick()
 assert(variantCount('a') >= 2, 'S5-3 重铸后心跳继续齐养(新源已接管)')
 
 // S6 满员: 重铸失败, 保持熄灭且不再骚扰 API
 resetWorld()
-db.anchors.push({ userId: 'full', isLive: true })
+db.anchors.push({ platform: 'pandalive', userId: 'full', isLive: true })
 await api.getPlayCached('full')
 world.variantMode = 'dead404'
 await tick()
@@ -228,7 +231,7 @@ world.playOk = false // 房间满员
 await tick()
 for (let i = 0; i < 30 && world.playCalls.filter((u) => u === 'full').length < 2; i++) await settle(100) // 重铸链轮询待尽
 const playsAfterFull = world.playCalls.filter((u) => u === 'full').length
-assert(playsAfterFull === 2 && !api.cachedSourceIds().includes('full'), 'S6-1 满员: 收尸+重铸一发失败后保持熄灭')
+assert(playsAfterFull === 2 && !api.cachedSourceIds().includes(rk('full')), 'S6-1 满员: 收尸+重铸一发失败后保持熄灭')
 const playsMark = world.playCalls.filter((u) => u === 'full').length
 await tick()
 await tick()
@@ -236,17 +239,17 @@ assert(world.playCalls.filter((u) => u === 'full').length === playsMark, 'S6-2 �
 
 // S7 副档 404 仅观测
 resetWorld()
-db.anchors.push({ userId: 'a', isLive: true })
+db.anchors.push({ platform: 'pandalive', userId: 'a', isLive: true })
 await api.getPlayCached('a')
 world.variantMode = 'secondary404'
 await tick()
 await tick()
-assert(api.cachedSourceIds().includes('a'), 'S7-1 副档 404 × 2: 不收尸(主档活着即不判死)')
+assert(api.cachedSourceIds().includes(rk('a')), 'S7-1 副档 404 × 2: 不收尸(主档活着即不判死)')
 assert(world.playCalls.filter((u) => u === 'a').length === 1, 'S7-2 副档 404: 零重铸')
 
 // S8 vod 回放包跳过
 resetWorld()
-db.anchors.push({ userId: 'recroom', isLive: true })
+db.anchors.push({ platform: 'pandalive', userId: 'recroom', isLive: true })
 await api.getPlayCached('recroom') // liveType=rec → vod 包
 const c1 = markCdn()
 await tick()
@@ -254,7 +257,7 @@ assert(world.cdnCalls.length === c1, 'S8 vod 回放包: tick 零心跳(静态分
 
 // S9 开关关闭零请求
 resetWorld()
-db.anchors.push({ userId: 'a', isLive: true })
+db.anchors.push({ platform: 'pandalive', userId: 'a', isLive: true })
 await api.getPlayCached('a')
 store.setSettings({ keepaliveStream: false })
 const c2 = markCdn()
@@ -270,7 +273,7 @@ assert(variantCount('guest') === 2, 'S10 未关注缓存源(回访场景): 照�
 
 // S11 重铸与手动拉源并发去重
 resetWorld()
-db.anchors.push({ userId: 'a', isLive: true })
+db.anchors.push({ platform: 'pandalive', userId: 'a', isLive: true })
 await api.getPlayCached('a')
 world.variantMode = 'dead404'
 world.playLatencyMs = 120
@@ -284,7 +287,7 @@ assert(world.playCalls.filter((u) => u === 'a').length === 2, 'S11 重铸×手�
 
 // S12 tick 自重叠防护
 resetWorld()
-db.anchors.push({ userId: 'a', isLive: true })
+db.anchors.push({ platform: 'pandalive', userId: 'a', isLive: true })
 await api.getPlayCached('a')
 world.variantMode = 'ok'
 const c3 = markCdn()
@@ -295,27 +298,27 @@ assert(variantCount('a') === 2 + 0, 'S12 并发 tick: keepaliveBusy 守卫, 心�
 
 // S13 状态投影(播放页"播放源卡"数据源)
 resetWorld()
-db.anchors.push({ userId: 'a', isLive: true })
+db.anchors.push({ platform: 'pandalive', userId: 'a', isLive: true })
 await api.getPlayCached('a')
-let st = api.keepaliveStatus('a')
+let st = kaStatus('a')
 assert(st.cached === true && st.lastAt === 0, 'S13-1 首心跳前投影: cached=true, lastAt=0(未心跳)')
 await tick()
-st = api.keepaliveStatus('a')
+st = kaStatus('a')
 assert(st.lastAt > 0 && st.lastOk && st.variants === 2 && st.enabled === true, 'S13-2 心跳后投影: 时刻/档位/开关齐备')
 const at1 = st.lastAt
 db.anchors[0].isLive = false
 await tick()
-assert(api.keepaliveStatus('a').lastAt === at1, 'S13-3 下播 tick 跳过: 心跳时刻不前进')
+assert(kaStatus('a').lastAt === at1, 'S13-3 下播 tick 跳过: 心跳时刻不前进')
 store.setSettings({ keepaliveStream: false })
-assert(api.keepaliveStatus('a').enabled === false, 'S13-4 enabled 实时反映设置开关')
+assert(kaStatus('a').enabled === false, 'S13-4 enabled 实时反映设置开关')
 store.setSettings({ keepaliveStream: true })
 api.invalidatePlay('a')
-st = api.keepaliveStatus('a')
+st = kaStatus('a')
 assert(st.cached === false && st.lastAt === 0, 'S13-5 作废后状态清档(不残留尸态)')
 
 // S14 重铸风控自闭环: 重铸撞 403 → 全链冷却 5 分钟, 后续收尸重铸直接丢弃(零请求)
 resetWorld()
-db.anchors.push({ userId: 'd1', isLive: true }, { userId: 'd2', isLive: true })
+db.anchors.push({ platform: 'pandalive', userId: 'd1', isLive: true }, { platform: 'pandalive', userId: 'd2', isLive: true })
 await api.getPlayCached('d1')
 await api.getPlayCached('d2')
 world.variantMode = 'dead404'
@@ -325,7 +328,7 @@ await tick() // 双双 strike=1
 await tick() // 双双收尸 → d1 重铸撞 403 → 冷却; d2 入队即丢弃(链步内二次检查)
 for (let i = 0; i < 30 && world.playCalls.filter((u) => u === 'd1').length < 2; i++) await settle(100)
 await settle(300) // 留 d2 若有漏按的时间(不应有)
-assert(api.keepaliveStatus('d1').cached === false, 'S14-1 重铸撞风控后保持熄灭')
+assert(kaStatus('d1').cached === false, 'S14-1 重铸撞风控后保持熄灭')
 assert(world.playCalls.filter((u) => u === 'd1').length === 2, 'S14-2 d1 重铸整好一发(撞风控那发)')
 assert(world.playCalls.filter((u) => u === 'd2').length === 1, 'S14-3 冷却期后续重铸被丢弃: d2 零额外 API 请求')
 
