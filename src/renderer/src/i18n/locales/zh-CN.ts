@@ -155,6 +155,8 @@ export default {
   },
   player: {
     backToLive: '返回 {plat}直播',
+    backToRec: '返回录制页',
+    backToView: '返回{where}',
     loading: '正在获取直播流…',
     pwRoom: '该直播间为密码房',
     needLogin: '该房间需要 SOOP 登录态(19+ / 地区限制), 请先在「账号」页登录',

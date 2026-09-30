@@ -152,6 +152,8 @@ export default {
   },
   player: {
     backToLive: 'Back to {plat} live',
+    backToRec: 'Back to Recordings',
+    backToView: 'Back to {where}',
     loading: 'Getting live stream…',
     pwRoom: 'This is a password room',
     needLogin: 'This room needs a SOOP login (19+ / region limited); sign in on the Account page first',

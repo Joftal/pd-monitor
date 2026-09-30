@@ -112,10 +112,23 @@ const sinceText = computed(() => {
   return t('player.liveSince', { t: `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}` })
 })
 
-/** 返回目标 = 本平台直播页(设计稿 5.2「返回 {平台}直播」):
- *  不用 router.back() —— 从 TG 推送/收藏直接进播放页时历史栈是空的, back() 会停在原地 */
+/** 返回 = 原路返回(从哪来回哪去, 不跨平台)。上一站若是同平台的直播页或录制页就走历史栈 ——
+ *  它连 `?view=` 与滚动位一起带回去: 从站内发现进的房, 返回不该落在在播关注。
+ *  栈是空的(TG 推送/收藏直接进播放页)或上一站是对面平台时, 落本平台直播页, 不把用户甩出当前工作区。
+ *  按钮写的就是它会去的地方: 从录制页进来的人看见「返回 直播」是句假话。 */
+const backTarget = computed<{ label: string; run: () => void }>(() => {
+  // hash 路由下 state.back 可能带 '#' 前缀, 两种形态都吃(vue-router 把它标成任意 state 字段, 只能 String() 收口)
+  const prev = String(router.options.history.state.back ?? '').replace(/^#/, '')
+  if (prev.startsWith(`/${platform}/recordings`)) return { label: t('player.backToRec'), run: () => router.back() }
+  if (prev.startsWith(`/${platform}/live`)) {
+    const v = new URLSearchParams(prev.slice(prev.indexOf('?') + 1)).get('view')
+    if (v === 'discover' || v === 'offline')
+      return { label: t('player.backToView', { where: v === 'discover' ? t('ws.viewDiscover') : t('ws.viewOffline') }), run: () => router.back() }
+  }
+  return { label: t('player.backToLive', { plat: platformName(platform) }), run: () => void router.push({ name: 'live', params: { plat: platform } }) }
+})
 function goBack(): void {
-  void router.push({ name: 'live', params: { plat: platform } })
+  backTarget.value.run()
 }
 
 async function loadPlay(password = '', forceFresh = false): Promise<boolean> {
@@ -362,7 +375,7 @@ async function manualRefresh() {
     <div class="flex items-center gap-3 shrink-0">
       <button class="flex items-center gap-1.5 text-[12.5px] text-ink2 hover:text-ink1 transition-colors" @click="goBack">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M15 6l-6 6 6 6"/></svg>
-        {{ t('player.backToLive', { plat: platformName(platform) }) }}
+        {{ backTarget.label }}
       </button>
       <div class="flex-1"></div>
       <span
@@ -418,7 +431,7 @@ async function manualRefresh() {
               <div class="text-3xl">📡</div>
               <p class="text-[13px] text-white/65 max-w-[320px] text-center leading-relaxed">{{ errorMsg || t('player.offline') }}</p>
               <div class="flex gap-2">
-                <n-button size="small" secondary @click="goBack">{{ t('player.backToLive', { plat: platformName(platform) }) }}</n-button>
+                <n-button size="small" secondary @click="goBack">{{ backTarget.label }}</n-button>
                 <n-button size="small" type="primary" @click="loadPlay(pwdInput, true)">{{ t('player.retry') }}</n-button>
               </div>
             </template>
