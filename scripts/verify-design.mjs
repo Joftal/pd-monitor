@@ -43,6 +43,7 @@
 //   D32 播放页侧栏与动作行: 侧栏自带滚动且卡片 shrink-0(不被压扁裁掉尾行); 动作行按轻重分档(幽灵/描边/实心)且只锁宽度下限; 观众数一屏只报一次
 //   D33 播放页读数一处收敛: room 快照 = 关注列表 > 站内发现, 展示值 = 回包 > 快照 > 裸 ID(未关注房不得整屏「—」)
 //   D34 工作区视图分段行不常驻快捷键提示: 1/2/3 与 / 的键盘本体保留, 屏上那条 11px 灰字撤掉且双语不留死键
+//   D35 工作区筛选条右端只在真有搜索词时出声: 「排序与页码在本视图内记忆」常驻说明撤掉(记忆本体不动), 无词时不留空转 flex-1
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -989,6 +990,23 @@ checkWithAllowlist(
   assert(segRow.includes('sec-n') && segRow.includes('@click="setView(v)"'), 'D34b0 视图分段行解析面合理(分段按钮与计数都取到了)', `${segRow.length} 字节`)
   assert(!/keyHint/.test(wv + zh + en), 'D34c 提示文案三处净空(模板 + 双语键, 无消费方即删不留死键)')
   assert(!/flex-1/.test(segRow), 'D34d 分段行右侧不再挂东西(为一句灰字摆的撑开块一并撤, 不留空转的 flex-1)')
+}
+
+// ============================================================================
+// D35 工作区筛选条右端「只在真有搜索词时出声」 (2026-10-01 用户指令, 与 D34 同一条口径)
+//   撤的是常驻说明书「排序与页码在本视图内记忆」: 记忆是这一屏的默认行为, 不是需要天天提醒的规则。
+//   搜索态那句(「{kw}」的搜索结果 + 清除搜索出口)必须留着 —— 它说的是此刻正在发生的事, 不是规则。
+// ============================================================================
+{
+  const wv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'WorkspaceView.vue'), 'utf8')
+  const zh = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'zh-CN.ts'), 'utf8')
+  const en = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'en-US.ts'), 'utf8')
+  const bar = /<!-- 本视图的排序 \/ 筛选条[\s\S]*?\n {4}<\/div>/.exec(wv)?.[0] ?? ''
+  assert(bar.includes('setSort(') && bar.includes('toggleFilter(') && bar.includes('ws.searchResult'), 'D35a0 筛选条解析面合理(排序 chip · 筛子 · 搜索态那句都取到了)', `${bar.length} 字节`)
+  assert(!/memoryHint/.test(wv + zh + en), 'D35b 「排序与页码在本视图内记忆」三处净空(模板 + 双语键, 无消费方即删不留死键)')
+  assert(/<template v-if="kw">[\s\S]{0,200}flex-1[\s\S]{0,200}ws\.searchResult/.test(bar), 'D35c 右端整块(撑开 + 那句)都挂在搜索态里 —— 无词时不留空转的 flex-1')
+  const st = fs.readFileSync(R('src', 'renderer', 'src', 'stores', 'app.ts'), 'utf8')
+  assert(/views: Record<WSView, ViewFilter>/.test(st) && /views: \{ live:[\s\S]{0,120}discover:[\s\S]{0,120}offline:/.test(st), 'D35d 记忆本体仍在(三视图各存一份 ViewFilter)—— 撤的只是屏上那句话')
 }
 
 // ============================================================================
