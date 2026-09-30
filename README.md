@@ -29,7 +29,7 @@ npm run pack:mac       # 打包 macOS dmg + zip(需在本机 macOS 上跑)
 npm run pack:linux     # 打包 AppImage + deb(需在本机 Linux 上跑)
 npm run pack:dir       # 只出解包目录(release/win-unpacked), 排查打包问题用
 npm run typecheck      # 双端类型检查
-npm run verify         # 行为回归链: 8 个纯 Node 脚本(设计契约/数据根/源缓存/保活泵/录制管线/关注导入/深链/通知)
+npm run verify         # 行为回归链: 9 个纯 Node 脚本(设计契约/数据根/源缓存/保活泵/录制管线/回放全长/关注导入/深链/通知)
 npm run build:icon     # 由 resources/icon.ico 派生 png/icns 与托盘模板
 ```
 
@@ -109,7 +109,7 @@ src/
    ├─ views/AccountView.vue   #   账号: 双平台独立会话 + 登录态四态 + 校验轨迹
    ├─ views/SettingsView.vue  #   设置: 外观/监控/录制/网络/通知与行为/数据与日志/关于
    └─ components/CinemaOverlay.vue # 磨砂影院浮层: 播放 + 合并 + 删除
-scripts/                      # verify-*.mjs 行为回归链(8 个) · icon-build/tray-icon-build 图标派生 · sim-keepalive-scale 保活规模仿真(手动)
+scripts/                      # verify-*.mjs 行为回归链(9 个) · icon-build/tray-icon-build 图标派生 · sim-keepalive-scale 保活规模仿真(手动)
 docs/design/                  # sodalive-ia-v1.html 现行设计稿; 其余为过程记录(页首标注被哪一节覆盖)
 ```
 </details>

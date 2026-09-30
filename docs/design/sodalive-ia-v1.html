@@ -1211,6 +1211,9 @@
       <b>② 分组维度决定平台徽标是否出现</b>：按主播分组 → 每行挂平台徽标（主播身份是平台相关的）；按日期分组 → 不挂（日期平台无关）。
       统计保持全局口径，并补一行「其中 Panda 84 · SOOP 44」，让平台占比可读而不用切页面 —— 库并入录制页后这条更强了：独立页的三枚统计胶囊收成一行「共 128 个视频 · 41h · 12.4 GB · 其中 …」，磁盘数字由页头概览条给一个源，不在同屏出现第二个。
     </div>
+    <div class="note gray" style="margin-top:9px">
+      <b>③ 「分段 N 分钟/段」只跟直播任务同屏</b>：段头摘要里那个 N 来自 <code class="tok">splitSeconds</code>，而回放分支是 <code class="tok">-c copy</code> 单 TS 直出（<code class="tok">recorder.ts</code> 的两条 spawn 分支写死，不经分段）—— 全是回放下载时还挂这句话，等于宣称一个当下不生效的参数。磁盘闸门两边都要落盘，所以始终保留。落地为 <code class="tok">RecordingsView.secCaption</code>。
+    </div>
   </div>
 </section>
 

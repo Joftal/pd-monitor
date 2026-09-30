@@ -12,7 +12,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && vue-tsc --noEmit -p tsconfig.web.json",
-    "verify": "node scripts/verify-design.mjs && node scripts/verify-dataroot.mjs && node scripts/verify-playcache.mjs && node scripts/verify-keepalive.mjs && node scripts/verify-p1.mjs && node scripts/verify-follows.mjs && node scripts/verify-deeplink.mjs && node scripts/verify-notify.mjs",
+    "verify": "node scripts/verify-design.mjs && node scripts/verify-dataroot.mjs && node scripts/verify-playcache.mjs && node scripts/verify-keepalive.mjs && node scripts/verify-p1.mjs && node scripts/verify-vodduration.mjs && node scripts/verify-follows.mjs && node scripts/verify-deeplink.mjs && node scripts/verify-notify.mjs",
     "pack": "npm run build && electron-builder --win --x64",
     "pack:mac": "npm run build && electron-builder --mac --x64 --arm64",
     "pack:linux": "npm run build && electron-builder --linux --x64",

@@ -86,6 +86,11 @@ const diskCaption = computed(() => {
   return diskLow.value ? t('rec.diskWarn') : t('rec.diskFull')
 })
 const splitMin = computed(() => Math.round((store.settings?.splitSeconds ?? 900) / 60))
+// 分段时长只作用于直播管线(VOD 是单 TS 直出, recorder.ts 的 spawn 两条分支写死的),
+// 全是回放时还挂「分段 N 分钟/段」就是假信息; 磁盘闸门两边都要落盘, 所以始终保留
+const secCaption = computed(() =>
+  active.value.some((task) => !task.vod) ? `${t('rec.segInfo', { min: splitMin.value })} · ${diskCaption.value}` : diskCaption.value
+)
 
 // ---- VOD 进度 ----
 function vodTotalLabel(task: RecTask): string {
@@ -239,7 +244,7 @@ const savePath = computed(() => store.settings?.savePath || '')
           <span class="sec-n">{{ active.length }}</span>
         </h2>
         <span class="w-px h-4 bg-line mx-0.5"></span>
-        <span class="sec-tools">{{ t('rec.segInfo', { min: splitMin }) }} · {{ diskCaption }}</span>
+        <span class="sec-tools">{{ secCaption }}</span>
       </div>
 
       <div v-if="active.length" class="space-y-3.5">
