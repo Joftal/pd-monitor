@@ -99,7 +99,7 @@
             gap: 6px; cursor: pointer; position: relative; white-space: nowrap; }
   .navtab:hover { color: var(--ink1); }
   .navtab.on { color: var(--ink1); font-weight: 700; }
-  .navtab.on::after { content: ''; position: absolute; left: 14px; right: 14px; bottom: 0; height: 2.5px; background: var(--brand); border-radius: 2px 2px 0 0; }
+  .navtab.on::after { content: ''; position: absolute; left: 14px; right: 14px; bottom: 0; height: 2.5px; background: var(--brand); border-radius: 999px 999px 0 0; }
   .navtab .cnt { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--brand-soft);
                  color: var(--brand); font-size: 11px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; }
   .navtab .cnt.red { background: rgba(229,72,77,.12); color: var(--live-ink); }
@@ -141,7 +141,7 @@
   .btn-primary:hover { background: var(--brand-hi); }
   .btn-ghost { background: transparent; color: var(--ink2); border: 1px solid var(--line); font-weight: 500; }
   .btn-ghost:hover { background: var(--fill); color: var(--ink1); }
-  .btn-sm { height: 28px; padding: 0 11px; font-size: 12px; border-radius: 8px; }
+  .btn-sm { height: 28px; padding: 0 11px; font-size: 12px; border-radius: 10px; }
   .btn-danger-ghost { background: transparent; border: 1px solid rgba(229,72,77,.35); color: var(--live-ink); font-weight: 600; }
 
   .chip { display: inline-flex; align-items: center; gap: 5px; height: 27px; padding: 0 11px; border-radius: var(--r-pill);
@@ -206,13 +206,13 @@
   .sw2::after { content: ''; position: absolute; left: 2px; top: 2px; width: 13px; height: 13px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
   .sw2.on { background: var(--brand); }
   .sw2.on::after { left: 15px; }
-  .iconbtn { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; color: var(--ink-deco); border: none; background: transparent; cursor: pointer; font-size: 12px; }
+  .iconbtn { width: 26px; height: 26px; border-radius: 10px; display: grid; place-items: center; color: var(--ink-deco); border: none; background: transparent; cursor: pointer; font-size: 12px; }
   .iconbtn:hover { background: var(--fill); color: var(--ink2); }
   .iconbtn.del:hover { background: rgba(229,72,77,.1); color: var(--live-ink); }
 
   .guide { display: flex; align-items: center; gap: 16px; background: var(--card); border: 1px dashed var(--line);
            border-radius: var(--r-card); padding: 16px 18px; }
-  .guide .ico { width: 40px; height: 40px; border-radius: 11px; background: var(--brand-soft); color: var(--brand);
+  .guide .ico { width: 40px; height: 40px; border-radius: 10px; background: var(--brand-soft); color: var(--brand);
                 display: grid; place-items: center; flex: none; font-size: 18px; font-weight: 800; }
   .guide .tx { min-width: 0; }
   .guide .tx .t1 { font-size: 13px; font-weight: 700; }
@@ -236,14 +236,14 @@
   .task { display: flex; align-items: center; gap: 14px; background: var(--card); border: 1px solid var(--line);
           border-radius: var(--r-card); padding: 13px 16px; box-shadow: var(--sh1); }
   .task + .task { margin-top: 9px; }
-  .task .th2 { width: 96px; aspect-ratio: 16/9; border-radius: 8px; background: linear-gradient(135deg, #262A31, #3D424A); flex: none;
+  .task .th2 { width: 96px; aspect-ratio: 16/9; border-radius: 10px; background: linear-gradient(135deg, #262A31, #3D424A); flex: none;
                display: grid; place-items: center; color: rgba(255,255,255,.5); font-size: 10px; font-weight: 800; letter-spacing: .05em; }
   .task .m { min-width: 0; flex: 1; }
   .task .row1 { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
   .task .row2 { display: flex; align-items: center; gap: 14px; margin-top: 7px; font-size: 11.5px; color: var(--ink3); font-variant-numeric: tabular-nums; }
   .task .row2 .k { color: var(--ink-deco); }
-  .meter { height: 5px; border-radius: 3px; background: var(--fillh); overflow: hidden; display: block; }
-  .meter i { display: block; height: 100%; border-radius: 3px; background: var(--brand); }
+  .meter { height: 5px; border-radius: 999px; background: var(--fillh); overflow: hidden; display: block; }
+  .meter i { display: block; height: 100%; border-radius: 999px; background: var(--brand); }
   .pipe { display: flex; align-items: center; gap: 5px; flex: none; }
   .pipe .p { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 5px;
              background: var(--fill); color: var(--ink3); font-size: 10.5px; font-weight: 700; }
@@ -261,10 +261,10 @@
   .srow .lab .l { font-weight: 600; }
   .srow .lab .d { font-size: 11px; color: var(--ink3); margin-top: 3px; line-height: 1.6; }
   .srow .after { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
-  .seg { display: inline-flex; background: var(--fill); border: 1px solid var(--line); border-radius: 8px; padding: 2px; gap: 2px; }
+  .seg { display: inline-flex; background: var(--fill); border: 1px solid var(--line); border-radius: 10px; padding: 2px; gap: 2px; }
   .seg button { border: none; background: transparent; cursor: pointer; height: 26px; padding: 0 12px; border-radius: 6px; font-size: 12px; color: var(--ink2); font-weight: 600; }
   .seg button.on { background: var(--card); box-shadow: var(--sh1); color: var(--brand); }
-  .ro { height: 30px; padding: 0 11px; border-radius: 8px; background: var(--fill); border: 1px solid var(--line);
+  .ro { height: 30px; padding: 0 11px; border-radius: 10px; background: var(--fill); border: 1px solid var(--line);
        color: var(--ink2); font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
   .ro b { color: var(--ink1); font-variant-numeric: tabular-nums; }
 
@@ -332,7 +332,7 @@
         font-size: 13.5px; font-weight: 600; color: var(--ink2); position: relative; white-space: nowrap; }
   .vt:hover { color: var(--ink1); }
   .vt.on { color: var(--brand); font-weight: 800; }
-  .vt.on::after { content: ''; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 2.5px; background: var(--brand); border-radius: 2px 2px 0 0; }
+  .vt.on::after { content: ''; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 2.5px; background: var(--brand); border-radius: 999px 999px 0 0; }
   .vt .n { font-size: 11.5px; font-weight: 700; color: var(--ink3); background: var(--fill); border-radius: var(--r-pill); padding: 2px 7px; }
   .vt.on .n { color: var(--brand); background: var(--brand-soft); }
   .vt .cdot { width: 7px; height: 7px; border-radius: 50%; background: var(--live); }
@@ -340,7 +340,7 @@
 
   /* 账号页 */
   .acc-hero { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card); padding: 16px 18px; display: flex; align-items: center; gap: 14px; box-shadow: var(--sh1); }
-  .acc-hero .tile { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; flex: none; font-size: 17px; font-weight: 800; }
+  .acc-hero .tile { width: 42px; height: 42px; border-radius: 10px; display: grid; place-items: center; flex: none; font-size: 17px; font-weight: 800; }
   .acc-hero .tile.ok { background: rgba(47,173,95,.13); color: var(--ok-ink); }
   .acc-hero .tile.warn { background: rgba(224,165,38,.15); color: var(--warn-ink); }
   .acc-hero .tile.none { background: var(--fill); color: var(--ink3); }
@@ -352,7 +352,7 @@
   .method + .method { margin-top: 10px; }
   .method.on { border-color: var(--brand); }
   .method .mh { display: flex; align-items: center; gap: 10px; }
-  .method .mi { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; background: var(--fill); color: var(--ink2); flex: none; font-size: 13px; }
+  .method .mi { width: 30px; height: 30px; border-radius: 10px; display: grid; place-items: center; background: var(--fill); color: var(--ink2); flex: none; font-size: 13px; }
   .method .mh .t { font-size: 14px; font-weight: 800; }
   .method .ms { font-size: 12px; color: var(--ink3); margin-top: 8px; line-height: 1.7; }
   .method .feat { display: flex; gap: 14px; margin-top: 9px; font-size: 11.5px; color: var(--ink2); flex-wrap: wrap; }
@@ -366,7 +366,7 @@
   .steps li .no3 { width: 18px; height: 18px; border-radius: 50%; background: var(--brand-soft); color: var(--brand); font-size: 10.5px; font-weight: 800; display: grid; place-items: center; flex: none; margin-top: 1px; }
   .cookie-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 10px; }
   .ta { border: 1px solid var(--line); border-radius: 10px; background: var(--fill); padding: 10px 12px; font-size: 11.5px; color: var(--ink-deco); font-family: ui-monospace, Consolas, monospace; min-height: 78px; line-height: 1.7; }
-  .inp { border: 1px solid var(--line); border-radius: 8px; background: var(--card); padding: 0 11px; height: 30px; font-size: 12px; color: var(--ink1); display: inline-flex; align-items: center; }
+  .inp { border: 1px solid var(--line); border-radius: 10px; background: var(--card); padding: 0 11px; height: 30px; font-size: 12px; color: var(--ink1); display: inline-flex; align-items: center; }
   .inp.pw { color: var(--ink-deco); letter-spacing: .18em; }
 
   /* 布局方案对比: 线框缩略 */
@@ -477,7 +477,7 @@
         <table class="spec">
           <thead><tr><th>用途</th><th class="mono">px / weight</th><th>示例</th></tr></thead>
           <tbody>
-            <tr><td class="mono">page/title</td><td class="mono">20 / 700</td><td style="font-size:20px;font-weight:700">PandaLive</td></tr>
+            <tr><td class="mono">page/title</td><td class="mono">17 / 800</td><td style="font-size:17px;font-weight:800">PandaLive</td></tr>
             <tr><td class="mono">group/head</td><td class="mono">13 / 800</td><td style="font-size:13px;font-weight:800">在播关注</td></tr>
             <tr><td class="mono">card/title</td><td class="mono">13.5 / 600</td><td style="font-size:13.5px;font-weight:600">今晚排位上分，赢了睡觉</td></tr>
             <tr><td class="mono">body</td><td class="mono">12.5 / 400–600</td><td style="font-size:12.5px">设置项正文与描述</td></tr>
@@ -495,6 +495,8 @@
             <tr><th class="k">阴影</th><td>一级 <code class="tok">0 1px 2px rgba(16,20,28,.06)</code> + 1px 边框恒在；二级（hover / 浮层）<code class="tok">0 6px 20px rgba(16,20,28,.10)</code>。<strong>深色主题下描边是唯一可信的边界</strong>，所以卡片一律描边，不做无边框纯阴影卡。</td></tr>
             <tr><th class="k">数字</th><td>所有计数 / 时长 / 码率走 <code class="tok">font-variant-numeric: tabular-nums</code>，避免每 30s 轮询刷新时列宽抖动导致整墙文字跳动。</td></tr>
             <tr><th class="k">缺失值</th><td>统一 <code class="tok">—</code>（破折号），禁止 0、空串、「暂无」三种写法混用。</td></tr>
+            <tr><th class="k">同一物件只允许一处规格</th><td>页头标题曾有三种写法（20/21px、bold/extrabold），平台色点有四套自画实现（5–8px、描边有无不一），计数药丸有三套（裸字 / <code class="tok">min-w+rounded-full</code> 手搓 / <code class="tok">.sec-n</code>），等宽数字有两种拼法（<code class="tok">.tnum</code> 与 <code class="tok">tabular-nums</code>）。<strong>规格收敛到令牌层一处，视图只写内容</strong>：<code class="tok">.page-h/.page-sub</code>（页头，实测 17/800 —— 原稿写的 20 与 30px 控件行不齐，落地时改）、<code class="tok">.sec-h/.sec-n/.sec-bar</code>（分组条与计数）、<code class="tok">.platn</code>（顶栏两枚平台计数）、<code class="tok">.pdot/.pdot-sm/.pdot-panda/.pdot-soop</code>（平台色点，7px + <code class="tok">ink3</code> 1px 描边：SOOP 黄压白卡只有 1.43:1，不勾边等于看不见）、<code class="tok">font-variant-numeric: tabular-nums</code>（唯一拼法，<code class="tok">.tnum</code> 同义类已删）。由 D18~D21 静态锁死。</td></tr>
+            <tr><th class="k">控件高度与 naive 对齐</th><td>自绘控件必须显式锁 <code class="tok">h-*</code> 档位（28 与 naive <code class="tok">small</code> 同高、34 是浮层动作行），<strong>不得用 <code class="tok">py-[Npx]</code> 撑高</strong> —— 撑出来的 34.35 与同行 naive 的 28 并排一眼可见，而圆角/颜色全在档上，D1~D22 一条都查不到（D24 补上）。同理 <code class="tok">App.vue</code> 的 naive 主题覆盖必须逐值等于 <code class="tok">styles.css</code> 的语义变量（D22），否则同一屏出现两套底色两套主色 —— 实测深色 <code class="tok">errorColor</code> 沿用了浅色的 <code class="tok">#e5484d</code>。</td></tr>
           </tbody>
         </table>
       </div>
@@ -1740,7 +1742,7 @@
             ⑧ 账号页按 S9 的 5 处改动落地（结构未动：仍是一页两态分段，只换皮、补状态文字、补校验轨、把密钥降级告警提到页顶、退出确认合并）；<br/>
             ⑨ D3 反向差值上线：同步站内关注只<strong>标注</strong>「站内已取关 · 本地仍保留」，一条都不删，离线视图另给一枚筛子。
           </td>
-          <td>类型检查 + <code class="tok">npm run verify</code> 八套脚本全绿；两平台各自的三个视图在真实数据下渲染正确，切换视图后排序/分页/滚动位置互不污染；在播为 0 时在播坞整体收起；「在播关注」视图不挂坞（㉖，D15m）；各屏空态为有界卡且下一步可点（㉕/㉗，D15i–n）、零数据页的下半屏由空槽撑满（㉘，D15o）；旧深链不落到空白页（由 <code class="tok">scripts/verify-deeplink.mjs</code> 在真路由表上断言）；老库的全局通知开关升格为矩阵后行为逐格不变（由 <code class="tok">scripts/verify-notify.mjs</code> 写真 db.json 走真 store 断言迁移与三路门禁）；「站内已取关」只标注不删墙、跨平台同名不串、重新回榜即清、북마크 取满 200 时跳过差值（由 <code class="tok">scripts/verify-follows.mjs</code> 的 D3 / E8 场景走真 <code class="tok">importFollowRows</code> 断言）；<strong>本稿可静态判定的规则已写成 <code class="tok">scripts/verify-design.mjs</code>（D1~D17，103 条断言，进 <code class="tok">npm run verify</code> 与 CI）</strong>：档位/禁原生色/禁硬编码色/纯色状态底白名单/状态色不承载文字/命名表/令牌层完好/双语键位与占位符/取词键存在/动效预算/瓷片可点性/平台分解行/白屏与最小窗宽/首屏不等官方校验与空态有界且可点/关注取关承载矩阵与进度承载面唯一/管线文案与码率差分按任务类型与字节实长走/仓库卫生（死令牌·无横幅历史稿·docs 二进制·README 双平台口径）。<br/><span style="color:#b02a31"><strong>验收口径未完成项（如实标注）：</strong></span>「深浅两主题逐屏截图比对」<strong>已执行三轮</strong>（2026-09-30，CDP 驱动真实 Electron 实例 + 真库 876 关注 / 24 在播，覆盖工作区三视图 / 录制页 / 账号页 / 设置页 / 播放页，两主题 × 1380 与 1024 宽；第三轮另真起两段 SOOP 直播录制并正常停止收尾），当场查出并修掉冷启动「加载中」空屏、设置页白屏、页头按钮档位并存、空态整屏居中、取关在播放页穿中性灰、卡片菜单用 div 装按钮、<strong>转码从未产出 MP4 且完全静默</strong>、实时码率是采样噪声、回放行首棒误写「拉取直播源」等 13 项，均由 D14/D15/D16 与 P1 套锁死。<strong>仍未实机覆盖的只剩一处，且不是「没做」而是现场不存在</strong>：发现卡的 hover 心形 —— Panda 未认证使站内发现为 0 张、SOOP 发现未开放，两平台都渲染空墙。回放管线行的有数据形态按 ㉚ 的口径取证（真机拉源 14/14 失败，改由同形状注入渲染）。</td>
+          <td>类型检查 + <code class="tok">npm run verify</code> 八套脚本全绿；两平台各自的三个视图在真实数据下渲染正确，切换视图后排序/分页/滚动位置互不污染；在播为 0 时在播坞整体收起；「在播关注」视图不挂坞（㉖，D15m）；各屏空态为有界卡且下一步可点（㉕/㉗，D15i–n）、零数据页的下半屏由空槽撑满（㉘，D15o）；旧深链不落到空白页（由 <code class="tok">scripts/verify-deeplink.mjs</code> 在真路由表上断言）；老库的全局通知开关升格为矩阵后行为逐格不变（由 <code class="tok">scripts/verify-notify.mjs</code> 写真 db.json 走真 store 断言迁移与三路门禁）；「站内已取关」只标注不删墙、跨平台同名不串、重新回榜即清、북마크 取满 200 时跳过差值（由 <code class="tok">scripts/verify-follows.mjs</code> 的 D3 / E8 场景走真 <code class="tok">importFollowRows</code> 断言）；<strong>本稿可静态判定的规则已写成 <code class="tok">scripts/verify-design.mjs</code>（D1~D24，129 条断言，进 <code class="tok">npm run verify</code> 与 CI）</strong>：档位/禁原生色/禁硬编码色/纯色状态底白名单/状态色不承载文字/命名表/令牌层完好/双语键位与占位符/取词键存在/动效预算/瓷片可点性/平台分解行/白屏与最小窗宽/首屏不等官方校验与空态有界且可点/关注取关承载矩阵与进度承载面唯一/管线文案与码率差分按任务类型与字节实长走/仓库卫生（死令牌·无横幅历史稿·docs 二进制·README 双平台口径）/圆角四档（模板与 CSS 双向，禁任意值）/平台色点唯一规格/计数药丸唯一规格/等宽数字唯一拼法/naive 主题逐值对齐语义变量/文案品牌形/自绘按钮锁 <code class="tok">h-*</code>。<br/><span style="color:#b02a31"><strong>验收口径未完成项（如实标注）：</strong></span>「深浅两主题逐屏截图比对」<strong>已执行三轮</strong>（2026-09-30，CDP 驱动真实 Electron 实例 + 真库 876 关注 / 24 在播，覆盖工作区三视图 / 录制页 / 账号页 / 设置页 / 播放页，两主题 × 1380 与 1024 宽；第三轮另真起两段 SOOP 直播录制并正常停止收尾），当场查出并修掉冷启动「加载中」空屏、设置页白屏、页头按钮档位并存、空态整屏居中、取关在播放页穿中性灰、卡片菜单用 div 装按钮、<strong>转码从未产出 MP4 且完全静默</strong>、实时码率是采样噪声、回放行首棒误写「拉取直播源」等 13 项，均由 D14/D15/D16 与 P1 套锁死。<strong>第四轮（㉜ 令牌层收敛，同日）</strong>量的是「同一物件在不在一档上」而非「有没有白屏」：顶栏两枚 <code class="tok">.platn</code>（999px / 实测 5 与 22）、<code class="tok">.pdot</code> 7px + ink3 描边（Panda 粉 #fb7299 / SOOP 黄 #ffd400）、视图分段 <code class="tok">.sec-n</code> 21.25px + <code class="tok">tabular-nums</code>、卡片 14px、在播坞 chip 27px（注入 9 位探针在播房间取证，坞在「在播关注」视图不渲染 = ㉖ 成立）、影院浮层动作行三枚 34px（注入 3 段/1 段探针条目取证）、账号页三枚 CTA 等宽 112px、设置保存条 128/128 对称、深浅两主题下 GitHub 按钮底色逐值等于 <code class="tok">--c-fill</code>。当场查出两处：<strong>设置·关于的自绘「GitHub 主页」按钮 34.35px 与同行 naive 的 28px 并排</strong>（已锁 <code class="tok">h-7</code>，由 D24 锁死）、<strong>深色 naive <code class="tok">errorColor</code> 沿用浅色档的 #e5484d</strong>（已改 <code class="tok">#eb575c</code> = <code class="tok">.dark --c-live</code>，由 D22 锁死）；另把免责文案里的小写 <code class="tok">pandalive</code> 订正为品牌形 <code class="tok">PandaLive</code>（D23，仅「落盘结构」两条保留小写 —— 那里说的就是目录名）。<strong>仍未实机覆盖的只剩一处，且不是「没做」而是现场不存在</strong>：发现卡的 hover 心形 —— Panda 未认证使站内发现为 0 张、SOOP 发现未开放，两平台都渲染空墙。回放管线行的有数据形态按 ㉚ 的口径取证（真机拉源 14/14 失败，改由同形状注入渲染）。</td>
         </tr>
         <tr>
           <th class="k">二期<br/>采集补强</th>
@@ -1802,6 +1804,7 @@
       · 本条在 2026-09-30 用真实数据实机跑过一轮（真起一段 SOOP 直播录制 83s 后停止），当场暴露三件静态检查看不到的事，均已修：① <strong>转码从未产出过 MP4 且完全静默</strong> —— 原子产物刻意叫 <code class="tok">&lt;mp4&gt;.part</code>，而 ffmpeg 按输出扩展名选封装器，猜不出 <code class="tok">.part</code> 就非零退出、一个字节都不写，<code class="tok">remux()</code> 又只在成功路径留痕 ⇒ 开着「自动转 MP4」录一百次也是零次转码。现两处 spawn 补 <code class="tok">-f mp4</code>、失败路径补日志，并把这条规则塞进伪 ffmpeg（它以前不挑输出名，所以整条链路全灭也测出 PASS）；② <strong>实时码率是采样噪声</strong> —— 字节由主进程每 2s stat 一次，推送却按状态变更随时发，按推送间隔做差分让 8.4 Mbps 稳流在 <code class="tok">0.0 / 8.4 / 17.8 / 26.1</code> 之间跳（12 次采样里 3 次读成 0.0）；现差分基线只在字节真长了时推进，窗口未满沿用上一读数，实测同一条流稳定落在 4.2–8.4；③ <strong>回放行的首棒写着「拉取直播源」</strong> —— 下载中/录制中早已按 <code class="tok">task.vod</code> 分叉，第一棒漏了。回放行的有数据形态（35% / 无分母退回纯文字 / 收尾 100%）见 ㉚ 的取证口径。<br/>
       ㉚ <strong>呈现类结论只能由实机取证，静态断言会放行"整条静默失败"</strong>：本稿一度把 S7 与 ㉙ 挂在「要有真实录像和在播源才能验」上挂起，而本机 876 位关注里有 24 间在播 —— 缺的从来不是数据，是「先跑一遍」这一步。补跑之后：㉙ 的四个承载点全部实机看过并改掉两处；S7 查出上面那三件事，其中 ① 是能让全部录制产物停在 TS 的功能性事故，而它在 <code class="tok">npm run verify</code> 的 75 条 P1 断言里一直是绿的。<strong>据此定口径：凡结论写成「某一屏长什么样」，就必须给出该屏被真实渲染过一次的证据</strong>（真任务 / 真数据 / 截图）；现场确实不存在的（如发现卡的心形 —— Panda 未认证、SOOP 发现未开放，两平台各 0 张卡）要写明"不存在"而不是"待验证"。回放行的有数据形态是本轮唯一没能在真机上跑出来的一段：Panda 回放 14 间全部拉源失败（13 间 <code class="tok">castEnd</code>、1 间网络断连），故该三态（35% / 无分母 / 100%）由注入与真任务同形状的 <code class="tok">RecTask</code> 渲染取证，只动渲染层内存、不落盘不写库；<strong>主进程侧 <code class="tok">vodTotalSec</code> 的真值来源（<code class="tok">fetchPlaylistDurationSec</code> 解析清单）本轮没有独立回归，仍是一处已知缺口</strong>。<br/>
       ㉛ <strong>改版收口要清场：死令牌、无主资产、按旧页面划分写成的设计稿，都是下一轮开发的假依据</strong>（2026-09-30 提交前体检落地）。本轮清掉四类堆积：① <code class="tok">tailwind.config.js</code> 里没人用的 <code class="tok">shadow-glow-brand</code> / <code class="tok">rounded-badge</code>（3.4「不留死令牌」此前只对 <code class="tok">animate-pop</code> 有一条断言，现在扩成 D17a 全量清单 + 解析下限，防止规则空转假绿）；② 字典里两语言都有、代码里一次没取过的 <code class="tok">common.myriad</code>（<code class="tok">fmtNum</code> 自己按 isZh 拼「万 / k」，键是早期方案的遗骸）；③ <code class="tok">docs/design/preview/</code> 五张 1.9MB 设计稿导出图 —— 零引用，且画的是改版前的「直播/录制/视频库」四段顶栏，留着比删掉更有害；④ 三份没有覆盖横幅的单页设计稿（设置 / 账号 / 观看），它们仍以"活文档"口径描述已被本稿 S5/S6/S9 改掉的分节与控件（设置页缺「外观」档、监控一卡未按平台拆、通知还是全局开关；账号页的「账号密码登录(推荐)」方案 A 从未落地；观看页写死 1080P 四档表和「主线/备用 1/备用 2」，而真实档位来自房间 master 变体、SOOP 根本不给线路清单）。<strong>口径：历史设计稿要么带横幅、要么按现行稿重画，不允许第三种状态存在</strong> —— 由 D17b 断言每份非现行稿必带 <code class="tok">superseded-banner</code>，D17c 断言 <code class="tok">docs/</code> 下不放二进制资产，D17d~f 断言 README 的双平台口径 / verify 链 / SOOP 半边源码在案。<br/>
+      ㉜ <strong>风格统一的最小单位不是「页」，是「同一个物件的第二套规格」</strong>（2026-09-30 令牌层收敛落地）。按页扫风格必然扫不完：页面逻辑早已一致，剩下的全是一种物件被画了两遍。本轮查出并归并的七组重复规格 —— ① 平台色点四套（<code class="tok">TopNav .platdot</code> / <code class="tok">PlatFilter .pf__dot</code> / <code class="tok">PlatTag .plat-tag__dot</code> / 库段分解行的内联 <code class="tok">:style</code> 底色），尺寸 5~8px 不一、描边有无不一，其中内联那一套完全没有描边，SOOP 黄压白卡 1.43:1 等于看不见 → 收成全局 <code class="tok">.pdot</code> 一处（7px + <code class="tok">ink3</code> 1px 环，徽标内 <code class="tok">.pdot-sm</code> 5px）；② 顶栏计数药丸手搓 <code class="tok">min-w+rounded-full</code> 与 <code class="tok">.sec-n</code> 并存 → 收成 <code class="tok">.platn</code>；③ 视图分段计数是裸字加三元色 → 归 <code class="tok">.sec-n</code>；④ 等宽数字两种拼法（<code class="tok">.tnum</code> 与 <code class="tok">tabular-nums</code>）→ 删 <code class="tok">.tnum</code>，只留 Tailwind 一种，否则「谁漏了一处」根本查不出来；⑤ 离档圆角约 32 处（<code class="tok">rounded-sm/lg/xl/2xl</code> 与任意值、滚动条与进度条端点 3px）→ 全量落到 14/10/6(sm=5)/999 四档；⑥ 段距 22 与 20 混用（§0.4 早点名要废 22，实际还留着）→ 废 22；⑦ 控件高度按内容撑（chip 28 vs 27、浮层动作行 34 vs 30、CTA 104 vs 112）→ 显式锁 <code class="tok">h-*</code> 与 <code class="tok">!w-[Npx]</code>。<strong>另外两处不是"不统一"而是"两套真相"</strong>：设置·关于的 GitHub 按钮写死 <code class="tok">#24292f/#0d1117</code> 两枚十六进制（D3 只查 Tailwind 原生色与 class/style 里的 <code class="tok">#hex</code> 字面量，它挂在 <code class="tok">bg-[#24292f]</code> 的任意值里，靠 D4 白名单混过去 —— 白名单条目随该次改动失效而被 D4 自己判 FAIL，这是白名单机制第一次真的拦住东西），现改走 <code class="tok">bg-fill + border-line + text-ink1</code>，两主题各自取值；<code class="tok">App.vue</code> 的 naive 主题覆盖与 <code class="tok">styles.css</code> 语义变量此前只是注释里承诺一致，实测深色 <code class="tok">errorColor</code> 停在浅档。<strong>口径：新增断言必须带"解析面下限"（D18a0/D19d/D21b/D22a~c/D23a0/D24a0），否则规则空转就是假绿</strong> —— 本轮 D22 首跑正是靠这条下限暴露出它自己把 <code class="tok">.dark</code> 解析到了 <code class="tok">:root</code> 块尾（<code class="tok">.dark</code> 先以文字出现在 <code class="tok">:root</code> 的注释里），修成锚定块头之后才量到真漂移。
       · S5 侧栏「失效自动续录 · 连续上限 3 次」只显示开关，不镜像次数：<code class="tok">Recorder.MAX_RETRY = 3</code> 是主进程私有常量，渲染层抄一份必然与真实值漂移 —— 宁可少说一个数字。<br/>
       · 3.1 ⑫⑬「关注与取关不上卡片」在<strong>站内发现卡</strong>上留了例外（hover 给心形）：发现页的唯一主行动就是关注，收进菜单等于把这一屏的核心动作藏起来；已关注卡与在播坞仍按原规则（取关在「…」菜单里，坞不承载）。四处的完整分工见 ㉙。<br/>
       · 设置页 GitHub 按钮保留官方 <code class="tok">#24292f / #0d1117</code>（第三方品牌面，不属于本应用令牌板）；品牌横幅因需三段渐变而用内联 <code class="tok">style</code> 写死深阶蓝 —— 这两处是 D4 白名单的全部条目。
