@@ -433,8 +433,6 @@ watch(
         <span v-if="v === 'discover' && isSoop" class="badge badge-sm bg-fill text-ink3">{{ t('ws.soon') }}</span>
         <span v-else class="sec-n">{{ viewCounts[v] }}</span>
       </button>
-      <div class="flex-1"></div>
-      <span class="text-[11px] text-deco pr-1">{{ t('ws.keyHint') }}</span>
     </div>
 
     <!-- 本视图的排序 / 筛选条: 条件看基数与"有没有筛子开着", 不看筛完的条数(见 filterBarVisible 的注释) -->

@@ -38,7 +38,6 @@ export default {
     viewLive: '在播关注',
     viewDiscover: '站内发现',
     viewOffline: '离线关注',
-    keyHint: '按 1 / 2 / 3 切换视图 · / 聚焦搜索',
     soon: '未开放',
     soonTitle: 'SOOP 暂未开放「站内发现」',
     soonBody: 'SOOP 没有公开的全站在播列表接口, 所以这一格暂时没有房间墙。单个「站内关注列表」接口已经用在整轮在播检测上 —— 你关注的人在不在播, 看「在播关注」和顶部的在播坞就够了。',

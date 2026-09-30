@@ -35,7 +35,6 @@ export default {
     viewLive: 'Live following',
     viewDiscover: 'Discover',
     viewOffline: 'Offline following',
-    keyHint: 'Press 1 / 2 / 3 to switch view · / focuses search',
     soon: 'Not open',
     soonTitle: 'SOOP has no public "Discover" feed',
     soonBody: 'SOOP exposes no public site-wide live list, so this view has no room wall for now. The single "favorites" endpoint is already spent on every live check — whether the people you follow are on air is what "Live following" and the dock above are for.',
