@@ -26,6 +26,13 @@
 //   D15 首屏与空态: 不等官方登录校验; 未取到态说「校验中」; 空态有界且下一步可点; 页头按钮同档; 坞不重复渲染在播
 //   D16 承载矩阵: 关注/取关四个现场各按其形态承载; 进度条全应用一条且只给有真分母的对象; 管线文案与码率差分按任务类型/字节实长走
 //   D17 仓库卫生: tailwind 不留死令牌; 历史设计稿必带覆盖横幅; docs/ 不放二进制; README 双平台口径与 verify 链在案
+//   D18 圆角档位: 模板只用 rounded-card|ctl|md|full, 禁任意值; CSS 里的 border-radius 只允许 5/6/10/14/999/50%
+//   D19 平台色点: 全应用一处 .pdot 规格(7px + ink3 描边), 组件不得再自画第二档
+//   D20 计数药丸: 顶栏两枚同用 .platn, 视图分段用 .sec-n, 不得手搓 min-w+rounded-full
+//   D21 等宽数字: 只有 tabular-nums 一种拼法(旧 .tnum 同义类已删), 覆盖面 ≥20 处
+//   D22 naive 主题对齐: App.vue 的 LIGHT/DARK_OVERRIDES 每枚色值都能在 styles.css 语义变量里找到同名档
+//   D23 品牌散文: 用户可见文案里不得出现小写 pandalive(那是枚举/目录名), 品牌形恒为 PandaLive
+//   D24 动作行按钮: 自绘按钮必须用 h-* 锁档位, 不得用 py-[Npx] 撑高(与同行 naive 按钮实测差 6px 就是这么来的)
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -156,11 +163,6 @@ checkWithAllowlist(
     return inClass ? 'class 内硬编码色' : inStyle ? 'style 内硬编码色' : null
   },
   [
-    {
-      file: 'src/renderer/src/views/SettingsView.vue',
-      re: /bg-\[#24292f\][^"]*#0d1117|bg-\[#24292f\]/,
-      why: 'GitHub 官方品牌面(第三方品牌色不属于本应用令牌板, 设计稿 3.3 R1 豁免)'
-    },
     {
       file: 'src/renderer/src/views/SettingsView.vue',
       re: /style="background: linear-gradient\(115deg, #243a5e/,
@@ -551,6 +553,203 @@ const ph = (s) => [...String(s).matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().
       assert(t.includes(svc), `D17f ${name} 代码结构含 ${svc}(整个 SOOP 半边不能只在源码里存在)`)
     }
   }
+}
+
+// ============================================================================
+// D18 圆角只有四档: 卡片 14 / 控件 10 / 徽标 6(sm=5) / 胶囊 999(设计稿 0.4 尺度表)
+//   档位是抄来的还是拍的? 拍的一档(rounded-lg/xl/2xl/裸 rounded)在同屏里长出 4/8/12/16px 四种
+//   圆角, 用户看不出道理, 下一个人也无从判断该用哪个 —— 所以数值本身要能被断言。
+// ============================================================================
+{
+  const LADDER = new Set(['card', 'ctl', 'md', 'full']) // md=6px(徽标档), full=胶囊/圆点
+  const off = []
+  let seen = 0
+  eachLine(RENDERER.filter((f) => f.endsWith('.vue')), (f, n, l) => {
+    if (isCommentLine(l)) return
+    for (const m of l.matchAll(/\brounded(?:-[a-z0-9[\].%]+)?/g)) {
+      seen++
+      const raw = m[0].slice('rounded'.length)
+      const tier = raw.startsWith('-[') ? '任意值' : raw.replace(/^-/, '')
+      if (!LADDER.has(tier)) off.push(`${loc(f, n)} :: ${m[0]}`)
+    }
+  })
+  const css = fs.readFileSync(R('src', 'renderer', 'src', 'styles.css'), 'utf8')
+  const CSS_LADDER = new Set(['5px', '6px', '10px', '14px', '999px', '50%'])
+  const cssOff = []
+  let cssSeen = 0
+  for (const src of [css, ...RENDERER.filter((f) => f.endsWith('.vue')).map((f) => fs.readFileSync(f, 'utf8'))]) {
+    for (const m of src.matchAll(/border-radius:\s*([^;]+)/g)) {
+      cssSeen++
+      for (const v of m[1].trim().split(/\s+/)) if (!CSS_LADDER.has(v)) cssOff.push(m[1].trim())
+    }
+  }
+  // 解析器空转 = 假绿(D9f 同款教训): 先兜住命中数下限
+  assert(seen >= 60, `D18a0 模板圆角类命中数合理(≥60)`, `${seen} 处`)
+  assert(cssSeen >= 12, `D18a1 CSS 圆角声明命中数合理(≥12)`, `${cssSeen} 处`)
+  assert(off.length === 0, 'D18a 模板只用 14/10/6/999 四档圆角(设计稿 0.4)', off.slice(0, 10).join('\n         '))
+  assert(cssOff.length === 0, 'D18b CSS 里的 border-radius 也全在档位上(含滚动条与进度条端点)', [...new Set(cssOff)].slice(0, 8).join(', '))
+}
+
+// ============================================================================
+// D19 平台身份色点只有一处定义(全局 .pdot), 各组件不再自画尺寸与描边环
+// ============================================================================
+{
+  const css = fs.readFileSync(R('src', 'renderer', 'src', 'styles.css'), 'utf8')
+  for (const sel of ['.pdot {', '.pdot-sm {', '.pdot-panda {', '.pdot-soop {']) {
+    assert(css.includes(sel), `D19a 平台色点定义齐全: ${sel}`)
+  }
+  assert(/\.pdot\s*\{[^}]*box-shadow: 0 0 0 1px rgb\(var\(--c-ink3\)\)/.test(css), 'D19b .pdot 描边环恒为 ink3(SOOP 黄压白卡 1.43:1, 不勾边就等于看不见)')
+  const legacy = ['platdot', 'pf__dot', 'plat-tag__dot', 'dot-panda', 'dot-soop']
+  const still = []
+  const users = []
+  for (const f of RENDERER.filter((x) => x.endsWith('.vue'))) {
+    const t = fs.readFileSync(f, 'utf8')
+    for (const name of legacy) if (new RegExp(`\\b${name}\\b`).test(t)) still.push(`${rel(f)} :: ${name}`)
+    if (/\bpdot\b/.test(t)) users.push(rel(f))
+  }
+  assert(still.length === 0, 'D19c 组件自画的平台点(旧名)已清零(两处规格=下一轮又要选一次用哪个)', still.join(', '))
+  assert(users.length >= 4, 'D19d .pdot 消费面 ≥4 处(解析器空转即假绿)', users.join(', '))
+  const handPainted = []
+  eachLine(RENDERER.filter((f) => f.endsWith('.vue')), (f, n, l) => {
+    if (isCommentLine(l)) return
+    if (/background: *'var\(--plat-/.test(l) || /:style="\{\s*background:.*--plat-/.test(l)) handPainted.push(loc(f, n))
+  })
+  assert(handPainted.length === 0, 'D19e 模板里不再用内联 style 拼平台底色(点走 .pdot, 底面板走 .ava/.pt--*)', handPainted.join(', '))
+}
+
+// ============================================================================
+// D20 计数药丸一枚定义: 顶栏 .platn / 段标题 .sec-n, 不许再有手搓的第三种
+// ============================================================================
+{
+  const nav = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'TopNav.vue'), 'utf8')
+  assert(!/min-w-\[\d+px\][^"]*rounded-full/.test(nav), 'D20a 顶栏没有手搓计数药丸')
+  const pills = (nav.match(/class="platn/g) || []).length
+  assert(pills === 2, 'D20b 顶栏两枚计数药丸同用 .platn(平台分段 + 页面 tab)', `${pills} 处`)
+  const ws = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'WorkspaceView.vue'), 'utf8')
+  assert(/class="sec-n"/.test(ws), 'D20c 视图分段计数是 .sec-n 药丸(设计稿 .vt .n), 不是裸字')
+}
+
+// ============================================================================
+// D21 等宽数字一种写法: Tailwind 的 tabular-nums(曾有同义类 .tnum, 两种拼法混用查不出漏网)
+// ============================================================================
+{
+  const css = fs.readFileSync(R('src', 'renderer', 'src', 'styles.css'), 'utf8')
+  // 去注释后再查: 下面那段注释本身就是「为什么曾有 .tnum」的记录, 提它是规则的本意
+  assert(!/\.tnum\b/.test(css.replace(/\/\*[\s\S]*?\*\//g, '')), 'D21a .tnum 同义类已删(等宽数字只有 tabular-nums 一种拼法)')
+  let tn = 0
+  eachLine(RENDERER.filter((f) => f.endsWith('.vue')), (f, n, l) => {
+    for (const m of l.matchAll(/\btabular-nums\b/g)) tn++
+  })
+  assert(tn >= 20, 'D21b 等宽数字覆盖面合理(≥20 处计数/时长/码率)', `${tn} 处`)
+}
+
+// ============================================================================
+// D22 naive 主题面与 styles.css 语义变量逐值对齐(App.vue 的注释承诺, 此前无人核对)
+//   供应商组件与自绘界面在同一屏里出现两套底色/两套主色, 就是这套值漂移出来的。
+// ============================================================================
+{
+  const css = fs.readFileSync(R('src', 'renderer', 'src', 'styles.css'), 'utf8')
+  const varsOf = (sel) => {
+    // 必须锚定到块头(选择器+{): `:root` 与 `.dark` 都先在注释里被提过一次,
+    // 裸 indexOf 会把 .dark 解析到 :root 块尾 —— 于是深色一侧整列拿到浅色值, 假红一片
+    const i = css.search(new RegExp(`${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{`))
+    const body = css.slice(i, css.indexOf('\n}', i))
+    const out = {}
+    for (const m of body.matchAll(/--c-([\w-]+):\s*(\d+)\s+(\d+)\s+(\d+)/g)) {
+      out[m[1]] = '#' + [m[2], m[3], m[4]].map((x) => Number(x).toString(16).padStart(2, '0')).join('')
+    }
+    return out
+  }
+  const L = varsOf(':root')
+  const D = varsOf('.dark')
+  const appSrc = fs.readFileSync(R('src', 'renderer', 'src', 'App.vue'), 'utf8')
+  const overridesOf = (name) => {
+    // 同上: 锚定 `const NAME = {`, 否则命中文件下方 computed 里的引用
+    const i = appSrc.search(new RegExp(`const ${name} =\\s*\\{`))
+    const body = appSrc.slice(i, appSrc.indexOf('\n}', i))
+    const out = {}
+    for (const m of body.matchAll(/(\w+):\s*'#([0-9a-fA-F]{6})'/g)) out[m[1]] = `#${m[2].toLowerCase()}`
+    return out
+  }
+  const LT = overridesOf('LIGHT_OVERRIDES')
+  const DT = overridesOf('DARK_OVERRIDES')
+  assert(Object.keys(L).length >= 12 && Object.keys(D).length >= 12, 'D22a 两套 CSS 变量解析合理(各 ≥12 色)', `L=${Object.keys(L).length} D=${Object.keys(D).length}`)
+  assert(Object.keys(LT).length >= 10 && Object.keys(DT).length >= 10, 'D22b 两套 naive 覆盖解析合理(各 ≥10 色)', `L=${Object.keys(LT).length} D=${Object.keys(DT).length}`)
+  // naive 键 ↔ 语义变量; 深浅两档不同时写 [浅变量, 深变量]
+  const PAIRS = [
+    ['primaryColor', 'brand', 'brand'],
+    ['primaryColorHover', 'brand-hi', 'brand-hi'],
+    ['bodyColor', 'page', 'page'],
+    ['cardColor', 'card', 'card'],
+    ['modalColor', 'card', 'fill'],
+    ['popoverColor', 'card', 'fill'],
+    ['inputColor', 'fill', 'fillh'],
+    ['borderColor', 'line', 'line'],
+    ['textColorBase', 'ink1', 'ink1'],
+    ['errorColor', 'live-ink', 'live'],
+    ['successColor', 'ok', 'ok-ink'],
+    ['warningColor', 'warn', 'warn-ink']
+  ]
+  const drift = []
+  for (const [key, lv, dv] of PAIRS) {
+    if (LT[key] !== L[lv]) drift.push(`light ${key}: naive ${LT[key]} vs --c-${lv} ${L[lv]}`)
+    if (DT[key] !== D[dv]) drift.push(`dark ${key}: naive ${DT[key]} vs --c-${dv} ${D[dv]}`)
+  }
+  assert(PAIRS.length >= 12, 'D22c 对齐清单条数合理(≥12 组)')
+  assert(drift.length === 0, 'D22 naive 主题每一枚色值都能在语义变量里找到同名档(漂移=同一屏两套色)', drift.join('\n         '))
+}
+
+// ============================================================================
+// D23 品牌散文: 用户可见文案里的小写 pandalive 是代码枚举/磁盘目录名, 不是品牌形
+//   (实测: 设置·关于的免责文案写着「与 pandalive 官方无任何关联」, 而同页分组标题写的是 PandaLive —— 同一屏两种称呼)
+//   例外只有「落盘结构」两条: 那里说的确实是目录名本身, 改成品牌形反而教人找不到文件夹。
+// ============================================================================
+{
+  const LOCALES = walk(R('src', 'renderer', 'src', 'i18n'), /\.ts$/)
+  let scanned = 0
+  checkWithAllowlist(
+    'D23 文案里的平台品牌形统一(PandaLive, 不是 pandalive)',
+    LOCALES,
+    (l) => {
+      if (!isCommentLine(l) && /['"`][^'"`]*:?\s*[^'"`]*['"`]/.test(l)) scanned++
+      return /['"`][^'"`]*\bpandalive\b/.test(l) && !isCommentLine(l) ? '小写 pandalive 出现在用户可见文案' : ''
+    },
+    [
+      { file: 'src/renderer/src/i18n/locales/zh-CN.ts', re: /saveDirLayout/, why: '说的是磁盘目录名本身, 不是品牌称呼' },
+      { file: 'src/renderer/src/i18n/locales/en-US.ts', re: /saveDirLayout/, why: '同上(与 zh 对齐)' }
+    ]
+  )
+  assert(scanned >= 200, 'D23a0 文案扫描面合理(≥200 条字符串)', `${scanned} 行`)
+}
+
+// ============================================================================
+// D24 动作行按钮档位: 自绘按钮的高度必须由 h-* 锁档, 不能靠 py-[Npx] 撑
+//   实测漏网: 设置·关于的「GitHub 主页」用 py-[7px] 撑到 34.35px, 同行 naive small「检查更新」是 28px,
+//   两枚按钮并排一眼看出不齐 —— 而 D1~D22 没有任何一条查得到它(圆角/颜色都在档上)。
+// ============================================================================
+{
+  const bad = []
+  let seen = 0
+  for (const f of RENDERER.filter((x) => x.endsWith('.vue'))) {
+    const ls = linesOf(f)
+    ls.forEach((l, i) => {
+      if (!/py-\[\d+(\.\d+)?px\]/.test(l)) return
+      seen++
+      const cls = (l.match(/class="([^"]*)"/) || [])[1] || ''
+      if (!/rounded-(ctl|card|md)\b/.test(cls)) return
+      if (/\bh-\[?[\d.]+|\bh-(2|3|4|5|6|7|8|9|10|11|12)\b/.test(cls)) return
+      // 判定这一行的宿主标签: 从本行往上找到第一个带开标签的行, 取该行最后一个标签名
+      // (class 常与 <button 分行写; 只看「附近有没有 button」会把 4 行外的按钮算成自己)
+      let tag = ''
+      for (let j = i; j >= Math.max(0, i - 6) && !tag; j--) {
+        const ms = [...ls[j].matchAll(/<([a-zA-Z][-\w]*)/g)].map((m) => m[1])
+        if (ms.length) tag = ms[ms.length - 1]
+      }
+      if (tag === 'button' || tag === 'n-button') bad.push(`${loc(f, i + 1)} ${l.trim().slice(0, 110)}`)
+    })
+  }
+  assert(seen >= 5, 'D24a0 py-[Npx] 扫描面合理(≥5 处)', `${seen} 行`)
+  assert(bad.length === 0, 'D24 自绘按钮用 h-* 锁档位(py-[Npx] 撑高会与同行 naive 按钮差 6px)', bad.slice(0, 8).join('\n         '))
 }
 
 // ============================================================================
