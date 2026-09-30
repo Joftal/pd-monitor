@@ -447,7 +447,12 @@ const ph = (s) => [...String(s).matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().
   const nav = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'TopNav.vue'), 'utf8')
   assert((nav.match(/t\('nav\.checking'\)/g) || []).length === 2, 'D15e 顶栏两平台在态未回来时都显示「校验中」')
   const acct = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'AccountView.vue'), 'utf8')
-  assert(/if \(!a\) return \{[\s\S]*?t\('nav\.checking'\)/.test(acct), 'D15f 账号页分段徽标同口径(未取到态 ≠ 未登录)')
+  // 2026-09-30 账号页重设计: 一屏只留一套平台切换(顶栏)、一张动作卡、一句存储说明
+  assert(!/<PlatFilter/.test(acct), 'D15f 账号页不自备第二套平台分段(换方归顶栏, 页内只标注当前是哪一方)')
+  assert(/page === 'account'[\s\S]{0,220}query: \{ \.\.\.route\.query, plat: target \}/.test(nav), 'D15f2 顶栏分段在账号页原地改 ?plat=(从前把人踢回直播页, 页面才被迫自备分段)')
+  assert(!/states\?:|pf__state/.test(fs.readFileSync(R('src', 'renderer', 'src', 'components', 'PlatFilter.vue'), 'utf8')), 'D15f3 PlatFilter 的 states 通道随账号页分段一起退役(没有消费方就删干净)')
+  const zhAcct = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'zh-CN.ts'), 'utf8')
+  assert(!/badgeEnc:|mARec:|mCStable:|mBT1:|segOk:/.test(zhAcct), 'D15f4 冗余徽章(推荐/最稳定/加密存储)与分段状态字已删: 推荐由按钮档位说, 存储由页底 doorNote 说一次')
   assert(/t\('account\.stChecking'\)/.test(acct) && /mode: 'checking' as const/.test(acct), "D15g 账号页大状态卡有独立一档「正在校验」(不与 none 共用, 否则复检按钮会被一起藏掉)")
   assert(/v-if="status\.mode === 'ok' \|\| status\.mode === 'warn'"/.test(acct), "D15h 退出登录只在确实有会话时给(校验中摆红色退出是空承诺)")
 
