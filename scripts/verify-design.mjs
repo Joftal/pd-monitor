@@ -37,6 +37,8 @@
 //   D26 关于页身份: 作者/仓库/日志目录一律由 appInfo 下发, 渲染层不得写死(唯一定义处是 shared/appmeta.ts)
 //   D27 段标题一档: 段标题只用 .sec-h, 卡内分组只用 .grp-h; 模板不得手搓 13px bold tracking-wide
 //   D28 按钮宽度只锁下限: 按钮禁 !w-[Npx](定宽裁翻译), 下限 !min-w-[Npx]; 例外仅限表单列宽与弹窗宽
+//   D29 筛选条不能被自己筛掉: 出现条件看基数(三视图同口径「词已生效 · chip 未生效」), 筛空的墙必带「取消筛选」
+//   D30 空态文案与出口同一判据: 墙上的归因由 emptyAction 单点决定, 点到搜索词就必须给出「清除搜索」
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -872,17 +874,27 @@ checkWithAllowlist(
 //   实机(2026-09-30): Panda 站内发现 395 条, 点「只看已关注」(本机关注数 0) 之后整条筛选条
 //   从 DOM 消失 —— 锁住人的不是筛子, 是开着的那枚 chip 跟着结果一起没了; 而空墙写的是
 //   「站内暂时没有可展示的在播房间」, 一句与筛子无关的通用解释顶掉了真正的归因。
+//   订正: 基数三视图必须同一口径(搜索词已生效、chip 未生效)。发现段原先用未过词的
+//   store.discovery.length, 于是「词无命中 + chip 开着」会被报成 chip 的锅, 而「取消筛选」
+//   按下去仍旧是空墙 —— 与本轮修掉的是同一类无出口现场, 只是换了个触发路径。
 // ============================================================================
 {
   const wsSrc = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'WorkspaceView.vue'), 'utf8')
   assert(!/v-if="activeList\.length" class="px-7 pt-3/.test(wsSrc), 'D29a 筛选条不得按「筛完还剩几条」决定出现(chip 会连自己一起消失)')
   assert(/v-if="filterBarVisible" class="px-7 pt-3/.test(wsSrc), 'D29b 筛选条的出现条件走 filterBarVisible')
   assert(/const filterBarVisible = computed\(\(\) => baseCount\.value > 0 \|\| activeFilters\.value\.length > 0\)/.test(wsSrc), 'D29c filterBarVisible = 基数有条 或 有筛子开着(后者必须留出口)')
-  assert(/view\.value === 'live' \? liveList\.value\.length : view\.value === 'discover' \? store\.discovery\.length : offBase\.value\.length/.test(wsSrc), 'D29d 三视图的基数各取「没筛之前」那一份(liveList / discovery / offBase)')
+  assert(/const baseCount = computed\(\(\) => \{[\s\S]{0,40}if \(view\.value === 'live'\) return liveList\.value\.length[\s\S]{0,40}if \(view\.value === 'discover'\) return store\.discovery\.filter\(\(x\) => hit\(x\)\)\.length[\s\S]{0,40}return offBase\.value\.length/.test(wsSrc), 'D29d 三视图基数同一口径「搜索词已生效 · chip 未生效」(liveList / discovery 过 hit / offBase)')
+  assert(!/view\.value === 'discover' \? store\.discovery\.length/.test(wsSrc), 'D29h 发现段基数不得用未过搜索词的 store.discovery.length(无命中时冤枉 chip, 取消筛选救不回现场)')
   assert(/@click="clearFilters"/.test(wsSrc), 'D29e 筛空的墙必带「取消筛选」出口')
   assert(/if \(activeFilters\.value\.length && baseCount\.value\)/.test(wsSrc), 'D29f 空态归因把「是筛空的」排在其它解释之前(否则被通用文案顶掉)')
   const zh = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'zh-CN.ts'), 'utf8')
   assert(/emptyFiltered: '「\{label\}」筛完是 0 条 · 这一栏本来有 \{n\} 条'/.test(zh), 'D29g 筛空那句话报的是筛子名与基数, 不是「没有房间」')
+  // D30 空态的文案与出口是一件事的两半: 分两处判断就会漂(实机: 发现段有词无命中, 墙上写「没有匹配 X」而手里一个按钮都没有,
+  //       而顶栏搜索框没有 ✕ —— 用户得自己去顶栏找回那个词)。改为 emptyAction 与 listEmpty 同判据同顺序。
+  assert(/const emptyAction = computed<EmptyAction>\(\(\) => \{/.test(wsSrc), 'D30a 空态出口由 emptyAction 单点决定(不再按视图各写一套 v-if)')
+  assert(/if \(view\.value === 'discover'\) \{\s*if \(kw\.value\) return 'clearKw'/.test(wsSrc), 'D30b 发现段判据里 kw 排在「缺前提」之前 —— 有词时该清除搜索, 不该跳登录')
+  assert(/v-if="emptyAction" class="flex gap-2 justify-center mt-2"/.test(wsSrc) && /emptyAction === 'clearKw'/.test(wsSrc), 'D30c 墙上句子里点到搜索词, 手里就必须有「清除搜索」这枚按钮')
+  assert(!/v-else-if="kw" size="small" secondary class="mt-2"/.test(wsSrc), 'D30d 出口不得再退回视图分支里的散写(与文案不同判据即失败)')
 }
 
 // ============================================================================
