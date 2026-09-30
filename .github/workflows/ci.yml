@@ -3,7 +3,7 @@ name: CI
 # 打包前的最低门槛: 类型检查 + 行为回归脚本(纯 Node, 不起 Electron, 无需 xvfb)
 # 发版流水线(release.yml)自带同样两步, 此工作流只为 push/PR 尽早出声
 #
-# Linux 侧成立性(2026-09-30 静态审查, 逐条 grep 过 9 个 verify 脚本):
+# Linux 侧成立性(2026-09-30 静态审查, 逐条 grep 过 10 个 verify 脚本):
 #   无 out/ 构建产物依赖 · 无 data/db.json 读写(不碰真实用户数据) · child_process 全替身(不 spawn ffmpeg)
 #   · 网络出口全是假 fetch/本地 127.0.0.1 服务 · 路径一律 path.join(无盘符与反斜杠) · 平台分支靠 defineProperty 覆写
 #   残留风险只有一个方向: 时间窗断言都是"轮询到条件成立即返回"的上限式(3~20s),

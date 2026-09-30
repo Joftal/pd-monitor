@@ -33,6 +33,9 @@
 //   D22 naive 主题对齐: App.vue 的 LIGHT/DARK_OVERRIDES 每枚色值都能在 styles.css 语义变量里找到同名档
 //   D23 品牌散文: 用户可见文案里不得出现小写 pandalive(那是枚举/目录名), 品牌形恒为 PandaLive
 //   D24 动作行按钮: 自绘按钮必须用 h-* 锁档位, 不得用 py-[Npx] 撑高(与同行 naive 按钮实测差 6px 就是这么来的)
+//   D25 设置保存链: 提交载荷先脱代理; 脏判定的基线是进页快照; 拒绝出声; 闸门/代理/窗口底色三处生效动作在案
+//   D26 关于页身份: 作者/仓库/日志目录一律由 appInfo 下发, 渲染层不得写死(唯一定义处是 shared/appmeta.ts)
+//   D27 段标题一档: 段标题只用 .sec-h, 卡内分组只用 .grp-h; 模板不得手搓 13px bold tracking-wide
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -750,6 +753,83 @@ const ph = (s) => [...String(s).matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().
   }
   assert(seen >= 5, 'D24a0 py-[Npx] 扫描面合理(≥5 处)', `${seen} 行`)
   assert(bad.length === 0, 'D24 自绘按钮用 h-* 锁档位(py-[Npx] 撑高会与同行 naive 按钮差 6px)', bad.slice(0, 8).join('\n         '))
+}
+
+// ============================================================================
+// D25 设置保存链契约 (2026-09-30 设置页审查 P0: 「保存设置」在实机上是静默 no-op)
+//   机制: 提交 {...form.value} 时 notify/autoRecordDefault 仍是 Pinia 响应式代理,
+//   IPC 走 structured clone ⇒ 整包被拒; 而保存只有 try/finally, 失败连气泡都没有 ——
+//   于是"点了没反应", 且盘没写、界面却显示已改(数据与界面分叉)。
+// ============================================================================
+{
+  const sv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'SettingsView.vue'), 'utf8')
+  const ipc = fs.readFileSync(R('src', 'main', 'ipc.ts'), 'utf8')
+  const main = fs.readFileSync(R('src', 'main', 'index.ts'), 'utf8')
+  assert(!/\{\s*\.\.\.form\.value/.test(sv), 'D25a 提交载荷不得浅展开 form.value(嵌套对象仍是代理, 不可克隆)')
+  assert(/structuredClone\(toRaw\(/.test(sv), 'D25b 提交载荷经 toRaw + structuredClone 脱代理')
+  const i = sv.indexOf('const dirtyKeys = computed')
+  const dirtyBody = sv.slice(i, sv.indexOf('})', sv.indexOf('return out', i)))
+  assert(/baseline\.value/.test(dirtyBody) && !/store\.settings/.test(dirtyBody), 'D25c 脏清单跟「进页快照」比, 不跟实时投影比(后者被别的写入方刷新 ⇒ 一按保存就把对方新值回滚)')
+  const adopted = (sv.match(/baseline\.value\.\w+ =/g) || []).length
+  assert(adopted >= 2, 'D25d 主题/语言即时通道落盘后同步基线(否则已保存的项永远挂着「未保存」)', `${adopted} 处`)
+  assert(/catch \(e\)[\s\S]{0,220}?t\('settings\.saveFail'/.test(sv), 'D25e 保存失败出声(此前 try/finally 把它吞成「点了没反应」)')
+  assert(/sanitizeSettingsPatch\(/.test(ipc), 'D25f settings:set 过入站闸门(不合格键不收, 而不是收了再兜底)')
+  assert(/logger\.(warn|info)\([^)]*拒收/.test(ipc), 'D25g 被拒的键落日志(不静默吞掉: 前端越界要看得见)')
+  assert(!/\bnet\.fetch\(/.test(ipc), 'D25h ipc 里没有绕过代理的 net.fetch(它走默认会话, 用户配的代理形同虚设)')
+  assert(/fromPartition\(SESSION_PARTITION\)\s*\.fetch\(/.test(ipc), 'D25i 检查更新走已配代理的分区会话')
+  assert(/setBackgroundColor\(windowBg\(/.test(ipc) && /backgroundColor: windowBg\(/.test(main), 'D25j 「主题立即生效」名副其实: 建窗与切主题两处同用 windowBg')
+}
+
+// ============================================================================
+// D26 关于页身份数据单一来源: 作者/头像/仓库 slug/日志目录都从 appInfo(IPC) 来
+//   实测漏网: 模板里写死 `Joftal/pd-monitor`、`https://github.com/Joftal.png`、`…\data\logs\app-YYYYMMDD.log`
+//   —— 换作者、换仓库名、mac/linux 下跑一份, 这三行显示的全是错的, 而且没人会去改模板。
+// ============================================================================
+checkWithAllowlist(
+  'D26 渲染层不得写死作者/仓库/日志路径(一律 appInfo 下发)',
+  RENDERER.filter((f) => f.endsWith('.vue')),
+  (l) => {
+    if (isCommentLine(l)) return ''
+    if (/github\.com\/[A-Za-z0-9_.-]+/.test(l)) return '写死 GitHub 身份 URL'
+    if (/Joftal/.test(l)) return '写死作者名'
+    if (/data[/\\]logs/.test(l)) return '写死日志目录样式'
+    return ''
+  },
+  []
+)
+{
+  const sv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'SettingsView.vue'), 'utf8')
+  const meta = fs.readFileSync(R('src', 'shared', 'appmeta.ts'), 'utf8')
+  const types = fs.readFileSync(R('src', 'shared', 'types.ts'), 'utf8')
+  for (const k of ['author', 'authorUrl', 'repo', 'releasesPage']) {
+    assert(new RegExp(`\\b${k}:`).test(meta), `D26b APP_META 定义 ${k}(唯一定义处)`)
+    assert(new RegExp(`^\\s{2}${k}: string$`, 'm').test(types.slice(types.indexOf('export interface AppInfo'), types.indexOf('/** 检查结果'))), `D26c AppInfo 下发 ${k}`)
+  }
+  const iface = types.slice(types.indexOf('export interface AppInfo'), types.indexOf('/** 检查结果'))
+  assert(/logsDir: string/.test(iface), 'D26d AppInfo 下发 logsDir(跨平台的真值, 不是 Windows 路径样式)')
+  assert(/info\?\.logsDir/.test(sv) && /avatarUrl/.test(sv) && /repoSlug/.test(sv), 'D26e 关于页三处身份数据都用 appInfo 的计算属性')
+}
+
+// ============================================================================
+// D27 段标题只有两档规格: 段用 .sec-h, 卡内分组用 .grp-h
+//   实测漏网: 设置页 7 个段标题手搓 `text-[13.5px] font-bold text-ink1 tracking-wide`,
+//   账号页同一角色又写成 13.5px、录制页写成 14.5px extrabold —— 同一屏三种字号字重。
+//   16px 的品牌字标(TopNav / 关于横幅)不是段标题, 不在这一档里。
+// ============================================================================
+{
+  const bad = []
+  eachLine(RENDERER.filter((f) => f.endsWith('.vue')), (f, n, l) => {
+    if (isCommentLine(l)) return
+    if (/text-\[1[34](\.\d)?px\][^"]*font-(bold|extrabold)[^"]*tracking-wide/.test(l)) bad.push(`${loc(f, n)} ${l.trim().slice(0, 110)}`)
+  })
+  assert(bad.length === 0, 'D27 段标题不得在模板里手搓(13~14px bold tracking-wide → 用 .sec-h)', bad.slice(0, 8).join('\n         '))
+  const css = fs.readFileSync(R('src', 'renderer', 'src', 'styles.css'), 'utf8')
+  const views = RENDERER.filter((f) => f.endsWith('.vue'))
+  for (const cls of ['sec-h', 'grp-h']) {
+    assert(new RegExp(`\\.${cls}\\s*\\{`).test(css), `D27b .${cls} 在 styles.css 有定义(模板引用的自定义类必须存在)`)
+    const used = views.filter((f) => new RegExp(`\\b${cls}\\b`).test(fs.readFileSync(f, 'utf8'))).length
+    assert(used >= 1, `D27c .${cls} 至少被一个视图使用(定义了没人用 = 死令牌)`, `${used} 个视图`)
+  }
 }
 
 // ============================================================================

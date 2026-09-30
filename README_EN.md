@@ -28,7 +28,7 @@ npm run pack:mac       # macOS dmg + zip (run on a mac)
 npm run pack:linux     # AppImage + deb (run on Linux)
 npm run pack:dir       # unpacked dir only (release/win-unpacked), for packaging debugging
 npm run typecheck      # type-check (main + renderer)
-npm run verify         # behaviour regression chain: 9 pure-Node scripts (design contract / data root / source cache / keep-alive / recording pipeline / VOD duration / follows / deep links / notifications)
+npm run verify         # behaviour regression chain: 10 pure-Node scripts (design contract / data root / source cache / keep-alive / recording pipeline / settings write chain / VOD duration / follows / deep links / notifications)
 npm run build:icon     # derive png/icns + tray template from resources/icon.ico
 ```
 
@@ -108,7 +108,7 @@ src/
    ├─ views/AccountView.vue   #   account: independent sessions per platform + 4-state login + verification trail
    ├─ views/SettingsView.vue  #   settings: appearance/monitor/record/network/notify/data & logs/about
    └─ components/CinemaOverlay.vue # frosted cinema overlay: playback + merge + delete
-scripts/                      # verify-*.mjs behaviour chain (9) · icon-build/tray-icon-build · sim-keepalive-scale (manual scale sim)
+scripts/                      # verify-*.mjs behaviour chain (10) · icon-build/tray-icon-build · sim-keepalive-scale (manual scale sim)
 docs/design/                  # sodalive-ia-v1.html is the current spec; the rest are process records (each headed by what superseded it)
 ```
 </details>

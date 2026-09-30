@@ -105,7 +105,7 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      # 行为回归链(设计契约/数据根/源缓存/保活泵/录制管线/关注导入/深链/通知, 共 8 个脚本): 纯 Node, 不起 Electron
+      # 行为回归链(设计契约/数据根/源缓存/保活泵/录制管线/设置写入链/VOD 时长/关注导入/深链/通知, 共 10 个脚本): 纯 Node, 不起 Electron
       - name: Verify behaviour scripts
         run: npm run verify
 
