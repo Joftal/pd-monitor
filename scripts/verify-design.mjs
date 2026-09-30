@@ -44,6 +44,7 @@
 //   D33 播放页读数一处收敛: room 快照 = 关注列表 > 站内发现, 展示值 = 回包 > 快照 > 裸 ID(未关注房不得整屏「—」)
 //   D34 工作区视图分段行不常驻快捷键提示: 1/2/3 与 / 的键盘本体保留, 屏上那条 11px 灰字撤掉且双语不留死键
 //   D35 工作区筛选条右端只在真有搜索词时出声: 「排序与页码在本视图内记忆」常驻说明撤掉(记忆本体不动), 无词时不留空转 flex-1
+//   D36 「关注主播」按平台拆成两个专属入口: 无「自动识别」档, 平台由工作区决定, 粘错平台给出口, SOOP 纯数字场次号单独归因
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -863,7 +864,7 @@ checkWithAllowlist(
 
   const LAYOUT_W = [
     { where: 'AccountView.vue', re: /<n-input\b[^>]*!w-\[180px\]/, why: '托管账密的账号输入框是列宽' },
-    { where: 'WorkspaceView.vue', re: /<n-modal\b[^>]*!w-\[460px\]/, why: '添加房间对话框的弹窗宽' }
+    { where: 'AddFollowDialog.vue', re: /<n-modal\b[^>]*!w-\[460px\]/, why: '关注/添加对话框的弹窗宽(2026-10-01 随对话框从 WorkspaceView 拆出, 例外跟着搬)' }
   ]
   for (const e of LAYOUT_W) {
     const hit = vues.filter((f) => f.endsWith(e.where)).some((f) => e.re.test(fs.readFileSync(f, 'utf8')))
@@ -1007,6 +1008,27 @@ checkWithAllowlist(
   assert(/<template v-if="kw">[\s\S]{0,200}flex-1[\s\S]{0,200}ws\.searchResult/.test(bar), 'D35c 右端整块(撑开 + 那句)都挂在搜索态里 —— 无词时不留空转的 flex-1')
   const st = fs.readFileSync(R('src', 'renderer', 'src', 'stores', 'app.ts'), 'utf8')
   assert(/views: Record<WSView, ViewFilter>/.test(st) && /views: \{ live:[\s\S]{0,120}discover:[\s\S]{0,120}offline:/.test(st), 'D35d 记忆本体仍在(三视图各存一份 ViewFilter)—— 撤的只是屏上那句话')
+}
+
+// ============================================================================
+// D36 「关注主播」拆成两平台专属入口 (2026-10-01 用户指令: 不要做在一起, 不需要自动识别, 都分平台做)
+//   原状: 一枚对话框里挂「自动识别 / Panda / SOOP」三档分段 + 一个输入框 —— 粘什么都会先替你猜一遍平台,
+//   而这一屏的用户本来就知道自己在哪一方(工作区就是按平台切的), 猜错还直接把对面的房间种进了本平台。
+//   判据: ① 平台由所在工作区决定, 对话框只收本平台的房间; ② 粘到对面平台的地址不静默入库 —— 明说是
+//   哪一方的并给一键过去(原文经 store.addDraft 过境换平台, 新实例把对话框撑开, 不用重打); ③ SOOP 的纯数字是场次号, 单独归因,
+//   不许当频道名进库; ④ 提交恒带平台参数, 不再留 undefined 让主进程按默认平台兜底。
+// ============================================================================
+{
+  const dlg = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'AddFollowDialog.vue'), 'utf8')
+  const wsSrc = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'WorkspaceView.vue'), 'utf8')
+  const pf = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'PlatFilter.vue'), 'utf8')
+  const i18n = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'zh-CN.ts'), 'utf8') + fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'en-US.ts'), 'utf8')
+  assert(dlg.includes('add.titlePanda') && dlg.includes('add.titleSoop') && dlg.includes('add.phPanda') && dlg.includes('add.phSoop') && dlg.includes('add.confirmPanda') && dlg.includes('add.confirmSoop'), 'D36a 两平台各自成套的标题/占位符/按钮文案都被消费(不是同一套皮换个名)')
+  assert(!/platAuto/.test(i18n) && !/'auto'/.test(pf) && !/PlatFilter/.test(dlg), 'D36b 「自动识别」这一档全站净空(双语键 + 控件选项 + 对话框里的平台分段)')
+  assert(/api\.anchorsAdd\(raw\.value\.trim\(\), props\.platform\)/.test(dlg), 'D36c 提交恒带平台参数(不得再传 undefined 让主进程按默认平台兜底)')
+  assert(dlg.includes("state === 'other'") && /emit\('goto-other', raw\.value\.trim\(\)\)/.test(dlg) && /@goto-other="gotoOtherPlat"/.test(wsSrc) && /store\.addDraft = text/.test(wsSrc) && /ref\(store\.addDraft !== ''\)/.test(wsSrc), 'D36d 粘错平台: 归因之外必须有出口 —— 原文经 store.addDraft 过境换平台, 新实例自己把对话框撑开')
+  assert(dlg.includes('/^\\d+$/.test(s)') && dlg.includes("return 'seq'"), 'D36e SOOP 的纯数字是场次号 —— 单独归因, 不许当频道名入库')
+  assert(/<AddFollowDialog v-model:show="showAdd" :platform="plat"/.test(wsSrc) && !/addPlatform|addParsed|addInput/.test(wsSrc), 'D36f 工作区只把当前平台交给对话框, 自己不留第二份解析态')
 }
 
 // ============================================================================
