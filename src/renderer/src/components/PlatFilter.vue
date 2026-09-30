@@ -2,8 +2,8 @@
 import { useI18n } from 'vue-i18n'
 import { platformName, type Platform } from '@shared/types'
 
-// 全应用唯一的"选平台"控件: 监控墙筛选 / 库 / 账号页 / 关注弹窗共用同一形态
-// (设计稿第②屏 P4: 一个控件一个长相)
+// 全应用唯一的"页内选平台"控件: 监控墙筛选 / 库 / 关注弹窗共用同一形态(设计稿第②屏 P4: 一个控件一个长相)。
+// 账号页从前也挂一枚, 与顶栏分段同屏并存 → 已收归顶栏
 type Opt = 'all' | 'auto' | Platform
 
 const props = withDefaults(
@@ -12,9 +12,6 @@ const props = withDefaults(
     values?: Opt[]
     /** 传了就渲染计数, 与选项同位 */
     counts?: Record<string, number>
-    /** 选项右侧登录态(账号页专用): 色点 + 短标签双通道。
-     *  设计稿 S9: 纯色点会被读成同一个意思, 状态必须能用文字念出来(原则 R3) */
-    states?: Record<string, { dot: string; text: string }>
   }>(),
   { values: () => ['all', 'pandalive', 'soop'] }
 )
@@ -47,9 +44,6 @@ function platDotCls(v: Opt): string {
       <i v-if="v === 'pandalive' || v === 'soop'" class="pdot" :class="platDotCls(v)"></i>
       <span>{{ label(v) }}</span>
       <span v-if="counts" class="pf__n">{{ counts[v] ?? 0 }}</span>
-      <span v-if="states && states[v]" class="pf__state-wrap">
-        <i class="pf__state" :class="states[v].dot"></i>{{ states[v].text }}
-      </span>
     </button>
   </div>
 </template>
@@ -85,20 +79,5 @@ function platDotCls(v: Opt): string {
 .pf__n {
   font-size: 11px;
   opacity: 0.65;
-}
-.pf__state-wrap {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  color: rgb(var(--c-ink2));
-  margin-left: 1px;
-}
-.pf__state {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex: none;
 }
 </style>

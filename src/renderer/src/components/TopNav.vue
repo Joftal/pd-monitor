@@ -14,8 +14,13 @@ const route = useRoute()
 const router = useRouter()
 const store = useAppStore()
 
-/** 当前工作区归属一律以地址里的 :plat 段为准(地址可分享/可收藏), 地址里没有平台段才回落默认工作区 */
-const plat = computed<Platform>(() => (isPlatform(route.params.plat) ? route.params.plat : resolveWorkspace()))
+/** 当前工作区归属一律以地址里的 :plat 段为准(地址可分享/可收藏)。
+ *  账号页没有平台段, 退到 ?plat= —— 分段高亮、头像状态与页面内容必须指向同一方, 否则顶栏说 Panda、页面演 SOOP */
+const plat = computed<Platform>(() => {
+  if (isPlatform(route.params.plat)) return route.params.plat
+  if (isPlatform(route.query.plat)) return route.query.plat as Platform
+  return resolveWorkspace()
+})
 
 const PLATS: { key: Platform; label: string }[] = (['pandalive', 'soop'] as Platform[]).map((key) => ({ key, label: platformName(key) }))
 
@@ -25,12 +30,21 @@ function liveCount(p: Platform): number {
   return store.anchors.reduce((n, a) => n + (a.platform === p && a.isLive ? 1 : 0), 0)
 }
 
-/** 切平台 = 换平台、留页面: 在录制页切到 SOOP 仍留在录制页, 不把用户甩回直播页 */
+/** 切平台 = 换平台、留页面: 在录制页切到 SOOP 仍留在录制页, 不把用户甩回直播页。
+ *  账号页同规则(它按 ?plat 展示某一方): 从前它不在名单里, 于是「在账号页换平台」会把人踢回直播页,
+ *  页面只好自备第二套分段 —— 同屏两套分段就是这次收编的起因 */
 function switchPlat(target: Platform): void {
   if (target === plat.value) return
-  const keep = ['live', 'recordings'].includes(String(route.name))
-  if (keep) router.push({ name: String(route.name), params: { ...route.params, plat: target }, query: route.query })
-  else router.push({ name: 'live', params: { plat: target } })
+  const page = String(route.name)
+  if (page === 'account') {
+    router.push({ name: 'account', query: { ...route.query, plat: target } })
+    return
+  }
+  if (['live', 'recordings'].includes(page)) {
+    router.push({ name: page, params: { ...route.params, plat: target }, query: route.query })
+    return
+  }
+  router.push({ name: 'live', params: { plat: target } })
 }
 
 const tabs = computed(() => [
