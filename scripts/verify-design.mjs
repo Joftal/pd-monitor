@@ -40,6 +40,7 @@
 //   D29 筛选条不能被自己筛掉: 出现条件看基数(三视图同口径「词已生效 · chip 未生效」), 筛空的墙必带「取消筛选」
 //   D30 空态文案与出口同一判据: 墙上的归因由 emptyAction 单点决定, 点到搜索词就必须给出「清除搜索」
 //   D31 播放页返回从哪来回哪去: 读历史栈落回 ?view= / 录制页, 栈空或跨平台才兜底本平台直播页, 文案与目的地同源
+//   D32 播放页侧栏与动作行: 侧栏自带滚动且卡片 shrink-0(不被压扁裁掉尾行); 动作行按轻重分档(幽灵/描边/实心)且只锁宽度下限
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -914,6 +915,35 @@ checkWithAllowlist(
   assert((pv.match(/backTarget\.label/g) || []).length === 2, `D31e 两处返回按钮都绑 backTarget.label(模板里再写死一句就是假话)`, `${(pv.match(/backTarget\.label/g) || []).length} 处`)
   assert((pv.match(/t\('player\.backToLive'/g) || []).length === 1, `D31f 「返回 直播」只剩兜底那一处(栈空/跨平台), 不得再当默认目的地`, `${(pv.match(/t\('player\.backToLive'/g) || []).length} 处`)
   assert(/run: \(\) => void router\.push\(\{ name: 'live', params: \{ plat: platform \} \}\)/.test(pv), 'D31g 兜底仍旧落本平台直播页(深链直进播放页时 back() 会停在原地)')
+}
+
+// ============================================================================
+// D32 播放页侧栏读得完 + 动作行按轻重分档 (2026-10-01 实机 1600x900 取证)
+//   ① 侧栏: 三张 .panel 直接放在 flex 列里, 默认会被压扁, 而 .panel{overflow:hidden}
+//      把尾部就地裁掉 —— aside 因此"没有溢出", 滚动条压根不出现, 被裁的几行永远滚不到。
+//      量尺: aside h=763 / scroll=763 / scrollTop=9999→0, 「上次失效」「开播自动录制」消失。
+//   ② 动作行: 刷新穿 primary secondary(淡蓝底)看着像禁用, 关注却是全排最响的实心,
+//      而本页真正的核心动作(录制)反而是淡底 —— 轻重与频次/后果都不匹配。
+// ============================================================================
+{
+  const pv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'PlayerView.vue'), 'utf8')
+  const aside = (pv.match(/<aside[\s\S]*?<\/aside>/) || [''])[0]
+  assert(aside.length > 500, 'D32a0 侧栏解析面合理(aside 段落取到了)', `${aside.length} 字符`)
+  assert(/<aside class="[^"]*\boverflow-y-auto\b/.test(aside), 'D32a 侧栏自己是滚动容器(读不完的内容必须滚得到)')
+  const panels = aside.match(/<div class="panel(?: [^"]*)?"/g) || []
+  assert(panels.length >= 3, `D32b 侧栏卡数合理(≥3 张)`, `${panels.length} 张`)
+  assert(panels.every((p) => /\bshrink-0\b/.test(p)), 'D32 侧栏每张卡 shrink-0(flex 列的默认压缩 + .panel{overflow:hidden} = 尾部行被裁且滚不到)', panels.join(' '))
+  assert(!/bg-brand\/\[0\.07\]/.test(pv), 'D32c 用法说明不再单占一枚品牌色大卡(它讲的是源失效怎么办, 并到播放源卡脚注)')
+  assert((pv.match(/t\('player\.tips'\)/g) || []).length === 1, `D32d 说明文案全页只出现一次`, `${(pv.match(/t\('player\.tips'\)/g) || []).length} 处`)
+
+  const acts = [...pv.matchAll(/<n-button\b(?=[^>]*@click="(manualRefresh|toggleFollow|toggleRecord)")[^>]*>/g)].map((m) => m[0])
+  assert(acts.length === 4, `D32e 动作行按钮解析面合理(刷新 1 + 关注 1 + 录制 2 分支)`, `${acts.length} 枚`)
+  assert(acts.every((a) => /size="small"/.test(a)), 'D32f 动作行同档 size="small"(实机四枚 h=28 齐高)')
+  assert(acts.every((a) => /!min-w-\[\d+px\]/.test(a)), 'D32g 动作行每枚都有宽度下限(定宽或无下限, 裁掉的都是翻译)')
+  assert(/quaternary[^>]*@click="manualRefresh"/.test(pv), 'D32h 刷新降为幽灵档(随手可点的辅助不该和核心动作同响)')
+  assert(/secondary :type="following \? 'error' : 'primary'"/.test(pv), 'D32i 关注恒描边(可逆收藏, 轻于录制; 取关仍走 error 红, 见 D16d)')
+  assert(!/:secondary="!recording"/.test(pv), 'D32j 录制按钮不再按开关态退回淡底(生效后最不明显 = 这一排最要紧的动作点完反而消失)')
+  assert(/<n-button v-if="!isVod" size="small" type="error" @click="toggleRecord"/.test(pv), 'D32k 直播录制恒实心 error 档(naive error = liveink 6.52:1, 可承载白字; 开关态由文案自己的 ⏺/■ 承担)')
 }
 
 // ============================================================================
