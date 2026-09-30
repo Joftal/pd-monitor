@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>SOOP 双平台集成设计稿 · PandaLive Monitor</title>
+<title>SOOP 双平台集成设计稿 · SODALive Monitor</title>
 <style>
   :root {
     --live: #fb7299; --live-dark: #f0567f; --live-deep: #d94b73;
@@ -237,6 +237,11 @@
 </head>
 <body>
 
+<!-- superseded-banner -->
+<div style="margin:14px 16px 0;padding:11px 14px;border-left:3px solid #2f4b7c;background:rgba(47,75,124,.07);border-radius:0 10px 10px 0;font:13px/1.65 system-ui,sans-serif;color:#1f2937">
+  <b>本稿的取流 / 接入结论仍然有效，草图顶栏已被 <code>sodalive-ia-v1.html</code> 覆盖</b>　·　「大厅 / 监控 / 录制中 / 视频库」这种平铺 tab 是集成期的临时形态，现导航为「Panda / SOOP」平台分段 + 「直播 / 录制」两条页面，「监控」是直播页内的视图分段，「视频库」改名「库」并入录制页第三段（㉒）；路由同样变成 <code>/:plat/live</code> · <code>/:plat/recordings</code>。SOOP 取流链路、登录窗与目录结构（<code>Videos/&lt;平台&gt;/&lt;主播&gt;/</code>）按本稿落地，未变。下列内容按原样保留作设计过程记录，不作为实现依据。
+</div>
+
 <div class="switcher">
   <span class="brand">SOOP 集成设计稿</span>
   <button class="sw-btn on" data-go="s-monitor" onclick="go('s-monitor',this)">① 主播监控墙</button>
@@ -250,7 +255,7 @@
 <!-- ============ ① 主播监控墙 ============ -->
 <section class="screen on" id="s-monitor">
   <div class="app">
-    <div class="wordmark"><div class="a">PandaLive</div><div class="b">MONITOR</div></div>
+    <div class="wordmark"><div class="a">SODALive</div><div class="b">MONITOR</div></div>
     <div class="tabs">
       <button class="tab">大厅</button>
       <button class="tab on">监控 <span class="pill pill-live">5</span></button>
@@ -401,7 +406,7 @@
 <!-- ============ ② 添加房间 ============ -->
 <section class="screen" id="s-add">
   <div class="app">
-    <div class="wordmark"><div class="a">PandaLive</div><div class="b">MONITOR</div></div>
+    <div class="wordmark"><div class="a">SODALive</div><div class="b">MONITOR</div></div>
     <div class="tabs"><button class="tab">大厅</button><button class="tab on">监控</button><button class="tab">录制中</button><button class="tab">视频库</button></div>
     <div class="search"><div>搜索主播 / 房间</div></div>
     <div class="statuspill"><span class="dot dot-live"></span> 轮询正常 · 6s</div>
@@ -470,7 +475,7 @@
 <!-- ============ ③ 观看 / 录制 ============ -->
 <section class="screen" id="s-player">
   <div class="app">
-    <div class="wordmark"><div class="a">PandaLive</div><div class="b">MONITOR</div></div>
+    <div class="wordmark"><div class="a">SODALive</div><div class="b">MONITOR</div></div>
     <div class="tabs"><button class="tab">大厅</button><button class="tab on">监控 <span class="pill pill-live">5</span></button><button class="tab">录制中 <span class="pill pill-dual">2</span></button><button class="tab">视频库</button></div>
     <div class="search"><div>搜索主播 / 房间</div></div>
     <div class="statuspill"><span class="dot dot-live"></span> 轮询正常 · 6s</div>
@@ -567,7 +572,7 @@
 <!-- ============ ④ 账号 · 双平台 ============ -->
 <section class="screen" id="s-account">
   <div class="app">
-    <div class="wordmark"><div class="a">PandaLive</div><div class="b">MONITOR</div></div>
+    <div class="wordmark"><div class="a">SODALive</div><div class="b">MONITOR</div></div>
     <div class="tabs"><button class="tab">大厅</button><button class="tab">监控</button><button class="tab">录制中</button><button class="tab">视频库</button></div>
     <div class="search"><div>搜索主播 / 房间</div></div>
     <div class="statuspill"><span class="dot dot-live"></span> 轮询正常 · 6s</div>
@@ -650,7 +655,7 @@
 <!-- ============ ⑤ 录制 / 视频库 ============ -->
 <section class="screen" id="s-library">
   <div class="app">
-    <div class="wordmark"><div class="a">PandaLive</div><div class="b">MONITOR</div></div>
+    <div class="wordmark"><div class="a">SODALive</div><div class="b">MONITOR</div></div>
     <div class="tabs"><button class="tab">大厅</button><button class="tab">监控 <span class="pill pill-live">5</span></button><button class="tab on">录制中 <span class="pill pill-dual">2</span></button><button class="tab">视频库</button></div>
     <div class="search"><div>搜索主播 / 房间</div></div>
     <div class="statuspill"><span class="dot dot-live"></span> 轮询正常 · 6s</div>

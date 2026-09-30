@@ -1,5 +1,5 @@
 appId: com.kbj.pandalivemonitor
-productName: PandaLive Monitor
+productName: SODALive Monitor
 copyright: Copyright © 2026
 directories:
   output: release
@@ -25,7 +25,7 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
-  shortcutName: PandaLive Monitor
+  shortcutName: SODALive Monitor
   createDesktopShortcut: true
   artifactName: '${productName}-Setup-${version}.${ext}'
 portable:

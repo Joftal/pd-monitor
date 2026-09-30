@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>账号页 v2 设计稿 · PandaLive Monitor</title>
+<title>账号页 v2 设计稿 · SODALive Monitor</title>
 <style>
   :root {
     --live: #fb7299; --live-dark: #f0567f;
@@ -101,6 +101,11 @@
 </style>
 </head>
 <body>
+
+<!-- superseded-banner -->
+<div style="margin:14px 16px 0;padding:11px 14px;border-left:3px solid #2f4b7c;background:rgba(47,75,124,.07);border-radius:0 10px 10px 0;font:13px/1.65 system-ui,sans-serif;color:#1f2937">
+  <b>本稿已被 <code>sodalive-ia-v1.html</code>（S9）覆盖</b>　·　本页已按平台分段：<b>Panda 与 SOOP 各一套独立会话</b>，SOOP 多一档「账密自动重登」方式；登录态头部从两态扩到 <b>四态</b>（含「正在校验」「会话未认证」）并补了校验轨迹（上次校验时刻 + 立即重新校验），「退出登录」只在 ok/warn 态出现且带二次确认；文案口径从「Windows DPAPI 加密」改为 <b>系统安全存储（DPAPI / Keychain / libsecret）</b>，并在保险箱不可用时阻断明文降级。本稿的 Panda 单平台形态与「账号密码登录(推荐)」方案 A 未落地。下列内容按原样保留作设计过程记录，不作为实现依据。
+</div>
 
 <div class="page">
   <!-- 页头 -->

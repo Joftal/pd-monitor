@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>观看页 v2 设计稿 · PandaLive Monitor</title>
+<title>观看页 v2 设计稿 · SODALive Monitor</title>
 <style>
   :root {
     --live: #fb7299; --live-dark: #f0567f;
@@ -109,6 +109,11 @@
 </style>
 </head>
 <body>
+
+<!-- superseded-banner -->
+<div style="margin:14px 16px 0;padding:11px 14px;border-left:3px solid #2f4b7c;background:rgba(47,75,124,.07);border-radius:0 10px 10px 0;font:13px/1.65 system-ui,sans-serif;color:#1f2937">
+  <b>本稿的取流与交互结论仍有效，档位表与配色已被 <code>sodalive-ia-v1.html</code>（S5）覆盖</b>　·　清晰度档<b>不是固定四档表</b>：按房间 master 真实变体生成，SOOP 走 original/hd/sd 预设；「主线/备用 1/备用 2」<b>只在该平台真给出备用清单时出现</b>，SOOP 官方不给线路清单 → 显示「不适用 · 原因」而不是一个恒为「主线」的假状态，且选中备用线时清晰度锁定为自动；徽标配色按现行令牌重排（在播用 <code>liveink</code>、回放归品牌色、密码房/粉丝房改中性描边徽标）；侧栏信息卡已补 获取时间 / 源保活 / 失效自动续录 / 本房间录制参数。<b>本稿的「播放倍速」控件未落地</b>（两平台都没有倍速入口）。下列内容按原样保留作设计过程记录，不作为实现依据。
+</div>
 
 <div class="page">
   <!-- ① 顶部工具行 -->

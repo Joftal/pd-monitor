@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>设置页 v2 设计稿 · PandaLive Monitor</title>
+<title>设置页 v2 设计稿 · SODALive Monitor</title>
 <style>
   :root {
     --live: #fb7299; --live-dark: #f0567f;
@@ -142,6 +142,11 @@
 </head>
 <body>
 
+<!-- superseded-banner -->
+<div style="margin:14px 16px 0;padding:11px 14px;border-left:3px solid #2f4b7c;background:rgba(47,75,124,.07);border-radius:0 10px 10px 0;font:13px/1.65 system-ui,sans-serif;color:#1f2937">
+  <b>本稿的分节与配色已被 <code>sodalive-ia-v1.html</code>（S6）覆盖</b>　·　现行侧栏导航是 <b>7 档且以「外观」开头</b>（外观/监控/录制/网络/通知与行为/数据与日志/关于），本稿缺外观档；「监控」一卡已按平台拆成 <b>监控节奏(全局) · Panda 采集 · SOOP 采集</b> 三张卡（SOOP 卡只读，写清采集方式与不适用项）；「通知与行为」的全局系统通知/开播提示音开关已换成 <b>平台 × 事件通知矩阵</b> + Telegram 推送块；本稿的粉色主题（<code>--live #fb7299</code> 兼作品牌色）已作废，品牌色换成中性蓝。文末「不新增/删减任何设置项」那句是本稿当时的自我约束，<b>不代表现状</b>。下列内容按原样保留作设计过程记录，不作为实现依据。
+</div>
+
 <div class="page">
   <!-- 页头 -->
   <div class="page-head">
@@ -173,7 +178,7 @@
       <button class="nav-item">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" d="M12 16v-5m0-3.5h.01"/></svg>关于
       </button>
-      <div class="nav-foot num">PandaLive Monitor v1.9.4</div>
+      <div class="nav-foot num">SODALive Monitor v1.9.4</div>
     </nav>
 
     <!-- 内容区 -->
@@ -280,7 +285,7 @@
             <img class="gh-bg" src="https://github.com/Joftal.png" alt="" onerror="this.style.display='none'" />
             <div class="ah-row">
               <div>
-                <div class="ah-name">PandaLive Monitor <span class="chip num">v1.9.4</span></div>
+                <div class="ah-name">SODALive Monitor <span class="chip num">v1.9.4</span></div>
                 <div class="ah-sub">直播监控 · 观看 · 录制 一体化桌面应用</div>
               </div>
             </div>

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>双平台视觉收敛设计稿 v2 · PandaLive Monitor</title>
+<title>双平台视觉收敛设计稿 v2 · SODALive Monitor</title>
 <style>
   :root {
     --live: #fb7299; --live-dark: #d94b73; --live-deep: #b83a5c;
@@ -218,6 +218,11 @@
 </head>
 <body>
 
+<!-- superseded-banner -->
+<div style="margin:14px 16px 0;padding:11px 14px;border-left:3px solid #2f4b7c;background:rgba(47,75,124,.07);border-radius:0 10px 10px 0;font:13px/1.65 system-ui,sans-serif;color:#1f2937">
+  <b>本稿的导航与页面划分已被 <code>sodalive-ia-v1.html</code> 覆盖</b>　·　草图顶栏那四枚 tab（直播大厅 / 已关注 / 录制管理 / 视频库）已不存在：一级轴换成「Panda / SOOP」平台分段，页面收敛为「直播 / 录制」两条（大厅与已关注并为直播页的视图分段，视频库改名「库」并入录制页第三段，㉒）。本稿的徽标分层、<code>PlatFilter</code> 单一实现与对比度结论仍有效，且已按上述新导航重新落地。下列内容按原样保留作设计过程记录，不作为实现依据。
+</div>
+
 <div class="switcher">
   <span class="brand">DUAL-PLATFORM UI v2</span>
   <button class="sw-btn on" data-s="s1">① 诊断与原则</button>
@@ -417,7 +422,7 @@
         <div class="cap"><span class="tagold">现状</span> 每卡一枚，20 枚/页</div>
         <div class="frame">
           <div class="app">
-            <div class="wordmark"><div class="w1">PandaLive</div><div class="w2">MONITOR</div></div>
+            <div class="wordmark"><div class="w1">SODALive</div><div class="w2">MONITOR</div></div>
             <div class="navtab on">直播大厅</div><div class="navtab">已关注</div><div class="navtab">录制管理</div><div class="navtab">视频库</div>
             <div class="searchbox"><input value="搜索 PandaLive 主播 / 标题" /></div>
             <div class="pill"><i></i>241 直播中</div>
@@ -448,7 +453,7 @@
         <div class="cap"><span class="tagnew">改后</span> 页头一枚，卡片零枚</div>
         <div class="frame">
           <div class="app">
-            <div class="wordmark"><div class="w1">PandaLive</div><div class="w2">MONITOR</div></div>
+            <div class="wordmark"><div class="w1">SODALive</div><div class="w2">MONITOR</div></div>
             <div class="navtab on">直播大厅</div><div class="navtab">已关注</div><div class="navtab">录制管理</div><div class="navtab">视频库</div>
             <div class="searchbox"><input value="搜索大厅主播 / 标题" /></div>
             <div class="pill"><i></i>241 直播中</div>
@@ -497,7 +502,7 @@
     <div class="sec"><h2>状态 A：筛选 = 全部（徽标在场，用 onimg 档）</h2></div>
     <div class="frame">
       <div class="app">
-        <div class="wordmark"><div class="w1">PandaLive</div><div class="w2">MONITOR</div></div>
+        <div class="wordmark"><div class="w1">SODALive</div><div class="w2">MONITOR</div></div>
         <div class="navtab">直播大厅</div><div class="navtab on">已关注 <span class="cnt">37</span></div><div class="navtab">录制管理</div><div class="navtab">视频库</div>
         <div class="searchbox"><input placeholder="搜索大厅主播 / 标题" /></div>
         <div class="pill"><i></i>9 直播中</div><div class="av">P<em></em></div><div class="av s">S<em></em></div>
@@ -694,7 +699,7 @@
       <div>
         <div class="cap"><span class="tagold">现状</span></div>
         <div class="frame"><div class="app" style="height:56px">
-          <div class="wordmark"><div class="w1">PandaLive</div><div class="w2">MONITOR</div></div>
+          <div class="wordmark"><div class="w1">SODALive</div><div class="w2">MONITOR</div></div>
           <div class="navtab on">直播大厅</div><div class="navtab">已关注</div>
           <div class="searchbox"><input placeholder="搜索 PandaLive 主播 / 标题"/></div>
           <div class="pill"><i></i>241 直播中</div>
@@ -705,7 +710,7 @@
       <div>
         <div class="cap"><span class="tagnew">改后</span></div>
         <div class="frame"><div class="app" style="height:56px">
-          <div class="wordmark"><div class="w1">PandaLive</div><div class="w2">MONITOR</div></div>
+          <div class="wordmark"><div class="w1">SODALive</div><div class="w2">MONITOR</div></div>
           <div class="navtab on">直播大厅</div><div class="navtab">已关注</div>
           <div class="searchbox"><input placeholder="搜索大厅主播 / 标题"/></div>
           <div class="pill"><i></i>241 直播中</div>
@@ -718,7 +723,7 @@
         <p style="font-size:11.5px;color:var(--ink3);margin-top:8px">每枚头像自带状态文字，两套会话独立可辨。琥珀点 = 有 Cookie 但未过官方校验（<code>held</code>），绿点 = <code>realLogin</code> —— 沿用现有判定，只是把结论从 tooltip 提到面上。</p>
       </div>
     </div>
-    <div class="note gray" style="margin-top:14px"><b>品牌名不在本稿擅自改。</b>顶栏与设置页仍写 "PandaLive Monitor"，但它现在管两个平台，名字已经名不副实。三个候选（<span class="kbd">继续用 PandaLive Monitor</span> / <span class="kbd">PD Monitor</span> / <span class="kbd">Live Monitor</span>）需要你拍板，涉及 package.json 的 <code>name/productName</code>、窗口标题、README 与安装包显示名，属于单独一次改动。</div>
+    <div class="note gray" style="margin-top:14px"><b>品牌名不在本稿擅自改。</b>顶栏与设置页仍写 "PandaLive Monitor"，但它现在管两个平台，名字已经名不副实。三个候选（<span class="kbd">继续用 PandaLive Monitor</span> / <span class="kbd">PD Monitor</span> / <span class="kbd">Live Monitor</span>）需要你拍板，涉及 package.json 的 <code>name/productName</code>、窗口标题、README 与安装包显示名，属于单独一次改动。<b>〔已定稿〕</b>最终选了第四候选 <span class="kbd">SODALive Monitor</span>：窗口标题 / 托盘菜单 / 关于页 / README / <code>electron-builder.productName</code> 与安装包显示名全部改走该品牌，<code>package.json</code> 的 <code>name</code>、<code>appId com.kbj.pandalivemonitor</code> 与 <code>pandalive</code> 技术标识按 <code>sodalive-ia-v1.html</code> 的 D7 保持不动。</div>
 
     <div class="sec"><h2>账号页：第 4 种平台选择器收进 PlatFilter</h2></div>
     <div class="cmp">
