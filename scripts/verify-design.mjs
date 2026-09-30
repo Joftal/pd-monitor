@@ -41,6 +41,7 @@
 //   D30 空态文案与出口同一判据: 墙上的归因由 emptyAction 单点决定, 点到搜索词就必须给出「清除搜索」
 //   D31 播放页返回从哪来回哪去: 读历史栈落回 ?view= / 录制页, 栈空或跨平台才兜底本平台直播页, 文案与目的地同源
 //   D32 播放页侧栏与动作行: 侧栏自带滚动且卡片 shrink-0(不被压扁裁掉尾行); 动作行按轻重分档(幽灵/描边/实心)且只锁宽度下限; 观众数一屏只报一次
+//   D33 播放页读数一处收敛: room 快照 = 关注列表 > 站内发现, 展示值 = 回包 > 快照 > 裸 ID(未关注房不得整屏「—」)
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -947,6 +948,27 @@ checkWithAllowlist(
   // ③ 同一读数一屏只说一次: 观众数此前在画面角标 / 标题元信息行 / 侧栏 kv 各挂一遍
   assert((pv.match(/\{\{ viewers \}\}/g) || []).length === 1, `D32l 观众数全页只渲染一次(三处各列一遍 = 用户先要判断该信哪个)`, `${(pv.match(/\{\{ viewers \}\}/g) || []).length} 处`)
   assert(!/v-if="m3u8[^"]*"[^>]*viewers|v-if="m3u8 && viewers"/.test(pv), 'D32m 那唯一一处不得挂在播放态守卫里(源失效时读数连同自己的上下文一起消失)')
+}
+
+// ============================================================================
+// D33 播放页读数不得只认「关注列表」 (2026-10-01 实机取证)
+//   站内发现进来的房大多没被关注, 那时 store.anchors 里根本没有这条 —— 而播放页的身份字段
+//   只从 anchor 播种、点赞/粉丝只读 anchor, 于是快照里明摆着的数据被渲染成裸 ID 与「—」:
+//   znvely00 快照 likes 2652 / fans 5681, 侧栏两行「—」; 密码房 umeceo 取不到源, 整屏写成
+//   「umeceo的直播间 / 标签 — / 点赞 —」。现一处 room 快照(关注列表 > 站内发现, 两级都随轮询整包推),
+//   展示值 = loadPlay 回包 > room > 裸 ID; 两样都没有的深链房仍旧如实显示「—」(那是真不知道)。
+// ============================================================================
+{
+  const pv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'PlayerView.vue'), 'utf8')
+  assert(/const room = computed\(\(\) => \{[\s\S]{0,60}const a = anchor\.value[\s\S]{0,60}const d = discoveryItem\.value/.test(pv), 'D33a 房间读数一处收敛(room 快照 = 关注列表 > 站内发现)')
+  const chained = (pv.match(/\|\| room\.value\./g) || []).length
+  assert(chained >= 5, `D33b 展示值都走「回包 > 快照」这条链(≥5 处: title/nick/userImg/thumb/tags)`, `${chained} 处`)
+  assert(!/numOrNa\(anchor\?\./.test(pv) && /numOrNa\(room\.(likes|fans)\)/.test(pv), 'D33c 点赞/粉丝不得只读 anchor(未关注房必然画成「—」, 而快照里有真值)')
+  assert(!/const viewers = computed\(\(\) => anchor\.value\?\.viewerCount \|\| discoveryItem/.test(pv), 'D33d 观众数不再自带一套取值链(与 room 同判据, 免得两处口径分叉)')
+  const playWrites = ['playTitle.value = r.title', 'playNick.value = r.nick', 'playUserImg.value = r.userImg', 'playThumb.value = r.thumbUrl', 'playTags.value = r.tags']
+  const writes = playWrites.filter((w) => pv.includes(w)).length
+  assert(!/\b(title|nick|userImg|thumb|tags)\.value = r\./.test(pv) && writes === 5, 'D33e loadPlay 回包只写 play* 引用(直接覆盖展示值就会把快照挤掉, 回包是一次性的)', `回包写入 play* ${writes}/5`)
+  assert(/const autoRecHere = computed\(\(\) => !!anchor\.value\?\.autoRecord\)/.test(pv), 'D33f 「开播自动录制」仍只读 anchor: 它是关注关系身上的开关, 没关注就是未开启, 不是缺失')
 }
 
 // ============================================================================
