@@ -4,14 +4,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAppStore, type SortKey, type ViewFilter, type WSView } from '@/stores/app'
 import { api } from '@/api'
 import AnchorCard from '@/components/AnchorCard.vue'
+import AddFollowDialog from '@/components/AddFollowDialog.vue'
 import ExploreCard from '@/components/ExploreCard.vue'
 import LiveDock from '@/components/LiveDock.vue'
-import PlatFilter from '@/components/PlatFilter.vue'
-import PlatTag from '@/components/PlatTag.vue'
 import SpinIcon from '@/components/SpinIcon.vue'
 import { useI18n } from 'vue-i18n'
-import { isPlatform, parseRoomInput, platformName, roomKey, DEFAULT_PLATFORM, type Anchor, type Platform } from '@shared/types'
-import { NButton, NEmpty, NInput, NModal, NPagination, NPopconfirm, NPopselect, NSwitch, useMessage } from 'naive-ui'
+import { isPlatform, platformName, roomKey, DEFAULT_PLATFORM, type Anchor, type Platform } from '@shared/types'
+import { NButton, NEmpty, NPagination, NPopconfirm, NPopselect, NSwitch, useMessage } from 'naive-ui'
 
 // ============ 工作区「直播」页(设计稿方案 A: 视图分段 + 常驻在播坞) ============
 // 一个平台一套内容, 三视图横切而不是纵向堆叠: 在播关注 / 站内发现 / 离线关注。
@@ -297,31 +296,16 @@ async function syncFollows(): Promise<void> {
   }
 }
 
-// ---- 关注主播 / 添加房间 ----
-const showAdd = ref(false)
-const addInput = ref('')
-const addLoading = ref(false)
-const addPlatform = ref<Platform | 'auto'>('auto')
-const addPlatformOptions: (Platform | 'auto')[] = ['auto', 'pandalive', 'soop']
-const addParsed = computed(() => parseRoomInput(addInput.value, addPlatform.value === 'auto' ? undefined : addPlatform.value))
+// ---- 关注主播 / 添加房间: 输入解析与提交都在 AddFollowDialog 里(一个平台一套, 无自动识别档) ----
+// 粘错平台的出口要换平台 → 本视图按 fullPath 作 key 会整体重挂, 所以原文经 store.addDraft 过境,
+// 新实例挂载时看到草稿非空就把对话框撑开(用户不必重粘一遍)。
+const showAdd = ref(store.addDraft !== '')
 function openAdd(): void {
-  addPlatform.value = 'auto'
   showAdd.value = true
 }
-async function addAnchor(): Promise<void> {
-  if (!addInput.value.trim()) return
-  addLoading.value = true
-  try {
-    const a = await api.anchorsAdd(addInput.value.trim(), addPlatform.value === 'auto' ? undefined : addPlatform.value)
-    message.success(t('monitor.added', { nick: a.nick }))
-    addInput.value = ''
-    showAdd.value = false
-    await store.reloadAnchors()
-  } catch (e) {
-    message.error((e as Error).message || t('monitor.addFail'))
-  } finally {
-    addLoading.value = false
-  }
+function gotoOtherPlat(text: string): void {
+  store.addDraft = text
+  router.replace({ name: 'live', params: { plat: otherPlat.value }, query: { ...route.query } })
 }
 async function removeAnchor(platform: Platform, userId: string): Promise<void> {
   await api.anchorsRemove(platform, userId)
@@ -602,33 +586,7 @@ watch(
       <n-pagination :page="f.page" :page-count="pageCount" size="small" @update:page="toPage" />
     </div>
 
-    <!-- 关注主播 / 添加房间 -->
-    <n-modal v-model:show="showAdd" preset="card" :title="isSoop ? t('ws.addRoom') : t('monitor.addModalTitle')" class="!w-[460px]" :bordered="false">
-      <div class="space-y-3">
-        <PlatFilter :values="addPlatformOptions" :model-value="addPlatform" @update:model-value="(v: string) => (addPlatform = v as Platform | 'auto')" />
-        <p class="text-[12.5px] text-ink2 leading-relaxed">
-          <template v-if="addPlatform === 'soop'">
-            {{ t('monitor.addExampleSoopLead') }}<br />
-            <code class="font-mono text-brand text-[12px]">https://play.sooplive.com/1004ysus/297384679</code>
-            <br /><span class="text-ink3">{{ t('monitor.addSoopTip') }}</span>
-          </template>
-          <template v-else>
-            {{ t('monitor.addExample1') }}<br />
-            <code class="font-mono text-brand text-[12px]">https://www.pandalive.co.kr/play/zenith6666</code> {{ t('common.or') }} <code class="font-mono text-brand text-[12px]">zenith6666</code>
-          </template>
-        </p>
-        <n-input v-model:value="addInput" :placeholder="t('monitor.addPh')" size="large" @keyup.enter="addAnchor" autofocus />
-        <div v-if="addInput.trim()" class="text-[12px] flex items-center gap-1.5" :class="addParsed ? 'text-ink2' : 'text-liveink'">
-          <template v-if="addParsed">{{ t('monitor.recognizedAs') }} <PlatTag :platform="addParsed.platform" size="sm" /> @{{ addParsed.userId }}</template>
-          <template v-else>{{ t('monitor.recognizeFail') }}</template>
-        </div>
-        <div class="flex justify-end gap-2 pt-1">
-          <n-button class="!min-w-[88px]" @click="showAdd = false">{{ t('monitor.cancel') }}</n-button>
-          <n-button type="primary" :disabled="!addParsed || addLoading" @click="addAnchor" class="!min-w-[88px]">
-            <span class="inline-flex items-center justify-center gap-1.5"><SpinIcon v-if="addLoading" />{{ t('monitor.confirmFollow') }}</span>
-          </n-button>
-        </div>
-      </div>
-    </n-modal>
+    <!-- 关注主播 / 添加房间: 平台由所在工作区决定, 对话框内不再摆平台分段 -->
+    <AddFollowDialog v-model:show="showAdd" :platform="plat" @added="store.reloadAnchors()" @goto-other="gotoOtherPlat" />
   </div>
 </template>

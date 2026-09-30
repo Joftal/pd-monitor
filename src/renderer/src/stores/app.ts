@@ -67,6 +67,8 @@ interface State {
   /** 两套登录态一次给全: 顶栏双头像与账号页共用同一份事实源 */
   accounts: AccountStates | null
   searchKeyword: string
+  /** 粘错平台时寄存的原文: 换平台会重挂工作区(:key=fullPath), 靠它把对话框带着原句撑开 */
+  addDraft: string
   /** 三视图各自的排序/筛选/分页/滚动状态 */
   views: Record<WSView, ViewFilter>
   /** 本次运行期间「新开播」的房间主键: 取代旧关注页的"开播就自动跳 tab"——
@@ -88,6 +90,7 @@ export const useAppStore = defineStore('app', {
     watcher: null,
     accounts: null,
     searchKeyword: '',
+    addDraft: '',
     // 在播默认「最新开播」(人气只有部分采集路径给得出), 发现默认「人气最高」(全站列表的老口径), 离线默认「未播最久」
     views: { live: newFilter('recent', 20), discover: newFilter('viewers', 20), offline: newFilter('stale', 40) },
     newLive: [],

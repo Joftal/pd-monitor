@@ -2,9 +2,9 @@
 import { useI18n } from 'vue-i18n'
 import { platformName, type Platform } from '@shared/types'
 
-// 全应用唯一的"页内选平台"控件: 监控墙筛选 / 库 / 关注弹窗共用同一形态(设计稿第②屏 P4: 一个控件一个长相)。
-// 账号页从前也挂一枚, 与顶栏分段同屏并存 → 已收归顶栏
-type Opt = 'all' | 'auto' | Platform
+// 全应用唯一的"页内选平台"控件: 监控墙筛选 / 库 共用同一形态(设计稿第②屏 P4: 一个控件一个长相)。
+// 账号页从前也挂一枚, 与顶栏分段同屏并存 → 已收归顶栏; 关注弹窗那枚(带「自动识别」)也已撤 —— 平台由所在工作区决定
+type Opt = 'all' | Platform
 
 const props = withDefaults(
   defineProps<{
@@ -21,7 +21,6 @@ const { t } = useI18n()
 
 function label(v: Opt): string {
   if (v === 'all') return t('monitor.platAll')
-  if (v === 'auto') return t('monitor.platAuto')
   return platformName(v)
 }
 
