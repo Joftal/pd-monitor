@@ -165,6 +165,30 @@ function toggleFilter(key: BoolKey): void {
   f.value[key] = !f.value[key]
   f.value.page = 1
 }
+/** 当前视图开着的那些筛子: 空态要按它归因, 更要靠它给出取消出口(见 filterBarVisible)。
+ *  标签用不带计数的短形 —— 数字已经摆在 chip 上, 句子里重复一遍只会把句子撑断。 */
+const activeFilters = computed<{ key: BoolKey; label: string }[]>(() => {
+  const g = f.value
+  const on: { key: BoolKey; label: string }[] = []
+  if (g.onlyFollowed) on.push({ key: 'onlyFollowed', label: t('ws.onlyFollowed') })
+  if (g.onlyAdult) on.push({ key: 'onlyAdult', label: t('ws.onlyAdult') })
+  if (g.onlyFan) on.push({ key: 'onlyFan', label: t('ws.onlyFan') })
+  if (g.onlyAutoRec) on.push({ key: 'onlyAutoRec', label: t('ws.onlyAutoRec') })
+  if (g.hideStale) on.push({ key: 'hideStale', label: t('ws.hideStaleShort') })
+  if (g.goneOnly) on.push({ key: 'goneOnly', label: t('ws.goneShort') })
+  return on
+})
+/** 各视图「没筛之前」的条数: 0 条是真的没东西, 大于 0 而筛完是 0 才是筛子的锅 */
+const baseCount = computed(() =>
+  view.value === 'live' ? liveList.value.length : view.value === 'discover' ? store.discovery.length : offBase.value.length
+)
+/** 筛选条的显示条件不能是筛完的条数: 把列表筛空的那枚 chip 会连同自己一起消失, 用户被锁在空墙里没有出口
+ *  (实机: 「只看已关注」把 395 条站内发现筛成 0, chip 从 DOM 里没了, 墙却写「站内暂时没有可展示的在播房间」)。
+ *  口径与录制页的库一致(D14e 看的是基数 totalCount, 不是结果)。 */
+const filterBarVisible = computed(() => baseCount.value > 0 || activeFilters.value.length > 0)
+function clearFilters(): void {
+  for (const x of activeFilters.value) f.value[x.key] = false
+}
 function setPageSize(n: number): void {
   f.value.pageSize = n
   f.value.page = 1
@@ -315,10 +339,13 @@ const discoverEmpty = computed(() => {
   return t('ws.emptyDiscovery')
 })
 const listEmpty = computed(() => {
+  // 「是筛空的」必须排在其它归因前面: 否则它会顶掉下一步(实机抓到的正是顶替后的那句「站内暂时没有可展示的在播房间」)
+  if (activeFilters.value.length && baseCount.value)
+    return t('ws.emptyFiltered', { label: activeFilters.value.map((x) => x.label).join(' + '), n: baseCount.value })
   if (view.value === 'discover') return discoverEmpty.value
   if (!platAnchors.value.length) return t('ws.emptyNoFollow')
   if (kw.value) return t('ws.emptyKw', { kw: store.searchKeyword.trim() })
-  if (view.value === 'live') return store.views.live.onlyAutoRec ? t('ws.emptyFiltered') : t('ws.emptyLive')
+  if (view.value === 'live') return t('ws.emptyLive')
   return t('ws.emptyAllLive')
 })
 
@@ -391,8 +418,8 @@ watch(
       <span class="text-[11px] text-deco pr-1">{{ t('ws.keyHint') }}</span>
     </div>
 
-    <!-- 本视图的排序 / 筛选条 -->
-    <div v-if="activeList.length" class="px-7 pt-3 shrink-0 flex items-center gap-x-4 gap-y-2 flex-wrap">
+    <!-- 本视图的排序 / 筛选条: 条件看基数与"有没有筛子开着", 不看筛完的条数(见 filterBarVisible 的注释) -->
+    <div v-if="filterBarVisible" class="px-7 pt-3 shrink-0 flex items-center gap-x-4 gap-y-2 flex-wrap">
       <template v-if="view === 'live'">
         <button
           v-for="c in liveSorters"
@@ -505,17 +532,23 @@ watch(
       <div v-else class="rounded-card border border-dashed border-line bg-card/40 py-16 grid place-items-center">
         <n-empty :description="listEmpty" class="text-ink3">
           <template #extra>
-            <!-- 发现段的空只有一种下一步: 补上缺的那个前提(登录 / 切回列表模式), 而不是让用户去加房间 -->
-            <div v-if="view === 'discover'" class="flex gap-2 justify-center mt-2">
-              <n-button v-if="!loggedIn" size="small" type="primary" @click="router.push({ name: 'account', query: { plat } })">{{ t('ws.gotoLogin') }}</n-button>
-              <n-button v-else-if="!isSoop && store.watcher?.mode === 'per-anchor'" size="small" secondary @click="router.push({ name: 'settings' })">{{ t('ws.gotoDetectList') }}</n-button>
-            </div>
-            <!-- 首用空墙给两条并列入口; 筛选后空墙只给「清除搜索」——两种空的下一步动作完全不同 -->
-            <div v-else-if="!platAnchors.length" class="flex gap-2 justify-center mt-2">
-              <n-button size="small" type="primary" @click="openAdd">{{ isSoop ? t('ws.addRoom') : t('monitor.addBtn') }}</n-button>
-              <n-button v-if="!isSoop" size="small" secondary @click="setView('discover')">{{ t('ws.gotoDiscoverView') }}</n-button>
-            </div>
-            <n-button v-else-if="kw" size="small" secondary class="mt-2" @click="store.searchKeyword = ''">{{ t('ws.clearKw') }}</n-button>
+            <!-- 筛空的墙只有一条下一步: 把筛子拿掉。此时不再并列「去登录 / 加房间」那类入口 —— 它们不是这个现场缺的东西 -->
+            <n-button v-if="activeFilters.length && baseCount" size="small" type="primary" class="mt-2" @click="clearFilters">
+              {{ t('ws.clearFilters') }}
+            </n-button>
+            <template v-else>
+              <!-- 发现段的空只有一种下一步: 补上缺的那个前提(登录 / 切回列表模式), 而不是让用户去加房间 -->
+              <div v-if="view === 'discover'" class="flex gap-2 justify-center mt-2">
+                <n-button v-if="!loggedIn" size="small" type="primary" @click="router.push({ name: 'account', query: { plat } })">{{ t('ws.gotoLogin') }}</n-button>
+                <n-button v-else-if="!isSoop && store.watcher?.mode === 'per-anchor'" size="small" secondary @click="router.push({ name: 'settings' })">{{ t('ws.gotoDetectList') }}</n-button>
+              </div>
+              <!-- 首用空墙给两条并列入口; 筛选后空墙只给「清除搜索」——两种空的下一步动作完全不同 -->
+              <div v-else-if="!platAnchors.length" class="flex gap-2 justify-center mt-2">
+                <n-button size="small" type="primary" @click="openAdd">{{ isSoop ? t('ws.addRoom') : t('monitor.addBtn') }}</n-button>
+                <n-button v-if="!isSoop" size="small" secondary @click="setView('discover')">{{ t('ws.gotoDiscoverView') }}</n-button>
+              </div>
+              <n-button v-else-if="kw" size="small" secondary class="mt-2" @click="store.searchKeyword = ''">{{ t('ws.clearKw') }}</n-button>
+            </template>
           </template>
         </n-empty>
       </div>
