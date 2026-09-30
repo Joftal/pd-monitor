@@ -178,10 +178,14 @@ const activeFilters = computed<{ key: BoolKey; label: string }[]>(() => {
   if (g.goneOnly) on.push({ key: 'goneOnly', label: t('ws.goneShort') })
   return on
 })
-/** 各视图「没筛之前」的条数: 0 条是真的没东西, 大于 0 而筛完是 0 才是筛子的锅 */
-const baseCount = computed(() =>
-  view.value === 'live' ? liveList.value.length : view.value === 'discover' ? store.discovery.length : offBase.value.length
-)
+/** 各视图「没筛之前」的条数: 0 条是真的没东西, 大于 0 而筛完是 0 才是筛子的锅。
+ *  口径统一为「搜索词已生效、chip 未生效」(liveList / offBase 本来就带 hit): 三视图若各用一套基数,
+ *  发现段会把「本来就 0 条」错报成「芯片筛空的」, 用户按了取消筛选仍旧是空墙。 */
+const baseCount = computed(() => {
+  if (view.value === 'live') return liveList.value.length
+  if (view.value === 'discover') return store.discovery.filter((x) => hit(x)).length
+  return offBase.value.length
+})
 /** 筛选条的显示条件不能是筛完的条数: 把列表筛空的那枚 chip 会连同自己一起消失, 用户被锁在空墙里没有出口
  *  (实机: 「只看已关注」把 395 条站内发现筛成 0, chip 从 DOM 里没了, 墙却写「站内暂时没有可展示的在播房间」)。
  *  口径与录制页的库一致(D14e 看的是基数 totalCount, 不是结果)。 */
@@ -337,6 +341,21 @@ const discoverEmpty = computed(() => {
   if (!loggedIn.value) return t('ws.emptyDiscoverLogin')
   if (store.watcher?.mode === 'per-anchor') return t('ws.emptyDiscoverPerAnchor')
   return t('ws.emptyDiscovery')
+})
+/** 空态的下一步动作: 必须与 listEmpty 同一顺序、同一判据 —— 墙上一句「没有匹配 X」而手里没有清除搜索,
+ *  等于让用户自己去顶栏找回那个词(顶栏搜索框没有 ✕)。文案与出口分两处判断就会漂移, 所以合为一处。 */
+type EmptyAction = 'clearFilters' | 'clearKw' | 'gotoLogin' | 'gotoDetectList' | 'firstUse' | null
+const emptyAction = computed<EmptyAction>(() => {
+  if (activeFilters.value.length && baseCount.value) return 'clearFilters'
+  if (view.value === 'discover') {
+    if (kw.value) return 'clearKw'
+    if (!loggedIn.value) return 'gotoLogin'
+    if (!isSoop.value && store.watcher?.mode === 'per-anchor') return 'gotoDetectList'
+    return null
+  }
+  if (!platAnchors.value.length) return 'firstUse'
+  if (kw.value) return 'clearKw'
+  return null
 })
 const listEmpty = computed(() => {
   // 「是筛空的」必须排在其它归因前面: 否则它会顶掉下一步(实机抓到的正是顶替后的那句「站内暂时没有可展示的在播房间」)
@@ -532,23 +551,26 @@ watch(
       <div v-else class="rounded-card border border-dashed border-line bg-card/40 py-16 grid place-items-center">
         <n-empty :description="listEmpty" class="text-ink3">
           <template #extra>
-            <!-- 筛空的墙只有一条下一步: 把筛子拿掉。此时不再并列「去登录 / 加房间」那类入口 —— 它们不是这个现场缺的东西 -->
-            <n-button v-if="activeFilters.length && baseCount" size="small" type="primary" class="mt-2" @click="clearFilters">
-              {{ t('ws.clearFilters') }}
-            </n-button>
-            <template v-else>
-              <!-- 发现段的空只有一种下一步: 补上缺的那个前提(登录 / 切回列表模式), 而不是让用户去加房间 -->
-              <div v-if="view === 'discover'" class="flex gap-2 justify-center mt-2">
-                <n-button v-if="!loggedIn" size="small" type="primary" @click="router.push({ name: 'account', query: { plat } })">{{ t('ws.gotoLogin') }}</n-button>
-                <n-button v-else-if="!isSoop && store.watcher?.mode === 'per-anchor'" size="small" secondary @click="router.push({ name: 'settings' })">{{ t('ws.gotoDetectList') }}</n-button>
-              </div>
-              <!-- 首用空墙给两条并列入口; 筛选后空墙只给「清除搜索」——两种空的下一步动作完全不同 -->
-              <div v-else-if="!platAnchors.length" class="flex gap-2 justify-center mt-2">
+            <!-- 出口由 emptyAction 单独决定(与墙上那句同一判据): 筛空的墙只有一条下一步「取消筛选」,
+                 此时不再并列「去登录 / 加房间」—— 它们不是这个现场缺的东西; 反之有词无命中必给「清除搜索」 -->
+            <div v-if="emptyAction" class="flex gap-2 justify-center mt-2">
+              <template v-if="emptyAction === 'clearFilters'">
+                <n-button size="small" type="primary" @click="clearFilters">{{ t('ws.clearFilters') }}</n-button>
+              </template>
+              <template v-else-if="emptyAction === 'clearKw'">
+                <n-button size="small" secondary @click="store.searchKeyword = ''">{{ t('ws.clearKw') }}</n-button>
+              </template>
+              <template v-else-if="emptyAction === 'gotoLogin'">
+                <n-button size="small" type="primary" @click="router.push({ name: 'account', query: { plat } })">{{ t('ws.gotoLogin') }}</n-button>
+              </template>
+              <template v-else-if="emptyAction === 'gotoDetectList'">
+                <n-button size="small" secondary @click="router.push({ name: 'settings' })">{{ t('ws.gotoDetectList') }}</n-button>
+              </template>
+              <template v-else>
                 <n-button size="small" type="primary" @click="openAdd">{{ isSoop ? t('ws.addRoom') : t('monitor.addBtn') }}</n-button>
                 <n-button v-if="!isSoop" size="small" secondary @click="setView('discover')">{{ t('ws.gotoDiscoverView') }}</n-button>
-              </div>
-              <n-button v-else-if="kw" size="small" secondary class="mt-2" @click="store.searchKeyword = ''">{{ t('ws.clearKw') }}</n-button>
-            </template>
+              </template>
+            </div>
           </template>
         </n-empty>
       </div>
