@@ -283,7 +283,7 @@ async function clearCredentials() {
 
       <!-- ② 登录方式 -->
       <div class="flex items-baseline gap-2.5 px-1 mt-5 mb-2">
-        <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">{{ t('account.methods') }}</h2>
+        <h2 class="sec-h">{{ t('account.methods') }}</h2>
         <span class="text-[11px] text-ink3 ml-auto">{{ t('account.methodsHint') }}</span>
       </div>
 

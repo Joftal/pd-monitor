@@ -332,6 +332,14 @@ button:disabled,
   font-size: 11.5px;
   color: rgb(var(--c-ink3));
 }
+/* 卡内分组小标题: 层级在 .sec-h(段)与正文(项)之间, 只做「这一组是什么」。
+   此前同一角色在设置页写了 6 遍(text-[11px] font-bold text-ink3 tracking-wide)。 */
+.grp-h {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: rgb(var(--c-ink3));
+}
 
 /* ===== 平台身份色点(单一规格) =====
    同一个平台色点此前在顶栏分段(7px)、筛选 chip(6px)、徽标(5/6px + 各自的颜色描边环)、库的平台分解行

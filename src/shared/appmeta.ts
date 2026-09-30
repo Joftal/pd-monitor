@@ -2,6 +2,8 @@
 export const APP_META = {
   name: 'SODALive Monitor',
   author: 'Joftal',
+  /** 作者主页(GitHub 头像 = 该地址 + '.png', 关于页两处都从这里取, 不再各写一遍) */
+  authorUrl: 'https://github.com/Joftal',
   repo: 'https://github.com/Joftal/pd-monitor',
   releasesPage: 'https://github.com/Joftal/pd-monitor/releases'
 } as const

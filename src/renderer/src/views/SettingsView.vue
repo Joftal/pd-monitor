@@ -5,16 +5,25 @@ import { NButton, NInput, NInputNumber, NSwitch, NRadioGroup, NRadioButton, useM
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api'
 import type { AppInfo, NotifyEvent, NotifyRow, Platform, Settings, UpdateCheckResult } from '@shared/types'
+import { platformName, REC_RETRY_MAX } from '@shared/types'
 import SpinIcon from '@/components/SpinIcon.vue'
 import PlatTag from '@/components/PlatTag.vue'
 import { useI18n } from 'vue-i18n'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
+
+/** 代理示例: 网络节与 TG 专用代理两处占位符必须同值, 写两遍就会各改各的 */
+const PROXY_PH = 'http://127.0.0.1:7890'
 
 const store = useAppStore()
 const router = useRouter()
 const message = useMessage()
 const form = ref<Settings | null>(null)
+/** 进页快照。脏判定跟这份比, 不跟 store.settings 比 —— 后者会被别的写入方(账号页、
+ *  保存回来的投影)刷新, 拿它当基线等于把「别人刚改的」读成「你没保存的」,
+ *  一按保存就把对方的新值回滚成进页时的旧值。
+ *  必须声明在首个 setForm 调用(immediate watch)之前: setup 里 TDZ 抛错 = 整页白屏。 */
+const baseline = ref<Settings | null>(null)
 const saving = ref(false)
 const dataDir = ref('')
 
@@ -45,6 +54,16 @@ function openRelease() {
   if (upd.value?.url) void api.openExternal(upd.value.url)
 }
 
+/** 关于节的身份数据一律来自 appInfo(IPC) —— 此前作者名/仓库 slug/日志路径都写死在模板里,
+ *  换作者、换仓库名、mac 下跑一份都会显示错的值 */
+const avatarUrl = computed(() => (info.value ? `${info.value.authorUrl}.png` : ''))
+const repoSlug = computed(() => (info.value?.repo || '').replace(/^https?:\/\/[^/]+\//, ''))
+
+/** 上轮时刻按应用语言显示: 裸 toLocaleTimeString() 跟的是宿主系统区域, 与界面语言可以不一致 */
+function roundTime(ms: number): string {
+  return new Date(ms).toLocaleTimeString(locale.value, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
 const defaultRecPath = computed(() => {
   if (!dataDir.value) return '…'
   return dataDir.value.replace(/[/\\]data$/, '/recording')
@@ -53,18 +72,39 @@ const defaultRecPath = computed(() => {
 watch(
   () => store.settings,
   (s) => {
-    if (s && !form.value) form.value = clone(s)
+    if (s && !form.value) setForm(s)
   },
   { immediate: true }
 )
 
-// 未保存脏标记(form 与已持久化 settings 值不一致)。
+/** form 与基线各拿一份独立深拷贝: 共用一份的话改一格就等于改了基线, 保存按钮永远点不动 */
+function setForm(src: Settings): void {
+  form.value = clone(src)
+  baseline.value = clone(src)
+}
+
+// 主进程投影字段: 真值在 secrets 保险箱, 不参与脏比对, 也不进保存补丁
+// (tgTokenSet 会被 tgSaveToken 外科式同步, 但 secretsEncrypted 没有同步点 —— 若计入,
+//  密钥环恢复加密后这一格永远脏, 用户看不出哪里没保存)
+const PROJECTED_KEYS: (keyof Settings)[] = ['tgTokenSet', 'secretsEncrypted']
+
+/** 逐键脏清单: 保存只提交这些键, 导航点也只按这些键亮 */
+const dirtyKeys = computed<Set<string>>(() => {
+  const out = new Set<string>()
+  const f = form.value
+  const cur = baseline.value
+  if (!f || !cur) return out
+  for (const k of Object.keys(f) as (keyof Settings)[]) {
+    if (PROJECTED_KEYS.includes(k)) continue
+    if (JSON.stringify(f[k]) !== JSON.stringify(cur[k])) out.add(k)
+  }
+  return out
+})
+
+// 未保存脏标记。
 // Token 草稿必须计入: 它走独立通道(不进 form/settings 投影), 只看 form 比对会让
 // "只填了 token"这一种最常见的保存动作永远点不动 —— 用户只能靠"测试"按钮顺手持久化
-const dirty = computed(() => {
-  if (!form.value || !store.settings) return false
-  return JSON.stringify(form.value) !== JSON.stringify(store.settings) || tgTokenDraft.value.trim() !== ''
-})
+const dirty = computed(() => dirtyKeys.value.size > 0 || tgTokenDraft.value.trim() !== '')
 
 function clampNum(v: unknown, min: number, max: number, fallback: number): number {
   const n = typeof v === 'number' && !Number.isNaN(v) ? v : fallback
@@ -88,28 +128,37 @@ async function save() {
   if (!form.value) return
   saving.value = true
   try {
+    // 先深拷贝脱 Proxy: IPC 载荷走 structured clone, 而浅展开({...form})会让 notify 矩阵与
+    // autoRecordDefault 仍是 Pinia 响应式代理 —— 整个补丁被主进程拒收, 结果是
+    // 「除主题/语言外全都存不下去」(那两个键走单键即时通道, 所以从未暴露)。
     // 清洗: NInputNumber 清空为 null / 非法值时回退默认, 并夹紧到安全区间
+    const f = clone(form.value)
     const clean: Settings = {
-      ...form.value,
-      proxyUrl: (form.value.proxyUrl || '').trim(),
-      tgChatId: (form.value.tgChatId || '').trim(),
-      tgProxy: (form.value.tgProxy || '').trim(),
-      pollIntervalSec: clampNum(form.value.pollIntervalSec, 5, 600, 30),
-      requestGapMs: clampNum(form.value.requestGapMs, 300, 10000, 1200),
-      splitSeconds: clampNum(form.value.splitSeconds, 60, 7200, 900),
-      diskLimitGb: clampNum(form.value.diskLimitGb, 0.5, 100, 1)
+      ...f,
+      proxyUrl: (f.proxyUrl || '').trim(),
+      tgChatId: (f.tgChatId || '').trim(),
+      tgProxy: (f.tgProxy || '').trim(),
+      pollIntervalSec: clampNum(f.pollIntervalSec, 5, 600, 30),
+      requestGapMs: clampNum(f.requestGapMs, 300, 10000, 1200),
+      splitSeconds: clampNum(f.splitSeconds, 60, 7200, 900),
+      diskLimitGb: clampNum(f.diskLimitGb, 0.5, 100, 1)
     }
-    // 全量提交前剔除主进程投影字段(真值在 secrets, 不经设置通道往返)
-    delete (clean as Partial<Settings>).tgTokenSet
-    await store.patchSettings(clean)
+    // 只提交真改过的键(带投影键已由 dirtyKeys 排除): 全量提交等于拿这份快照
+    // 覆盖另一个写入方(轮询/账号页)在编辑期间刚落的新值
+    const patch: Record<string, unknown> = {}
+    for (const k of dirtyKeys.value) patch[k] = clean[k as keyof Settings]
+    if (Object.keys(patch).length) await store.patchSettings(patch as Partial<Settings>)
     // Token 单独通道: 非空草稿才落保险箱(空草稿=未改动, 清除走「清除」按钮)
     if (tgTokenDraft.value.trim()) {
       await tgSaveToken(tgTokenDraft.value.trim())
       tgTokenDraft.value = ''
     }
     // 脏标记按 JSON 键序比对, 手工重组 form 键序必翻车 —— 一律从持久化投影回拷
-    if (store.settings) form.value = clone(store.settings)
+    if (store.settings) setForm(store.settings)
     message.success(t('settings.saved'))
+  } catch (e) {
+    // 拒绝必须出声: 此前只有 try/finally, 保存失败被吞成「点了没反应」, 脏标记也永远不清
+    message.error(t('settings.saveFail', { msg: String((e as Error).message || e) }))
   } finally {
     saving.value = false
   }
@@ -122,7 +171,11 @@ const tgTokenDraft = ref('')
  *  form 只外科式同步这一个键(整体回拷会吞掉用户其他未保存编辑) */
 async function tgSaveToken(token: string): Promise<void> {
   store.settings = await api.telegramSetToken(token)
-  if (form.value && store.settings) form.value.tgTokenSet = store.settings.tgTokenSet
+  if (!form.value || !store.settings) return
+  // 两枚投影键一起回拷: 界面按它们显示"已保存/降级明文"。secretsEncrypted 此前没有同步点,
+  // 密钥环恢复加密后那一格永远停在旧值(它已从脏比对里排除, 不会因此变脏)
+  form.value.tgTokenSet = store.settings.tgTokenSet
+  form.value.secretsEncrypted = store.settings.secretsEncrypted
 }
 
 // 一次性动作: 不设按钮 loading 态(结果经 message 气泡回报; 主进程侧有 15s 超时护栏兜底)
@@ -161,7 +214,7 @@ async function tgClearToken() {
 }
 
 function resetForm(): void {
-  if (store.settings) form.value = clone(store.settings)
+  if (store.settings) setForm(store.settings)
 }
 
 /** 主题特殊通道: 点按即切换并立即持久化(不走"保存设置"批处理), 与页内文案"立即生效"一致 */
@@ -169,6 +222,8 @@ async function applyTheme(v: 'light' | 'dark') {
   if (!form.value || form.value.theme === v) return
   form.value.theme = v
   await store.patchSettings({ theme: v })
+  // 已经单独落盘的键必须同步基线: 不然它明明存下去了, 吸底条却永远挂着「1 项未保存」
+  if (baseline.value) baseline.value.theme = v
   message.success(v === 'dark' ? t('settings.switchedDark') : t('settings.switchedLight'))
 }
 
@@ -178,6 +233,7 @@ async function applyLocale(v: string | number | boolean) {
   if (!form.value || form.value.locale === l) return
   form.value.locale = l
   await store.patchSettings({ locale: l })
+  if (baseline.value) baseline.value.locale = l
   message.success(t('settings.switchedLang'))
 }
 
@@ -201,6 +257,43 @@ const navs = computed<{ key: NavKey; label: string }[]>(() => [
 const scrollRef = ref<HTMLElement | null>(null)
 const activeNav = ref<NavKey>('appearance')
 
+/** 设置键 → 所在节: 脏标记只写在吸底条上等于让人逐屏找, 亮的应该是「哪一屏有没保存的项」 */
+const SEC_OF_KEY: Partial<Record<keyof Settings, NavKey>> = {
+  theme: 'appearance',
+  locale: 'appearance',
+  pollIntervalSec: 'monitor',
+  requestGapMs: 'monitor',
+  watchMode: 'monitor',
+  defaultWorkspace: 'monitor',
+  prefetchStream: 'monitor',
+  keepaliveStream: 'monitor',
+  savePath: 'record',
+  splitSeconds: 'record',
+  diskLimitGb: 'record',
+  autoMp4: 'record',
+  deleteTs: 'record',
+  mergeMp4: 'record',
+  mergeDeleteSegments: 'record',
+  autoRetryRecord: 'record',
+  autoRecordDefault: 'record',
+  proxyUrl: 'network',
+  notify: 'notify',
+  closeToTray: 'notify',
+  tgChatId: 'notify',
+  tgProxy: 'notify'
+}
+
+const dirtySecs = computed<Set<NavKey>>(() => {
+  const out = new Set<NavKey>()
+  for (const k of dirtyKeys.value) {
+    const sec = SEC_OF_KEY[k as keyof Settings]
+    if (sec) out.add(sec)
+  }
+  // Token 草稿属通知节
+  if (tgTokenDraft.value.trim()) out.add('notify')
+  return out
+})
+
 function scrollToSec(key: NavKey): void {
   activeNav.value = key
   scrollRef.value
@@ -221,8 +314,10 @@ function onScroll(): void {
 }
 
 // 开关磁贴公共样式(label+desc 左, NSwitch 右; 无边框, 浅填充)
+// 磁贴刻意保持 div 而不是 button: 里面已经嵌了一个 n-switch, button 套可交互控件会让
+// Tab 停在壳上进不去开关。所以可操作身份由 role=switch + tabindex + Space/Enter 三件补齐
 const tileCls =
-  'flex items-center gap-2.5 rounded-ctl px-3 py-2.5 cursor-pointer transition-colors bg-fill hover:bg-fillh'
+  'flex items-center gap-2.5 w-full text-left rounded-ctl px-3 py-2.5 cursor-pointer transition-colors bg-fill hover:bg-fillh'
 
 /** 磁贴里能被翻的布尔项。全部是 Settings 顶层 boolean, 所以一次成型而不是一堆专用 handler */
 type BoolKey =
@@ -239,6 +334,12 @@ type BoolKey =
  *  点开关本身会冒泡到这里 —— 不排除就是"开关翻一次 + 这里再翻一次", 表现为点了没反应 */
 function tileClick(e: MouseEvent, key: BoolKey): void {
   if ((e.target as HTMLElement | null)?.closest('.n-switch')) return
+  const f = form.value
+  if (f) f[key] = !f[key]
+}
+
+/** 键盘侧的命中区: 整块磁贴是 div, 鼠标能点不等于键盘能翻 —— role=switch + tabindex 还得配 Space/Enter */
+function tileKey(key: BoolKey): void {
   const f = form.value
   if (f) f[key] = !f[key]
 }
@@ -273,6 +374,19 @@ function autoRecOverrides(p: Platform): number {
 function setNotify(p: Platform, e: NotifyEvent, ch: 'system' | 'telegram', v: boolean): void {
   const row = form.value?.notify[p][e]
   if (row) (row as NotifyRow)[ch] = v
+}
+
+/** 整矩阵开/关(声音列不动: 它只在开播行存在, 且「全部关闭」的诉求就是不响) */
+function setNotifyAll(v: boolean): void {
+  const f = form.value
+  if (!f) return
+  for (const p of PLATS) {
+    for (const e of ['live', 'offline', 'record', 'alert'] as NotifyEvent[]) {
+      const row = f.notify[p][e] as NotifyRow
+      row.system = v
+      row.telegram = v
+    }
+  }
 }
 
 // SOOP 采集节是"读状态不给开关"(设计稿 S6 判据): 这里只取本平台轮询态与登录态
@@ -312,7 +426,13 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
           <svg v-else-if="n.key === 'notify'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2a2 2 0 01-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1"/></svg>
           <svg v-else-if="n.key === 'storage'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="6" rx="8" ry="3"/><path stroke-linecap="round" d="M4 6v6c0 1.66 3.58 3 8 3s8-1.34 8-3V6M4 12v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg>
           <svg v-else class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" d="M12 16v-5m0-3.5h.01"/></svg>
-          {{ n.label }}
+          <span class="flex-1 min-w-0 truncate">{{ n.label }}</span>
+          <!-- 脏点位在导航上: 吸底条说"有 3 项没保存"却不说在哪一屏, 人就得逐屏找 -->
+          <i
+            v-if="dirtySecs.has(n.key)"
+            class="w-1.5 h-1.5 rounded-full bg-warnink shrink-0"
+            :title="t('settings.dirtyHere')"
+          ></i>
         </button>
         <div class="mt-3.5 px-3 text-[11px] text-ink3 tabular-nums">SODALive Monitor v{{ info?.version || '…' }}</div>
       </nav>
@@ -322,7 +442,7 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
         <!-- 外观 -->
         <section data-sec="appearance" class="mb-5">
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
-            <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">{{ t('settings.appearance') }}</h2>
+            <h2 class="sec-h">{{ t('settings.appearance') }}</h2>
             <span class="text-[11px] text-ink3 ml-auto">{{ t('settings.appearanceDesc') }}</span>
           </div>
           <div class="bg-card rounded-card shadow-card overflow-hidden">
@@ -382,11 +502,11 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
         <!-- 监控: 全局一条时间轴 + 两平台各自的采集面 -->
         <section data-sec="monitor" class="mb-5">
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
-            <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">{{ t('settings.monitor') }}</h2>
+            <h2 class="sec-h">{{ t('settings.monitor') }}</h2>
             <span class="text-[11px] text-ink3 ml-auto">{{ t('settings.monitorDesc') }}</span>
           </div>
 
-          <div class="text-[11px] font-bold text-ink3 tracking-wide px-1 pb-1.5">{{ t('settings.grpGlobal') }}</div>
+          <div class="grp-h px-1 pb-1.5">{{ t('settings.grpGlobal') }}</div>
           <div class="bg-card rounded-card shadow-card overflow-hidden mb-4">
             <div class="flex items-center justify-between gap-4 px-4 py-3">
               <div>
@@ -402,14 +522,16 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
               </div>
               <n-radio-group v-model:value="form.defaultWorkspace" size="small">
                 <n-radio-button value="remember">{{ t('settings.wsRemember') }}</n-radio-button>
-                <n-radio-button value="pandalive">Panda</n-radio-button>
-                <n-radio-button value="soop">SOOP</n-radio-button>
+                <!-- 平台称呼走 platformName()(与 PlatTag 同一出口), 不在模板里手打裸字:
+                     手打的 "Panda"/"SOOP" 与组件文案漂移时没人会发现(全站身份词只允许一处定义) -->
+                <n-radio-button value="pandalive">{{ platformName('pandalive') }}</n-radio-button>
+                <n-radio-button value="soop">{{ platformName('soop') }}</n-radio-button>
               </n-radio-group>
             </div>
           </div>
 
           <div class="flex items-baseline gap-2 px-1 pb-1.5">
-            <span class="text-[11px] font-bold text-ink3 tracking-wide">{{ t('settings.grpPanda') }}</span>
+            <span class="grp-h">{{ t('settings.grpPanda') }}</span>
             <span class="text-[10.5px] font-normal text-ink3">{{ t('settings.grpPandaD') }}</span>
           </div>
           <div class="bg-card rounded-card shadow-card overflow-hidden mb-4">
@@ -435,14 +557,14 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
               <n-input-number v-model:value="form.requestGapMs" :min="300" :max="10000" :step="100" size="small" class="!w-28" />
             </div>
             <div class="grid grid-cols-2 gap-2.5 px-4 py-3 border-t border-line/40">
-              <div :class="tileCls" @click="tileClick($event, 'prefetchStream')">
+              <div :class="tileCls" role="switch" :aria-checked="form.prefetchStream" tabindex="0" @click="tileClick($event, 'prefetchStream')" @keydown.space.prevent="tileKey('prefetchStream')" @keydown.enter="tileKey('prefetchStream')">
                 <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.prefetch') }}</div>
                   <div class="text-[10.5px] text-ink3">{{ t('settings.prefetchD') }}</div>
                 </div>
                 <n-switch size="small" v-model:value="form.prefetchStream" />
               </div>
-              <div :class="tileCls" @click="tileClick($event, 'keepaliveStream')">
+              <div :class="tileCls" role="switch" :aria-checked="form.keepaliveStream" tabindex="0" @click="tileClick($event, 'keepaliveStream')" @keydown.space.prevent="tileKey('keepaliveStream')" @keydown.enter="tileKey('keepaliveStream')">
                 <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.keepalive') }}</div>
                   <div class="text-[10.5px] text-ink3">{{ t('settings.keepaliveD') }}</div>
@@ -453,7 +575,7 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
           </div>
 
           <div class="flex items-baseline gap-2 px-1 pb-1.5">
-            <span class="text-[11px] font-bold text-ink3 tracking-wide">{{ t('settings.grpSoop') }}</span>
+            <span class="grp-h">{{ t('settings.grpSoop') }}</span>
             <span class="text-[10.5px] font-normal text-ink3">{{ t('settings.grpSoopD') }}</span>
           </div>
           <div class="bg-card rounded-card shadow-card overflow-hidden">
@@ -468,7 +590,7 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
               <div class="text-right shrink-0">
                 <div class="text-[12px] font-semibold text-ink1">{{ t('settings.soopChainFixed') }}</div>
                 <div v-if="soopStatus" class="text-[11px] text-ink3 mt-0.5 tabular-nums">
-                  {{ t('settings.soopRound', { ms: soopStatus.roundMs, n: soopStatus.monitored, at: soopStatus.lastRoundAt ? new Date(soopStatus.lastRoundAt).toLocaleTimeString() : '—' }) }}
+                  {{ t('settings.soopRound', { ms: soopStatus.roundMs, n: soopStatus.monitored, at: soopStatus.lastRoundAt ? roundTime(soopStatus.lastRoundAt) : '—' }) }}
                 </div>
               </div>
             </div>
@@ -497,7 +619,7 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
         <!-- 录制 -->
         <section data-sec="record" class="mb-5">
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
-            <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">{{ t('settings.record') }}</h2>
+            <h2 class="sec-h">{{ t('settings.record') }}</h2>
             <span class="text-[11px] text-ink3 ml-auto">{{ t('settings.recordDesc') }}</span>
           </div>
           <div class="bg-card rounded-card shadow-card overflow-hidden">
@@ -524,30 +646,30 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
               <n-input-number v-model:value="form.diskLimitGb" :min="0.5" :max="100" :step="0.5" size="small" class="!w-28" />
             </div>
 
-            <div class="px-4 pt-3.5 pb-1 text-[11px] font-bold text-ink3 tracking-wide border-t border-line/40">{{ t('settings.outProc') }}</div>
+            <div class="px-4 pt-3.5 pb-1 grp-h border-t border-line/40">{{ t('settings.outProc') }}</div>
             <div class="grid grid-cols-2 gap-2.5 px-4 py-3">
-              <div :class="tileCls" @click="tileClick($event, 'autoMp4')">
+              <div :class="tileCls" role="switch" :aria-checked="form.autoMp4" tabindex="0" @click="tileClick($event, 'autoMp4')" @keydown.space.prevent="tileKey('autoMp4')" @keydown.enter="tileKey('autoMp4')">
                 <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.autoMp4') }}</div>
                   <div class="text-[10.5px] text-ink3">{{ t('settings.autoMp4D') }}</div>
                 </div>
                 <n-switch size="small" v-model:value="form.autoMp4" />
               </div>
-              <div :class="tileCls" v-if="form.autoMp4" @click="tileClick($event, 'deleteTs')">
+              <div :class="tileCls" v-if="form.autoMp4" role="switch" :aria-checked="form.deleteTs" tabindex="0" @click="tileClick($event, 'deleteTs')" @keydown.space.prevent="tileKey('deleteTs')" @keydown.enter="tileKey('deleteTs')">
                 <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.deleteTs') }}</div>
                   <div class="text-[10.5px] text-ink3">{{ t('settings.deleteTsD') }}</div>
                 </div>
                 <n-switch size="small" v-model:value="form.deleteTs" />
               </div>
-              <div :class="tileCls" v-if="form.autoMp4" @click="tileClick($event, 'mergeMp4')">
+              <div :class="tileCls" v-if="form.autoMp4" role="switch" :aria-checked="form.mergeMp4" tabindex="0" @click="tileClick($event, 'mergeMp4')" @keydown.space.prevent="tileKey('mergeMp4')" @keydown.enter="tileKey('mergeMp4')">
                 <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.mergeMp4') }}</div>
                   <div class="text-[10.5px] text-ink3">{{ t('settings.mergeMp4D') }}</div>
                 </div>
                 <n-switch size="small" v-model:value="form.mergeMp4" />
               </div>
-              <div :class="tileCls" v-if="form.autoMp4 && form.mergeMp4" @click="tileClick($event, 'mergeDeleteSegments')">
+              <div :class="tileCls" v-if="form.autoMp4 && form.mergeMp4" role="switch" :aria-checked="form.mergeDeleteSegments" tabindex="0" @click="tileClick($event, 'mergeDeleteSegments')" @keydown.space.prevent="tileKey('mergeDeleteSegments')" @keydown.enter="tileKey('mergeDeleteSegments')">
                 <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.mergeDel') }}</div>
                   <div class="text-[10.5px] text-ink3">{{ t('settings.mergeDelD') }}</div>
@@ -556,29 +678,33 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
               </div>
             </div>
 
-            <div class="px-4 pt-3.5 pb-1 text-[11px] font-bold text-ink3 tracking-wide border-t border-line/40">{{ t('settings.automation') }}</div>
+            <!-- 自动化: 一块磁贴 + 按平台的开播自录默认值并排(此前磁贴独占半行、右侧留空) -->
+            <div class="px-4 pt-3.5 pb-1 grp-h border-t border-line/40">{{ t('settings.automation') }}</div>
             <div class="grid grid-cols-2 gap-2.5 px-4 py-3">
-              <div :class="tileCls" @click="tileClick($event, 'autoRetryRecord')">
+              <div :class="tileCls" role="switch" :aria-checked="form.autoRetryRecord" tabindex="0" @click="tileClick($event, 'autoRetryRecord')" @keydown.space.prevent="tileKey('autoRetryRecord')" @keydown.enter="tileKey('autoRetryRecord')">
                 <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.autoRetry') }}</div>
-                  <div class="text-[10.5px] text-ink3">{{ t('settings.autoRetryD') }}</div>
+                  <!-- 次数由 REC_RETRY_MAX 注入: 文案里镜像常量就是下一个会过期的假话(设计决策 ㉘) -->
+                  <div class="text-[10.5px] text-ink3">{{ t('settings.autoRetryD', { max: REC_RETRY_MAX }) }}</div>
                 </div>
                 <n-switch size="small" v-model:value="form.autoRetryRecord" />
               </div>
-            </div>
 
-            <!-- 开播自动录制的默认值按平台各留一档(SOOP 有 19+/限区房, 默认全开会撞进拉不到源的录制) -->
-            <div class="px-4 pt-3.5 pb-1 text-[11px] font-bold text-ink3 tracking-wide border-t border-line/40">{{ t('settings.autoRecDef') }}</div>
-            <div class="px-4 py-3 space-y-2.5">
-              <div v-for="p in PLATS" :key="p" class="flex items-center gap-3">
-                <PlatTag :platform="p" size="sm" />
-                <n-radio-group v-model:value="form.autoRecordDefault[p]" size="small">
-                  <n-radio-button :value="false">{{ t('settings.autoRecOff') }}</n-radio-button>
-                  <n-radio-button :value="true">{{ t('settings.autoRecOn') }}</n-radio-button>
-                </n-radio-group>
-                <span class="text-[11.5px] text-ink3">{{ t('settings.autoRecOver', { n: autoRecOverrides(p) }) }}</span>
+              <!-- 开播自动录制的默认值按平台各留一档(SOOP 有 19+/限区房, 默认全开会撞进拉不到源的录制) -->
+              <div class="rounded-ctl bg-fill px-3 py-2.5">
+                <div class="text-[12.5px] font-semibold text-ink1 leading-snug mb-2">{{ t('settings.autoRecDef') }}</div>
+                <div class="space-y-2">
+                  <div v-for="p in PLATS" :key="p" class="flex items-center gap-3">
+                    <PlatTag :platform="p" size="sm" />
+                    <n-radio-group v-model:value="form.autoRecordDefault[p]" size="small">
+                      <n-radio-button :value="false">{{ t('settings.autoRecOff') }}</n-radio-button>
+                      <n-radio-button :value="true">{{ t('settings.autoRecOn') }}</n-radio-button>
+                    </n-radio-group>
+                    <span class="text-[11px] text-ink3">{{ t('settings.autoRecOver', { n: autoRecOverrides(p) }) }}</span>
+                  </div>
+                  <p class="text-[10.5px] text-ink3 leading-relaxed">{{ t('settings.autoRecDefD') }}</p>
+                </div>
               </div>
-              <p class="text-[10.5px] text-ink3 leading-relaxed">{{ t('settings.autoRecDefD') }}</p>
             </div>
           </div>
         </section>
@@ -586,7 +712,7 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
         <!-- 网络 -->
         <section data-sec="network" class="mb-5">
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
-            <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">{{ t('settings.network') }}</h2>
+            <h2 class="sec-h">{{ t('settings.network') }}</h2>
             <span class="text-[11px] text-ink3 ml-auto">{{ t('settings.networkDesc') }}</span>
           </div>
           <div class="bg-card rounded-card shadow-card overflow-hidden">
@@ -595,7 +721,7 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
                 <div class="text-[13px] font-medium text-ink1">{{ t('settings.proxy') }}</div>
                 <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.proxyDesc') }}</div>
               </div>
-              <n-input v-model:value="form.proxyUrl" size="small" placeholder="http://127.0.0.1:7890" class="!w-56" clearable />
+              <n-input v-model:value="form.proxyUrl" size="small" :placeholder="PROXY_PH" class="!w-56" clearable />
             </div>
           </div>
         </section>
@@ -603,12 +729,20 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
         <!-- 通知与行为 -->
         <section data-sec="notify" class="mb-5">
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
-            <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">{{ t('settings.notify') }}</h2>
+            <h2 class="sec-h">{{ t('settings.notify') }}</h2>
+            <span class="text-[11px] text-ink3 ml-auto">{{ t('settings.notifyDesc') }}</span>
           </div>
           <div class="bg-card rounded-card shadow-card overflow-hidden">
             <!-- 通知矩阵(D4): 行 = 平台 × 事件, 列 = 系统通知 / Telegram / 声音。
                  声音列只在开播行给开关 —— 其余行挂了也没人听, 与其摆个假开关不如标「—」 -->
-            <div class="px-4 pt-3.5 pb-1 text-[11px] font-bold text-ink3 tracking-wide">{{ t('settings.nmTitle') }}</div>
+            <div class="flex items-center gap-2 px-4 pt-3.5 pb-1">
+              <span class="grp-h">{{ t('settings.nmTitle') }}</span>
+              <!-- 整块开/关: 静音全部是真实诉求(逐格点 16 下不是) -->
+              <div class="ml-auto flex items-center gap-1.5">
+                <n-button size="tiny" tertiary @click="setNotifyAll(true)">{{ t('settings.nmAllOn') }}</n-button>
+                <n-button size="tiny" tertiary @click="setNotifyAll(false)">{{ t('settings.nmAllOff') }}</n-button>
+              </div>
+            </div>
             <div class="px-4 pb-2 text-[10.5px] text-ink3 leading-relaxed">{{ t('settings.nmDesc') }}</div>
             <table class="w-full text-[12.5px] px-4 pb-2">
               <thead>
@@ -636,7 +770,7 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
               </tbody>
             </table>
             <div class="grid grid-cols-3 gap-2.5 px-4 py-3 border-t border-line/40">
-              <div :class="tileCls" @click="tileClick($event, 'closeToTray')">
+              <div :class="tileCls" role="switch" :aria-checked="form.closeToTray" tabindex="0" @click="tileClick($event, 'closeToTray')" @keydown.space.prevent="tileKey('closeToTray')" @keydown.enter="tileKey('closeToTray')">
                 <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.closeToTray') }}</div>
                   <div class="text-[10.5px] text-ink3">{{ t('settings.closeToTrayD') }}</div>
@@ -666,7 +800,7 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
                   </div>
                   <div class="min-w-0">
                     <div class="text-[11px] text-ink3 mb-1">{{ t('settings.tgProxy') }}<span class="text-ink3"> · {{ t('settings.tgProxyD') }}</span></div>
-                    <n-input v-model:value="form.tgProxy" size="small" placeholder="http://127.0.0.1:7890" clearable />
+                    <n-input v-model:value="form.tgProxy" size="small" :placeholder="PROXY_PH" clearable />
                   </div>
                 </div>
                 <div class="flex items-center gap-3 mt-3 flex-wrap">
@@ -688,7 +822,7 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
         <!-- 数据与日志 -->
         <section data-sec="storage" class="mb-5">
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
-            <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">{{ t('settings.storage') }}</h2>
+            <h2 class="sec-h">{{ t('settings.storage') }}</h2>
             <span class="text-[11px] text-ink3 ml-auto">{{ t('settings.storageDesc') }}</span>
           </div>
           <div class="bg-card rounded-card shadow-card overflow-hidden">
@@ -701,7 +835,7 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
               </div>
               <div class="rounded-ctl bg-fill px-3.5 py-3 min-w-0">
                 <div class="text-[12.5px] font-semibold text-ink1">{{ t('settings.logs') }}</div>
-                <div class="text-[11px] text-ink3 mt-1 truncate font-mono">…\data\logs\app-YYYYMMDD.log</div>
+                <div class="text-[11px] text-ink3 mt-1 truncate font-mono" :title="info?.logsDir">{{ info?.logsDir || '…' }}</div>
                 <div class="text-[10.5px] text-ink3 mt-0.5">{{ t('settings.logsMeta') }}</div>
                 <n-button size="tiny" secondary class="mt-2.5" @click="openLogsDir">{{ t('settings.openLogs') }}</n-button>
               </div>
@@ -712,14 +846,16 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
         <!-- 关于 -->
         <section data-sec="about" class="mb-5">
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
-            <h2 class="text-[13.5px] font-bold text-ink1 tracking-wide">{{ t('settings.about') }}</h2>
+            <h2 class="sec-h">{{ t('settings.about') }}</h2>
+            <span class="text-[11px] text-ink3 ml-auto">{{ t('settings.aboutDesc') }}</span>
           </div>
           <div class="rounded-card shadow-card overflow-hidden bg-card">
             <!-- 品牌横幅(头像灰度背景)。底色用应用主色阶而非 Panda 粉:
                  原则 0.2「平台色只表身份」—— 这块横幅表的是「本应用」, 用平台色会把 SODALive 读成 Panda -->
             <div class="relative overflow-hidden text-white" style="background: linear-gradient(115deg, #243a5e 0%, #2f4b7c 55%, #3a5c96 100%)">
               <img
-                src="https://github.com/Joftal.png"
+                v-if="avatarUrl"
+                :src="avatarUrl"
                 alt=""
                 class="absolute -right-4 -top-7 w-[152px] h-[152px] rounded-full opacity-20 grayscale -rotate-6 pointer-events-none select-none"
                 @error="hideBrokenImg"
@@ -736,11 +872,11 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
             <div class="grid grid-cols-2">
               <div class="px-4 py-3">
                 <div class="text-[10.5px] text-ink3">{{ t('settings.metaAuthor') }}</div>
-                <div class="text-[12.5px] font-semibold text-ink1 mt-0.5">{{ info?.author || 'Joftal' }}</div>
+                <div class="text-[12.5px] font-semibold text-ink1 mt-0.5">{{ info?.author || '…' }}</div>
               </div>
               <div class="px-4 py-3">
                 <div class="text-[10.5px] text-ink3">{{ t('settings.metaRepo') }}</div>
-                <div class="text-[12.5px] font-medium text-ink1 mt-0.5 font-mono truncate">Joftal/pd-monitor</div>
+                <div class="text-[12.5px] font-medium text-ink1 mt-0.5 font-mono truncate">{{ repoSlug || '…' }}</div>
               </div>
             </div>
             <!-- 操作 -->
@@ -776,7 +912,7 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
         <!-- 悬浮吸底操作条(sticky 于内容滚动区底部) -->
         <div class="sticky bottom-0 pt-2" style="background: linear-gradient(rgb(var(--c-page) / 0), rgb(var(--c-page) / 0.96) 35%)">
           <div class="flex items-center gap-2.5 bg-card/90 rounded-ctl px-3.5 py-[9px] shadow-[0_4px_16px_rgba(0,0,0,.06)] backdrop-blur">
-            <span class="text-[11.5px]" :class="dirty ? 'text-warnink' : 'text-ink3'">{{ dirty ? t('settings.dirtyText') : t('settings.cleanText') }}</span>
+            <span class="text-[11.5px]" :class="dirty ? 'text-warnink' : 'text-ink3'">{{ dirty ? t('settings.dirtyTextN', { n: dirtyKeys.size }) : t('settings.cleanText') }}</span>
             <div class="flex-1"></div>
             <n-button secondary :disabled="!dirty" @click="resetForm" class="!w-[128px]">{{ t('settings.discard') }}</n-button>
             <n-button type="primary" :disabled="!dirty || saving" @click="save" class="!w-[128px]">

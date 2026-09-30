@@ -404,8 +404,11 @@ export interface Toast {
 export interface AppInfo {
   version: string
   author: string
+  authorUrl: string
   repo: string
   releasesPage: string
+  /** 日志目录真值: 关于页此前把 Windows 路径样式写死在模板里(mac/linux 展示是错的) */
+  logsDir: string
 }
 
 /** 检查结果(ok=false 时 latest/url 可能为空) */
