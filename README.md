@@ -33,6 +33,20 @@ npm run verify         # 行为回归链: 8 个纯 Node 脚本(设计契约/数�
 npm run build:icon     # 由 resources/icon.ico 派生 png/icns 与托盘模板
 ```
 
+**二进制镜像**：electron 与 ffmpeg 的**安装脚本只读环境变量**（npm 11 起 `.npmrc` 里的未知键会逐条告警，npm 12 起更是不再传递给 postinstall），国内网络首次装依赖时按需带上：
+
+```bash
+# Windows PowerShell
+$env:ELECTRON_MIRROR="https://cdn.npmmirror.com/binaries/electron/"
+$env:FFMPEG_BINARIES_URL="https://cdn.npmmirror.com/binaries/ffmpeg-static"
+npm install
+
+# macOS / Linux —— 同一对变量写成行前缀
+ELECTRON_MIRROR=https://cdn.npmmirror.com/binaries/electron/ FFMPEG_BINARIES_URL=https://cdn.npmmirror.com/binaries/ffmpeg-static npm install
+```
+
+打包期不需要任何环境变量：electron 压缩包走 `electron-builder.yml` 的 `electronDownload.mirror`，nsis / winCodeSign 等工具链走 `package.json` 的 `config.electron_builder_binaries_mirror`。
+
 **CI**：`push` / `PR` 进 `main`·`dev` 自动跑 `typecheck` + `verify`（`.github/workflows/ci.yml`，纯 Node，不起 Electron）。
 
 **发版**：`Actions → Build & Release` 填版本号即可——自动把版本号写回 `package.json` 并提交（唯一版本源）、**三平台并行打包**(Windows NSIS/便携版 · macOS dmg/zip 双架构 · Linux AppImage/deb）并推送 Releases（tag: `v<版本号>`），应用内「检查更新」即读取该 tag。

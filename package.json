@@ -5,6 +5,9 @@
   "author": "Joftal",
   "private": true,
   "main": "./out/main/index.js",
+  "config": {
+    "electron_builder_binaries_mirror": "https://cdn.npmmirror.com/binaries/electron-builder-binaries/"
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",

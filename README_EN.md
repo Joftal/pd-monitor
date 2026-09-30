@@ -32,6 +32,20 @@ npm run verify         # behaviour regression chain: 8 pure-Node scripts (design
 npm run build:icon     # derive png/icns + tray template from resources/icon.ico
 ```
 
+**Binary mirrors**: the **install scripts of electron and ffmpeg only read environment variables** (since npm 11 every unknown `.npmrc` key prints a warning, and npm 12 will stop passing them to postinstall at all). On a slow link, prefix the first install with them:
+
+```bash
+# Windows PowerShell
+$env:ELECTRON_MIRROR="https://cdn.npmmirror.com/binaries/electron/"
+$env:FFMPEG_BINARIES_URL="https://cdn.npmmirror.com/binaries/ffmpeg-static"
+npm install
+
+# macOS / Linux — same two variables as a line prefix
+ELECTRON_MIRROR=https://cdn.npmmirror.com/binaries/electron/ FFMPEG_BINARIES_URL=https://cdn.npmmirror.com/binaries/ffmpeg-static npm install
+```
+
+Packaging needs no environment variables: the electron archive comes from `electronDownload.mirror` in `electron-builder.yml`, the nsis / winCodeSign toolchain from `config.electron_builder_binaries_mirror` in `package.json`.
+
 **CI**: `push` / `PR` to `main`·`dev` automatically runs `typecheck` + `verify` (`.github/workflows/ci.yml`, pure Node — no Electron launched).
 
 **Release**: run `Actions → Build & Release` with a version number — it writes the version back into `package.json` (single source of truth), packages **all three platforms in parallel** (Windows NSIS/portable · macOS dmg/zip for both arches · Linux AppImage/deb), and publishes to Releases (tag: `v<version>`); the in-app update check reads that tag.
