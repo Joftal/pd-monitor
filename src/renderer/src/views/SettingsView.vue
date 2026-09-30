@@ -222,7 +222,7 @@ function onScroll(): void {
 
 // 开关磁贴公共样式(label+desc 左, NSwitch 右; 无边框, 浅填充)
 const tileCls =
-  'flex items-center gap-2.5 rounded-xl px-3 py-2.5 cursor-pointer transition-colors bg-fill hover:bg-fillh'
+  'flex items-center gap-2.5 rounded-ctl px-3 py-2.5 cursor-pointer transition-colors bg-fill hover:bg-fillh'
 
 /** 磁贴里能被翻的布尔项。全部是 Settings 顶层 boolean, 所以一次成型而不是一堆专用 handler */
 type BoolKey =
@@ -295,7 +295,7 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
     </div>
 
     <!-- 主体: 左导航 + 右滚动区 -->
-    <div class="flex-1 min-h-0 flex px-7 gap-[22px] pb-4">
+    <div class="flex-1 min-h-0 flex px-7 gap-5 pb-4">
       <nav class="w-[200px] shrink-0 pt-0.5">
         <button
           v-for="n in navs"
@@ -329,7 +329,7 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
             <div class="grid grid-cols-2 gap-2.5 px-4 py-3">
               <button
                 type="button"
-                class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 cursor-pointer transition-colors text-left"
+                class="flex items-center gap-2.5 rounded-ctl px-3 py-2.5 cursor-pointer transition-colors text-left"
                 :class="form.theme === 'light' ? 'bg-fill' : 'hover:bg-fill'"
                 @click="applyTheme('light')"
               >
@@ -349,7 +349,7 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
               </button>
               <button
                 type="button"
-                class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 cursor-pointer transition-colors text-left"
+                class="flex items-center gap-2.5 rounded-ctl px-3 py-2.5 cursor-pointer transition-colors text-left"
                 :class="form.theme === 'dark' ? 'bg-fill' : 'hover:bg-fill'"
                 @click="applyTheme('dark')"
               >
@@ -647,7 +647,7 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
 
             <!-- Telegram 推送 -->
             <div class="px-4 pb-3.5">
-              <div class="rounded-xl bg-fill px-3.5 py-3">
+              <div class="rounded-ctl bg-fill px-3.5 py-3">
                 <div class="text-[12.5px] font-semibold text-ink1 mb-2">{{ t('settings.tgTitle') }}</div>
                 <div class="grid grid-cols-2 gap-2.5">
                   <div class="min-w-0">
@@ -693,13 +693,13 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
           </div>
           <div class="bg-card rounded-card shadow-card overflow-hidden">
             <div class="grid grid-cols-2 gap-2.5 px-4 py-3.5">
-              <div class="rounded-xl bg-fill px-3.5 py-3 min-w-0">
+              <div class="rounded-ctl bg-fill px-3.5 py-3 min-w-0">
                 <div class="text-[12.5px] font-semibold text-ink1">{{ t('settings.dataDir') }}</div>
                 <div class="text-[11px] text-ink3 mt-1 truncate font-mono" :title="dataDir">{{ dataDir || '…' }}</div>
                 <div class="text-[10.5px] text-ink3 mt-0.5">{{ t('settings.dataDirMeta') }}</div>
                 <n-button size="tiny" secondary class="mt-2.5" @click="openDataDir">{{ t('settings.openDir') }}</n-button>
               </div>
-              <div class="rounded-xl bg-fill px-3.5 py-3 min-w-0">
+              <div class="rounded-ctl bg-fill px-3.5 py-3 min-w-0">
                 <div class="text-[12.5px] font-semibold text-ink1">{{ t('settings.logs') }}</div>
                 <div class="text-[11px] text-ink3 mt-1 truncate font-mono">…\data\logs\app-YYYYMMDD.log</div>
                 <div class="text-[10.5px] text-ink3 mt-0.5">{{ t('settings.logsMeta') }}</div>
@@ -745,8 +745,11 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
             </div>
             <!-- 操作 -->
             <div class="flex items-center gap-2 px-4 py-3 flex-wrap">
+              <!-- GitHub 主页: 识别交给 GitHub 徽标本身, 承载面走令牌板(此前写死 #24292f/#0d1117 两枚
+                   十六进制, 深色主题下比卡面还亮、浅色主题下又和主按钮抢焦点, 且 D3「零原生色」查不到它)。
+                   高度锁 h-7 与同行 naive small「检查更新」同档(实测 34.35 vs 28 一眼看出不齐)。 -->
               <button
-                class="inline-flex items-center gap-1.5 px-4 py-[7px] rounded-lg bg-[#24292f] hover:bg-[#0d1117] text-white text-[12.5px] font-semibold transition-all active:scale-[0.97]"
+                class="inline-flex items-center gap-1.5 h-7 px-3 rounded-ctl bg-fill hover:bg-fillh border border-line text-ink1 text-[13px] font-semibold transition-all active:scale-[0.97]"
                 @click="openRepo"
               >
                 <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.55v-2.14c-3.2.69-3.87-1.37-3.87-1.37-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.23-1.28-5.23-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11.1 11.1 0 015.78 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.25 5.67.41.36.78 1.05.78 2.13v3.16c0 .31.21.67.8.55A11.51 11.51 0 0023.5 12C23.5 5.65 18.35.5 12 .5z"/></svg>
@@ -759,7 +762,7 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
                 <span v-if="!upd.ok" class="text-[11.5px] text-liveink">{{ upd.error || t('settings.checkFail') }}</span>
                 <template v-else-if="upd.hasUpdate">
                   <span class="badge badge-md bg-warn/[0.14] text-warnink tabular-nums">{{ t('settings.hasUpdate', { v: upd.latest }) }}</span>
-                  <n-button size="tiny" type="primary" @click="openRelease">{{ t('settings.goDownload') }}</n-button>
+                  <n-button size="small" type="primary" @click="openRelease">{{ t('settings.goDownload') }}</n-button>
                 </template>
                 <span v-else class="badge badge-md bg-ok/10 text-okink">{{ t('settings.newest') }}</span>
               </template>
@@ -772,10 +775,10 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
 
         <!-- 悬浮吸底操作条(sticky 于内容滚动区底部) -->
         <div class="sticky bottom-0 pt-2" style="background: linear-gradient(rgb(var(--c-page) / 0), rgb(var(--c-page) / 0.96) 35%)">
-          <div class="flex items-center gap-2.5 bg-card/90 rounded-xl px-3.5 py-[9px] shadow-[0_4px_16px_rgba(0,0,0,.06)] backdrop-blur">
+          <div class="flex items-center gap-2.5 bg-card/90 rounded-ctl px-3.5 py-[9px] shadow-[0_4px_16px_rgba(0,0,0,.06)] backdrop-blur">
             <span class="text-[11.5px]" :class="dirty ? 'text-warnink' : 'text-ink3'">{{ dirty ? t('settings.dirtyText') : t('settings.cleanText') }}</span>
             <div class="flex-1"></div>
-            <n-button secondary :disabled="!dirty" @click="resetForm">{{ t('settings.discard') }}</n-button>
+            <n-button secondary :disabled="!dirty" @click="resetForm" class="!w-[128px]">{{ t('settings.discard') }}</n-button>
             <n-button type="primary" :disabled="!dirty || saving" @click="save" class="!w-[128px]">
               <span class="inline-flex items-center justify-center gap-1.5"><SpinIcon v-if="saving" />{{ t('settings.saveBtn') }}</span>
             </n-button>

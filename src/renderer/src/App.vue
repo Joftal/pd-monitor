@@ -50,7 +50,8 @@ const DARK_OVERRIDES = {
     primaryColorPressed: '#6b93ce',
     primaryColorSuppl: '#7fa6e0',
     successColor: '#6cd391',
-    errorColor: '#e5484d',
+    // 深色档的在播红是 .dark --c-live(#eb575c, 压深底更亮); 沿用浅色的 #e5484d 会让同一屏两套红
+    errorColor: '#eb575c',
     warningColor: '#f2c46b',
     borderRadius: '10px',
     fontFamily:

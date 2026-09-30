@@ -128,7 +128,7 @@ async function toggleRecord(): Promise<void> {
         <slot name="hoverActions" />
         <n-tooltip trigger="hover" :delay="300"><template #trigger>
           <button
-            class="w-8 h-8 rounded-lg grid place-items-center shadow-md hover:scale-105 transition-transform"
+            class="w-8 h-8 rounded-ctl grid place-items-center shadow-md hover:scale-105 transition-transform"
             :class="m.recording ? 'bg-live text-white' : 'bg-card/95 text-liveink'"
             @click.stop="toggleRecord"
           >

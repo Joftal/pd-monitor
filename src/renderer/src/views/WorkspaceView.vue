@@ -382,10 +382,10 @@ watch(
         :class="view === v ? 'bg-brand/10 text-brand font-semibold' : 'text-ink2 hover:text-ink1 hover:bg-fill'"
         @click="setView(v)"
       >
-        <span v-if="v === 'live'" class="w-1.5 h-1.5 rounded-full" :class="viewCounts.live ? 'bg-live animate-breathe' : 'bg-deco'"></span>
+        <span v-if="v === 'live'" class="w-[7px] h-[7px] rounded-full" :class="viewCounts.live ? 'bg-live animate-breathe' : 'bg-deco'"></span>
         {{ VIEW_LABELS[v]() }}
         <span v-if="v === 'discover' && isSoop" class="badge badge-sm bg-fill text-ink3">{{ t('ws.soon') }}</span>
-        <span v-else class="text-[11px] tabular-nums" :class="view === v ? 'text-brand/80' : 'text-ink3'">{{ viewCounts[v] }}</span>
+        <span v-else class="sec-n">{{ viewCounts[v] }}</span>
       </button>
       <div class="flex-1"></div>
       <span class="text-[11px] text-deco pr-1">{{ t('ws.keyHint') }}</span>
@@ -494,7 +494,7 @@ watch(
             <span class="text-[11px] text-ink3">{{ t('ws.autoRecShort') }}</span>
             <n-switch size="small" :value="a.autoRecord" @update:value="(v: boolean) => setAuto(a, v)" />
           </div>
-          <button class="w-7 h-7 rounded-lg grid place-items-center text-ink3 hover:text-liveink hover:bg-live/10 transition-colors shrink-0" :title="t('card.unfollow')" @click="removeAnchor(a.platform, a.userId)">
+          <button class="w-7 h-7 rounded-ctl grid place-items-center text-ink3 hover:text-liveink hover:bg-live/10 transition-colors shrink-0" :title="t('card.unfollow')" @click="removeAnchor(a.platform, a.userId)">
             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
           </button>
         </div>
@@ -566,7 +566,7 @@ watch(
           <template v-else>{{ t('monitor.recognizeFail') }}</template>
         </div>
         <div class="flex justify-end gap-2 pt-1">
-          <n-button @click="showAdd = false">{{ t('monitor.cancel') }}</n-button>
+          <n-button class="!w-[88px]" @click="showAdd = false">{{ t('monitor.cancel') }}</n-button>
           <n-button type="primary" :disabled="!addParsed || addLoading" @click="addAnchor" class="!w-[88px]">
             <span class="inline-flex items-center justify-center gap-1.5"><SpinIcon v-if="addLoading" />{{ t('monitor.confirmFollow') }}</span>
           </n-button>

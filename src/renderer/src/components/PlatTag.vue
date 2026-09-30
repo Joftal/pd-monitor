@@ -19,7 +19,9 @@ const cls = computed(() => [`pt--${props.size}`, `pt--${props.surface}`, props.p
 </script>
 
 <template>
-  <span class="plat-tag" :class="cls"><i class="plat-tag__dot"></i>{{ platformName(platform) }}</span>
+  <span class="plat-tag" :class="cls">
+    <i class="pdot pdot-sm" :class="platform === 'soop' ? 'pdot-soop' : 'pdot-panda'"></i>{{ platformName(platform) }}
+  </span>
 </template>
 
 <style scoped>
@@ -33,21 +35,6 @@ const cls = computed(() => [`pt--${props.size}`, `pt--${props.surface}`, props.p
   letter-spacing: 0.01em;
   flex: none;
 }
-.plat-tag__dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex: none;
-}
-.is-panda .plat-tag__dot {
-  background: var(--plat-panda);
-  box-shadow: 0 0 0 1.5px rgba(251, 114, 153, 0.28);
-}
-.is-soop .plat-tag__dot {
-  background: var(--plat-soop-accent);
-  box-shadow: 0 0 0 1.5px rgba(255, 212, 0, 0.3);
-}
-
 .pt--md {
   height: 21px;
   padding: 0 7px;
@@ -59,10 +46,6 @@ const cls = computed(() => [`pt--${props.size}`, `pt--${props.surface}`, props.p
   font-size: 10.5px;
   border-radius: 5px;
   gap: 4px;
-}
-.pt--sm .plat-tag__dot {
-  width: 5px;
-  height: 5px;
 }
 
 /* 图片上: 墨底白字(白字压 #fb7299 只有约 2.9:1, 故底色选中性深色而非品牌色) */
@@ -83,8 +66,6 @@ const cls = computed(() => [`pt--${props.size}`, `pt--${props.surface}`, props.p
 .pt--onsurf.is-soop {
   color: var(--plat-soop-ink);
 }
-/* 浅底面: 色点的柔光环在白卡上等于没有(--c-line 只有 1.26:1), 换成 ink3 实描边(浅底 3.06:1 / 深底 4.1:1) */
-.pt--onsurf .plat-tag__dot {
-  box-shadow: 0 0 0 1px rgb(var(--c-ink3));
-}
+/* 色点的尺寸/描边环走全局 .pdot .pdot-sm(SOOP 黄压白卡 1.43:1 靠 ink3 实描边勾边),
+   本组件只负责承载面与文字墨色 */
 </style>

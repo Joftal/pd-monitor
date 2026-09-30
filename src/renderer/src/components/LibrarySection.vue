@@ -322,7 +322,7 @@ async function onMerge(task: RecHistoryItem): Promise<void> {
       <span class="text-ink3/50">·</span>
       <span>{{ t('library.ofWhich') }}</span>
       <span v-for="p in (['pandalive', 'soop'] as Platform[])" :key="p" class="flex items-center gap-1">
-        <i class="w-[7px] h-[7px] rounded-full shrink-0" :style="{ background: p === 'soop' ? 'var(--plat-soop-accent)' : 'var(--plat-panda)' }"></i>{{ platformName(p) }} {{ platCount[p] }}<span v-if="p === 'pandalive'" class="text-ink3/50">·</span>
+        <i class="pdot" :class="p === 'soop' ? 'pdot-soop' : 'pdot-panda'"></i>{{ platformName(p) }} {{ platCount[p] }}<span v-if="p === 'pandalive'" class="text-ink3/50">·</span>
       </span>
     </div>
 
@@ -390,7 +390,7 @@ async function onMerge(task: RecHistoryItem): Promise<void> {
                   class="absolute right-2 top-2 badge badge-sm text-white"
                   :class="statusBadge[h.status]?.cls || 'bg-onimg'"
                 >{{ statusBadge[h.status] ? t(statusBadge[h.status].key) : h.status }}</span>
-                <span v-if="!h.vod" class="absolute left-2 bottom-2 badge badge-sm bg-onimg text-white tnum">{{ fmtDur(h.startedAt, h.endedAt) }}</span>
+                <span v-if="!h.vod" class="absolute left-2 bottom-2 badge badge-sm bg-onimg text-white tabular-nums">{{ fmtDur(h.startedAt, h.endedAt) }}</span>
                 <!-- hover 播放罩 -->
                 <!-- hover 播放罩: 用图片承载面令牌而非裸黑 —— 35% 黑压在高亮海报上, 白色 ▶ 会掉到 3:1 以下 -->
                 <div class="absolute inset-0 grid place-items-center bg-onimg opacity-0 group-hover:opacity-100 transition-opacity">

@@ -342,7 +342,7 @@ export default {
     stChecking: 'Verifying session',
     checkingDesc: 'This page sends one verification request per service — the result refreshes automatically',
     descOkAdult: 'Full access — account is adult-verified',
-    descOkNoAdult: 'Logged in, but NOT adult-verified on pandalive; 19+ content stays locked',
+    descOkNoAdult: 'Logged in, but NOT adult-verified on PandaLive; 19+ content stays locked',
     descWarn: 'Previous login failed official verification — please log in again',
     descNone: 'Log in to unlock adult / fan-club rooms; 19+ rooms only appear on the Live page once you are',
     badgeAdult: 'Adult verified ✓',
@@ -545,6 +545,6 @@ export default {
     newest: 'Up to date',
     hasUpdate: 'New version v{v}',
     goDownload: 'Download',
-    disclaimer: 'For personal study and research only; not affiliated with pandalive. Recorded content is subject to local laws and platform terms — no commercial use or redistribution.'
+    disclaimer: 'For personal study and research only; not affiliated with PandaLive. Recorded content is subject to local laws and platform terms — no commercial use or redistribution.'
   }
 }

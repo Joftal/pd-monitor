@@ -48,7 +48,7 @@ async function setAuto(v: boolean): Promise<void> {
     <template #meta>
       <n-popover trigger="click" placement="bottom-end" :show-arrow="false">
         <template #trigger>
-          <button class="w-7 h-7 rounded-lg grid place-items-center text-ink3 hover:text-ink1 hover:bg-fill/70 transition-colors shrink-0" @click.stop>
+          <button class="w-7 h-7 rounded-ctl grid place-items-center text-ink3 hover:text-ink1 hover:bg-fill/70 transition-colors shrink-0" @click.stop>
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
           </button>
         </template>

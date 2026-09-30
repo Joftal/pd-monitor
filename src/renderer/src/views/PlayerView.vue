@@ -386,15 +386,15 @@ async function manualRefresh() {
               <span class="w-1.5 h-1.5 rounded-full bg-live animate-breathe"></span>REC
             </span>
           </div>
-          <div v-if="m3u8 && viewers" class="absolute top-3 right-3 badge badge-sm bg-onimg text-white tnum">
+          <div v-if="m3u8 && viewers" class="absolute top-3 right-3 badge badge-sm bg-onimg text-white tabular-nums">
             <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5c-5 0-9 3.5-10.5 7C3 15.5 7 19 12 19s9-3.5 10.5-7C21 8.5 17 5 12 5zm0 11.5a4.5 4.5 0 110-9 4.5 4.5 0 010 9zm0-7.5a3 3 0 100 6 3 3 0 000-6z"/></svg>
             {{ viewers }}
           </div>
           <!-- 非播放态: 加载/密码房/错误 遮罩 -->
           <div v-if="!m3u8" class="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/95">
             <template v-if="loading">
-              <n-skeleton class="!w-24 !h-3 rounded" :sharp="false" />
-              <n-skeleton class="!w-40 !h-3 rounded" :sharp="false" />
+              <n-skeleton class="!w-24 !h-3 rounded-md" :sharp="false" />
+              <n-skeleton class="!w-40 !h-3 rounded-md" :sharp="false" />
               <span class="text-[12.5px] text-white/65">{{ t('player.loading') }}</span>
             </template>
             <template v-else-if="needPw">
@@ -452,7 +452,7 @@ async function manualRefresh() {
           <!-- 清晰度直选: 选项来自房间真实 master 分档; 仅一档(单码率房/master 回退档)时无可切, 整块收起 -->
           <template v-if="levelOptions.length > 1">
             <span class="text-[11px] text-ink3">{{ t('player.quality') }}</span>
-            <div class="inline-flex bg-fill rounded-lg p-0.5 gap-px" :class="activeLine !== 0 ? 'opacity-50 pointer-events-none' : ''">
+            <div class="inline-flex bg-fill rounded-ctl p-0.5 gap-px" :class="activeLine !== 0 ? 'opacity-50 pointer-events-none' : ''">
               <button
                 v-for="opt in levelOptions"
                 :key="opt.value"
@@ -466,7 +466,7 @@ async function manualRefresh() {
           <template v-if="backups.length">
             <span class="w-px h-5 bg-line/70"></span>
             <span class="text-[11px] text-ink3">{{ t('player.line') }}</span>
-            <div class="inline-flex bg-fill rounded-lg p-0.5 gap-px">
+            <div class="inline-flex bg-fill rounded-ctl p-0.5 gap-px">
               <button
                 v-for="i in backups.length + 1"
                 :key="i"
@@ -537,10 +537,10 @@ async function manualRefresh() {
         <div class="panel">
           <div class="panel-h">
             <span class="panel-t">{{ t('player.curSource') }}</span>
-            <button class="text-[11px] text-ink3 hover:text-brand hover:bg-brand/[0.10] rounded px-1.5 py-0.5 transition-colors" @click="copyUrl">{{ t('player.copy') }}</button>
+            <button class="text-[11px] text-ink3 hover:text-brand hover:bg-brand/[0.10] rounded-md px-1.5 py-0.5 transition-colors" @click="copyUrl">{{ t('player.copy') }}</button>
           </div>
           <div class="panel-b">
-            <div class="flex items-center gap-2 bg-fill rounded-lg px-2.5 py-[7px]">
+            <div class="flex items-center gap-2 bg-fill rounded-ctl px-2.5 py-[7px]">
               <span class="flex-1 min-w-0 truncate font-mono text-[11px] text-ink2" :title="m3u8">{{ m3u8 ? shortUrl(m3u8) : t('player.noSource') }}</span>
             </div>
             <p v-if="isProxySource" class="text-[11px] text-ink3 leading-snug mt-1.5">{{ t('player.srcProxyTip') }}</p>

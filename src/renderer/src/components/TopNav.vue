@@ -145,9 +145,9 @@ const account = computed(() => {
         :title="store.newLiveCount(p.key) ? t('nav.newLiveTip', { n: store.newLiveCount(p.key), plat: p.label }) : t('nav.platTip', { plat: p.label })"
         @click="switchPlat(p.key)"
       >
-        <i class="platdot" :class="p.key === 'soop' ? 'dot-soop' : 'dot-panda'"></i>
+        <i class="pdot" :class="p.key === 'soop' ? 'pdot-soop' : 'pdot-panda'"></i>
         <span>{{ p.label }}</span>
-        <span v-if="liveCount(p.key)" class="platn tnum" :class="store.newLiveCount(p.key) ? 'is-new' : ''">{{ liveCount(p.key) }}</span>
+        <span v-if="liveCount(p.key)" class="platn tabular-nums" :class="store.newLiveCount(p.key) ? 'is-new' : ''">{{ liveCount(p.key) }}</span>
       </button>
     </div>
 
@@ -161,10 +161,7 @@ const account = computed(() => {
         @click="router.push({ name: tab.name, params: { plat } })"
       >
         {{ tab.label }}
-        <span
-          v-if="tabBadge(tab.name)"
-          class="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-live/15 text-liveink text-[11px] font-bold tnum"
-        >{{ tabBadge(tab.name) }}</span>
+        <span v-if="tabBadge(tab.name)" class="platn ml-1.5 tabular-nums">{{ tabBadge(tab.name) }}</span>
       </button>
     </nav>
 
@@ -209,7 +206,7 @@ const account = computed(() => {
             "
           >
             <span
-              class="w-2 h-2 rounded-full shrink-0"
+              class="w-[7px] h-[7px] rounded-full shrink-0"
               :class="watcherState.tone === 'bad' ? 'bg-live' : watcherState.tone === 'warn' ? 'bg-warn' : watcherState.tone === 'ok' ? 'bg-brand animate-breathe' : 'bg-ink3'"
             ></span>
             <span class="truncate">{{ watcherState.text }}</span>
@@ -311,20 +308,6 @@ const account = computed(() => {
 }
 .platbtn.is-on.is-soop {
   color: var(--plat-soop-ink);
-}
-.platdot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex: none;
-  /* 描边环: SOOP 黄压白卡只有 1.43:1, 用 ink3 勾边(浅底 3.06:1 / 深底 4.1:1) */
-  box-shadow: 0 0 0 1px rgb(var(--c-ink3));
-}
-.dot-panda {
-  background: var(--plat-panda);
-}
-.dot-soop {
-  background: var(--plat-soop-accent);
 }
 .platn {
   min-width: 17px;

@@ -51,7 +51,7 @@ function isNew(a: { platform: Platform; userId: string }): boolean {
   <!-- 0 位关注在播 → 整条收起不占位 -->
   <div v-if="items.length" class="livedock sticky top-0 z-20 flex items-center gap-3 min-h-[44px] py-1.5 px-4 rounded-ctl bg-card/95 backdrop-blur border border-line shadow-card">
     <div class="flex items-center gap-1.5 shrink-0 text-[12px] font-semibold text-ink2">
-      <span class="w-2 h-2 rounded-full bg-live animate-breathe"></span>
+      <span class="w-[7px] h-[7px] rounded-full bg-live animate-breathe"></span>
       <span>{{ t('dock.title') }}</span>
       <span class="text-liveink font-bold tabular-nums">{{ items.length }}</span>
     </div>
@@ -60,7 +60,7 @@ function isNew(a: { platform: Platform; userId: string }): boolean {
       <button
         v-for="a in shown"
         :key="roomKey(a.platform, a.userId)"
-        class="relative flex items-center gap-1.5 h-7 pl-1 pr-2.5 rounded-full bg-fill hover:bg-fillh border transition-colors"
+        class="relative flex items-center gap-1.5 h-[27px] pl-1 pr-2.5 rounded-full bg-fill hover:bg-fillh border transition-colors"
         :class="isNew(a) ? 'border-brand/40' : 'border-line'"
         @click="open(a)"
       >
@@ -72,10 +72,10 @@ function isNew(a: { platform: Platform; userId: string }): boolean {
         <span v-if="store.isRecording(a.platform, a.userId)" class="w-1.5 h-1.5 rounded-full bg-live animate-breathe shrink-0" :title="t('dock.recording')"></span>
       </button>
 
-      <button v-if="hiddenCount" class="h-7 px-2.5 rounded-full bg-fill hover:bg-fillh border border-line text-[11.5px] font-semibold text-ink2 transition-colors" @click="expanded = true">
+      <button v-if="hiddenCount" class="h-[27px] px-2.5 rounded-full bg-fill hover:bg-fillh border border-line text-[11.5px] font-semibold text-ink2 transition-colors" @click="expanded = true">
         +{{ hiddenCount }}
       </button>
-      <button v-else-if="expanded && items.length > LIMIT" class="h-7 px-2.5 rounded-full text-[11.5px] font-medium text-ink3 hover:text-ink1 transition-colors" @click="expanded = false">
+      <button v-else-if="expanded && items.length > LIMIT" class="h-[27px] px-2.5 rounded-full text-[11.5px] font-medium text-ink3 hover:text-ink1 transition-colors" @click="expanded = false">
         {{ t('dock.collapse') }}
       </button>
     </div>

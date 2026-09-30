@@ -243,7 +243,7 @@ async function clearCredentials() {
       <!-- ① 状态横幅(hero + 状态条 + 校验轨三合一; 校验轨单独一行, 窄窗口不把按钮挤掉) -->
       <div class="mt-4 bg-card rounded-card shadow-card px-[18px] py-4 flex flex-col gap-3">
         <div class="flex items-center gap-3.5">
-          <div class="w-10 h-10 rounded-xl grid place-items-center shrink-0 transition-colors" :class="status.tile">
+          <div class="w-10 h-10 rounded-ctl grid place-items-center shrink-0 transition-colors" :class="status.tile">
             <svg v-if="status.mode === 'warn'" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.6 2.9 20h18.2z"/><path stroke-linecap="round" d="M12 10v4.2M12 17.2h.01"/></svg>
             <svg v-else-if="status.mode !== 'ok'" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M6.5 12h11"/></svg>
             <svg v-else class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
@@ -252,7 +252,7 @@ async function clearCredentials() {
           </div>
           <div class="min-w-0">
             <div class="flex items-center gap-2">
-              <span class="w-2 h-2 rounded-full shrink-0" :class="status.dot"></span>
+              <span class="w-[7px] h-[7px] rounded-full shrink-0" :class="status.dot"></span>
               <span class="text-[15px] font-bold text-ink1">{{ status.title }}</span>
               <span v-if="status.mode === 'ok' && acc?.idx" class="text-[12px] text-ink3">uid {{ acc.idx }}</span>
               <span v-else-if="status.mode === 'ok' && acc?.id" class="text-[12px] text-ink3">{{ acc.id }}</span>
@@ -275,7 +275,7 @@ async function clearCredentials() {
         <div v-if="status.mode !== 'none'" class="flex items-center gap-2">
           <span v-if="lastVerifyText" class="badge badge-md bg-fill text-ink2">{{ t('account.lastVerify', { time: lastVerifyText }) }}</span>
           <span v-else class="text-[11px] text-ink3">{{ t('account.neverVerified') }}</span>
-          <n-button size="small" secondary :disabled="recheckLoading" @click="recheck" class="ml-auto !w-[104px]">
+          <n-button size="small" secondary :disabled="recheckLoading" @click="recheck" class="ml-auto !w-[112px]">
             <span class="inline-flex items-center justify-center gap-1"><SpinIcon v-if="recheckLoading" :size="12" />{{ t('account.recheck') }}</span>
           </n-button>
         </div>
@@ -333,11 +333,11 @@ async function clearCredentials() {
             </li>
             <li class="flex gap-2.5 items-start">
               <span class="w-[18px] h-[18px] rounded-full grid place-items-center text-[10.5px] font-bold text-brand bg-brand/[0.10] shrink-0 mt-px">2</span>
-              <span class="text-[12px] text-ink2 leading-relaxed">{{ t('account.mCS2a') }}<code class="bg-fill border border-line rounded px-1 text-[11px] font-mono text-brand">F12</code>{{ t('account.mCS2b') }}</span>
+              <span class="text-[12px] text-ink2 leading-relaxed">{{ t('account.mCS2a') }}<code class="bg-fill border border-line rounded-md px-1 text-[11px] font-mono text-brand">F12</code>{{ t('account.mCS2b') }}</span>
             </li>
             <li class="flex gap-2.5 items-start">
               <span class="w-[18px] h-[18px] rounded-full grid place-items-center text-[10.5px] font-bold text-brand bg-brand/[0.10] shrink-0 mt-px">3</span>
-              <span class="text-[12px] text-ink2 leading-relaxed">{{ t('account.mCS3a') }}<code class="bg-fill border border-line rounded px-1 text-[11px] font-mono text-brand">document.cookie</code>{{ t('account.mCS3b') }}</span>
+              <span class="text-[12px] text-ink2 leading-relaxed">{{ t('account.mCS3a') }}<code class="bg-fill border border-line rounded-md px-1 text-[11px] font-mono text-brand">document.cookie</code>{{ t('account.mCS3b') }}</span>
             </li>
             <li class="flex gap-2.5 items-start">
               <span class="w-[18px] h-[18px] rounded-full grid place-items-center text-[10.5px] font-bold text-brand bg-brand/[0.10] shrink-0 mt-px">4</span>
@@ -353,7 +353,7 @@ async function clearCredentials() {
             />
             <div class="flex items-center gap-2.5 mt-2.5">
               <span class="text-[11px] text-ink3">{{ isSoop ? t('account.soopImportHint') : t('account.mCHint') }}</span>
-              <n-button size="small" type="primary" :disabled="!cookieInput.trim() || importLoading" @click="importCookies" class="ml-auto !w-[104px]">
+              <n-button size="small" type="primary" :disabled="!cookieInput.trim() || importLoading" @click="importCookies" class="ml-auto !w-[112px]">
                 <span class="inline-flex items-center justify-center gap-1"><SpinIcon v-if="importLoading" :size="12" />{{ t('account.mCBtn') }}</span>
               </n-button>
             </div>

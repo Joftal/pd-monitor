@@ -28,9 +28,10 @@ function label(v: Opt): string {
   return platformName(v)
 }
 
-/** 色点承担平台身份, 与 PlatTag 同源; 浅色底给一层描边环 —— #ffd400 压白卡几乎看不见(约 1.4:1) */
-function platColor(v: Opt): string {
-  return v === 'pandalive' ? 'var(--plat-panda)' : v === 'soop' ? 'var(--plat-soop-accent)' : 'transparent'
+/** 色点承担平台身份, 与 PlatTag 同源: 尺寸与描边环走全局 .pdot(见 styles.css),
+ *  浅色底那层环是 SOOP 黄压白卡 1.43:1 的唯一补救, 不在本组件重画一遍 */
+function platDotCls(v: Opt): string {
+  return v === 'soop' ? 'pdot-soop' : 'pdot-panda'
 }
 </script>
 
@@ -43,7 +44,7 @@ function platColor(v: Opt): string {
       :class="modelValue === v ? 'is-on' : ''"
       @click="emit('update:modelValue', v)"
     >
-      <i v-if="v === 'pandalive' || v === 'soop'" class="pf__dot" :style="{ background: platColor(v) }"></i>
+      <i v-if="v === 'pandalive' || v === 'soop'" class="pdot" :class="platDotCls(v)"></i>
       <span>{{ label(v) }}</span>
       <span v-if="counts" class="pf__n">{{ counts[v] ?? 0 }}</span>
       <span v-if="states && states[v]" class="pf__state-wrap">
@@ -80,14 +81,6 @@ function platColor(v: Opt): string {
   border-color: rgb(var(--c-ink3));
   color: rgb(var(--c-ink1));
   font-weight: 700;
-}
-.pf__dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex: none;
-  /* 描边环: #ffd400 压白卡只有 1.43:1, 用 --c-line(1.26:1) 等于没描; ink3 在浅底 3.06:1、深底 4.1:1, 两主题都勾得出边 */
-  box-shadow: 0 0 0 1px rgb(var(--c-ink3));
 }
 .pf__n {
   font-size: 11px;

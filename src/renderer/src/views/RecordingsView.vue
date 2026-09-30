@@ -235,7 +235,7 @@ const savePath = computed(() => store.settings?.savePath || '')
       <!-- ② 进行中 · 大卡片 -->
       <div class="sec-bar">
         <h2 class="sec-h">
-          <span class="w-2 h-2 rounded-full bg-live" :class="active.length ? 'animate-breathe' : ''"></span>{{ t('rec.secActive') }}
+          <span class="w-[7px] h-[7px] rounded-full bg-live" :class="active.length ? 'animate-breathe' : ''"></span>{{ t('rec.secActive') }}
           <span class="sec-n">{{ active.length }}</span>
         </h2>
         <span class="w-px h-4 bg-line mx-0.5"></span>

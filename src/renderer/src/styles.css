@@ -102,7 +102,7 @@ body,
 }
 ::-webkit-scrollbar-thumb {
   background: var(--scrollbar);
-  border-radius: 8px;
+  border-radius: 999px; /* 8px 宽的滚动条: 与旧值 8px 同形, 但落在圆角档位上 */
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-hover);
@@ -150,7 +150,7 @@ body,
   bottom: 0;
   width: 0;
   height: 3px;
-  border-radius: 3px;
+  border-radius: 999px;
   background: rgb(var(--c-brand));
   transform: translateX(-50%);
   transition: width 0.18s ease;
@@ -159,10 +159,9 @@ body,
   width: 100%;
 }
 
-/* 计数/时长/码率一律走等宽数字: 每 30s 轮询刷新时列宽不抖, 整墙文字不跳 */
-.tnum {
-  font-variant-numeric: tabular-nums;
-}
+/* 计数/时长/码率一律走等宽数字: 每 30s 轮询刷新时列宽不抖, 整墙文字不跳。
+   写法只有 Tailwind 的 tabular-nums 一种 —— 这里曾另立过 .tnum 同义类,
+   两种拼法混用后「谁漏了一处」根本查不出来(设计稿 0.4 数字档)。 */
 
 /* ===== 按钮交互规范 ===== */
 /* 按压反馈: 整体居中缩放, 不做位移 */
@@ -261,19 +260,19 @@ button:disabled,
 }
 
 /* ===== 进度条(设计稿 .meter) =====
-   全场只有一种细进度条: 5px / 圆角 3 / fillh 轨道 / brand 填充(状态色不参与进度)。
+   全场只有一种细进度条: 5px / 端点全圆 / fillh 轨道 / brand 填充(状态色不参与进度)。
    宽度由内联 style 给百分比; 未知总长时不画条, 由调用方显示「—」而不是画一根 0% 的死条。 */
 .meter {
   display: block;
   height: 5px;
-  border-radius: 3px;
+  border-radius: 999px;
   background: rgb(var(--c-fillh));
   overflow: hidden;
 }
 .meter i {
   display: block;
   height: 100%;
-  border-radius: 3px;
+  border-radius: 999px;
   background: rgb(var(--c-brand));
   transition: width 0.2s linear;
 }
@@ -322,7 +321,7 @@ button:disabled,
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 22px 0 10px;
+  margin: 20px 0 10px; /* 设计稿 0.4 点名的混用: 段距 22 与 20 并存, 废 22 */
   flex-wrap: wrap;
 }
 .sec-tools {
@@ -332,6 +331,30 @@ button:disabled,
   gap: 10px;
   font-size: 11.5px;
   color: rgb(var(--c-ink3));
+}
+
+/* ===== 平台身份色点(单一规格) =====
+   同一个平台色点此前在顶栏分段(7px)、筛选 chip(6px)、徽标(5/6px + 各自的颜色描边环)、库的平台分解行
+   (7px 无描边环)各画一遍。SOOP 黄压白卡只有 1.43:1 —— 没描边环的那几处在浅色主题下几乎看不见,
+   而它承载的是「这是哪个平台」这一条信息(原则 R3: 状态要能用眼睛念出来)。
+   收成一处: 默认 7px(与卡面/控件同排), 徽标内 5px 档; 描边环恒为 ink3 ——
+   --c-line 只有 1.26:1 等于没描, ink3 在浅底 3.06:1 / 深底 4.1:1, 两主题都勾得出边。 */
+.pdot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  box-shadow: 0 0 0 1px rgb(var(--c-ink3));
+}
+.pdot-sm {
+  width: 5px;
+  height: 5px;
+}
+.pdot-panda {
+  background: var(--plat-panda);
+}
+.pdot-soop {
+  background: var(--plat-soop-accent);
 }
 
 /* ===== 筛选 chip(设计稿 .chip) =====
@@ -402,7 +425,9 @@ button:disabled,
   font-size: 11px;
 }
 
-/* 卡片标题两行截断 */.clamp-2 {
+/* 标题两行截断: 目前只有播放页大标题用(房间标题可达数十字, 单行会被截成看不懂的半句)。
+   卡片墙标题走单行 truncate —— 卡片高度要参与网格对齐, 两行会让整墙长短不齐。 */
+.clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;

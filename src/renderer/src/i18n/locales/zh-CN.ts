@@ -345,7 +345,7 @@ export default {
     stChecking: '正在校验登录态',
     checkingDesc: '本页会向两边官方接口各发一次校验请求, 结果稍后自动更新',
     descOkAdult: '账号权限完整, 含成人认证, 全部内容可用',
-    descOkNoAdult: '已登录, 但账号未完成 pandalive 成人认证, 19+ 内容仍不可用',
+    descOkNoAdult: '已登录, 但账号未完成 PandaLive 成人认证, 19+ 内容仍不可用',
     descWarn: '之前的登录未通过官方校验, 请重新登录',
     descNone: '登录后可解锁成人房 / 粉丝团等权限内容, 直播页才会显示 19+ 房间',
     badgeAdult: '成人认证 ✓',
@@ -548,6 +548,6 @@ export default {
     newest: '已是最新版本',
     hasUpdate: '发现新版本 v{v}',
     goDownload: '前往下载',
-    disclaimer: '本项目仅供个人学习研究使用, 与 pandalive 官方无任何关联; 录制内容请遵守当地法律法规与原平台条款, 勿用于任何商业用途或二次分发。'
+    disclaimer: '本项目仅供个人学习研究使用, 与 PandaLive 官方无任何关联; 录制内容请遵守当地法律法规与原平台条款, 勿用于任何商业用途或二次分发。'
   }
 }
