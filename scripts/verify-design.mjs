@@ -42,6 +42,7 @@
 //   D31 播放页返回从哪来回哪去: 读历史栈落回 ?view= / 录制页, 栈空或跨平台才兜底本平台直播页, 文案与目的地同源
 //   D32 播放页侧栏与动作行: 侧栏自带滚动且卡片 shrink-0(不被压扁裁掉尾行); 动作行按轻重分档(幽灵/描边/实心)且只锁宽度下限; 观众数一屏只报一次
 //   D33 播放页读数一处收敛: room 快照 = 关注列表 > 站内发现, 展示值 = 回包 > 快照 > 裸 ID(未关注房不得整屏「—」)
+//   D34 工作区视图分段行不常驻快捷键提示: 1/2/3 与 / 的键盘本体保留, 屏上那条 11px 灰字撤掉且双语不留死键
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -969,6 +970,25 @@ checkWithAllowlist(
   const writes = playWrites.filter((w) => pv.includes(w)).length
   assert(!/\b(title|nick|userImg|thumb|tags)\.value = r\./.test(pv) && writes === 5, 'D33e loadPlay 回包只写 play* 引用(直接覆盖展示值就会把快照挤掉, 回包是一次性的)', `回包写入 play* ${writes}/5`)
   assert(/const autoRecHere = computed\(\(\) => !!anchor\.value\?\.autoRecord\)/.test(pv), 'D33f 「开播自动录制」仍只读 anchor: 它是关注关系身上的开关, 没关注就是未开启, 不是缺失')
+}
+
+// ============================================================================
+// D34 工作区·视图分段行右侧不常驻快捷键提示 (2026-10-01 用户指令)
+//   撤下的是屏上那条常驻灰字, 不是快捷键本身: 1/2/3 切视图与 / 聚焦搜索照旧能用。
+//   提示一旦上屏就成一排分段右侧的第三条声音(分段本身 + 计数药丸 + 一句说明书),
+//   而它讲的动作不需要看见才会发生 —— 键盘是自己会敲的人用的。
+//   口径: 提示文案没有消费方就必须连 i18n 键一起删(㊀ 的「无消费方即删」), 死键会让双语 parity 看起来还在但其实没人读。
+// ============================================================================
+{
+  const wv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'WorkspaceView.vue'), 'utf8')
+  const zh = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'zh-CN.ts'), 'utf8')
+  const en = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'en-US.ts'), 'utf8')
+  const nav = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'TopNav.vue'), 'utf8')
+  assert(/function onKey\(e: KeyboardEvent\)/.test(wv) && /e\.key === '1'/.test(wv) && /getElementById\('global-search'\)/.test(wv) && /id="global-search"/.test(nav), 'D34a 快捷键本体仍在且指得到实物(1/2/3 切视图 · / 聚焦顶栏搜索)—— 撤的是提示, 不是功能')
+  const segRow = /<!-- 视图分段 -->\n\s*<div[\s\S]*?\n {4}<\/div>/.exec(wv)?.[0] ?? ''
+  assert(segRow.includes('sec-n') && segRow.includes('@click="setView(v)"'), 'D34b0 视图分段行解析面合理(分段按钮与计数都取到了)', `${segRow.length} 字节`)
+  assert(!/keyHint/.test(wv + zh + en), 'D34c 提示文案三处净空(模板 + 双语键, 无消费方即删不留死键)')
+  assert(!/flex-1/.test(segRow), 'D34d 分段行右侧不再挂东西(为一句灰字摆的撑开块一并撤, 不留空转的 flex-1)')
 }
 
 // ============================================================================
