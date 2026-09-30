@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { NEmpty, useMessage } from 'naive-ui'
 import { api } from '@/api'
 import { useAppStore } from '@/stores/app'
-import { resolveWorkspace } from '@/workspace'
 import CinemaOverlay from '@/components/CinemaOverlay.vue'
 import PlatFilter from '@/components/PlatFilter.vue'
 import PlatTag from '@/components/PlatTag.vue'
@@ -20,7 +18,6 @@ import { isPlatform, platformName, roomKey, type Platform, type RecHistoryItem }
 
 const { t, locale } = useI18n()
 const store = useAppStore()
-const router = useRouter()
 const message = useMessage()
 
 const props = defineProps<{ plat?: string }>()
@@ -65,13 +62,6 @@ const platCount = computed(() => {
   return n
 })
 const platCounts = computed(() => ({ all: totalCount.value, pandalive: platCount.value.pandalive, soop: platCount.value.soop }))
-/** 空态要给的是「下一步」, 而没设保存目录时下一步根本不在直播页 */
-const savePath = computed(() => store.settings?.savePath || '')
-/** 下一步得能点: 只看当前筛选那一方(「全部平台」时留在当前工作区), 而不是把人甩到默认页 */
-function gotoNextStep(): void {
-  if (!savePath.value) router.push({ name: 'settings' })
-  else router.push({ name: 'live', params: { plat: platFilter.value === 'all' ? resolveWorkspace() : platFilter.value } })
-}
 
 // ---- 平台口径: 地址带平台段(/:plat/recordings)即默认只看这一方, 「全部平台」仍可切回去 ----
 const platFilter = ref<'all' | Platform>(isPlatform(props.plat) ? props.plat : 'all')
@@ -329,15 +319,9 @@ async function onMerge(task: RecHistoryItem): Promise<void> {
     <!-- 一条都还没有: 页头已经有一块「暂无进行中的录制」大空态, 这里再摆一块 200px 的虚线框,
          整页就只剩两个空盒子。收成一行提示, 等真正有录像可管时再把版面还给墙。 -->
     <div v-if="!totalCount" class="flex items-center gap-2 py-5 text-[12.5px] text-ink3 border-t border-line/60">
+      <!-- 只报这一条事实: 去向说明与跳转链接都撤了 —— 页头右上角已经有「打开保存目录」「录制设置」
+           「去直播页」三枚, 这一行再挂一枚链接就是同屏第二个入口, 反而要人判断该点哪个 -->
       <span class="text-ink2 font-semibold">{{ t('library.empty') }}</span>
-      <span class="text-ink3/50">·</span>
-      <!-- 没设保存目录时录像是落不了盘的, 这句才是真正的原因; 设了目录才提「去哪开录」 -->
-      <!-- 原因说在这一句里, 下一步交给末尾那枚链接: 把「先到录制设置里选一个」写进句子,
-           用户读到了却没有任何可点的东西 —— 空态的下一步必须是动作, 不是地址描述 -->
-      <span>{{ savePath ? t('library.emptyGoLive') : t('library.emptyNoDir') }}</span>
-      <button class="text-brand font-medium hover:underline" @click="gotoNextStep">
-        {{ savePath ? t('rec.qLive') : t('rec.qSettings') }} ›
-      </button>
     </div>
     <template v-else>
       <div v-if="groups.length" class="flex gap-4 items-start">

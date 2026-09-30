@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron'
+import * as fs from 'fs'
 import * as path from 'path'
 import {
   CH, EV, AccountState, AccountStates, Anchor, AppInfo, DEFAULT_PLATFORM, FollowImportResult, isPlatform, isRoomId, parseRoomInput, Platform, PlayInfo, Settings, SoopAccountState, UpdateCheckResult
@@ -549,16 +550,25 @@ export function registerIpc(): void {
       path.resolve(dataDir())
     ])
     for (const h of store.listHistory()) if (h.dirPath) roots.add(path.resolve(h.dirPath))
-    const ok = [...roots].some((root) => {
+    const allowed = [...roots].some((root) => {
       const rel = path.relative(root, resolved)
       return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
     })
-    if (ok) {
-      await shell.openPath(resolved)
-    } else {
+    if (!allowed) {
       logger.warn('ipc', `打开目录被白名单拒绝: ${resolved}`)
+      return false
     }
-    return ok
+    // 白名单过关不等于目录存在: 默认录制根只在第一次开录时才建, 用户也可能手动删过。
+    // shell.openPath 对不存在的路径只回一个错误串、界面毫无动静, 于是「点了没反应」= 原缺陷。
+    try {
+      await fs.promises.mkdir(resolved, { recursive: true })
+    } catch (e) {
+      logger.warn('ipc', `创建录制目录失败: ${resolved} ${(e as Error).message}`)
+      return false
+    }
+    const openErr = await shell.openPath(resolved)
+    if (openErr) logger.warn('ipc', `打开目录失败: ${resolved} ${openErr}`)
+    return !openErr
   })
 
   ipcMain.handle(CH.recThumb, (_e, taskId: string) => ({ ok: true, url: thumbs.ensure(String(taskId)).url }))

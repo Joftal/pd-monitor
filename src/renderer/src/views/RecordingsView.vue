@@ -87,10 +87,9 @@ const diskCaption = computed(() => {
 })
 const splitMin = computed(() => Math.round((store.settings?.splitSeconds ?? 900) / 60))
 // 分段时长只作用于直播管线(VOD 是单 TS 直出, recorder.ts 的 spawn 两条分支写死的),
-// 全是回放时还挂「分段 N 分钟/段」就是假信息; 磁盘闸门两边都要落盘, 所以始终保留
-const secCaption = computed(() =>
-  active.value.some((task) => !task.vod) ? `${t('rec.segInfo', { min: splitMin.value })} · ${diskCaption.value}` : diskCaption.value
-)
+// 全是回放时还挂「分段 N 分钟/段」就是假信息 → 这一栏留空, 由模板收掉分隔线。
+// 磁盘状态不在这里复读: 概览条第三格已经给了 GB 数, 低于阈值另有页头告警枚
+const secCaption = computed(() => (active.value.some((task) => !task.vod) ? t('rec.segInfo', { min: splitMin.value }) : ''))
 
 // ---- VOD 进度 ----
 function vodTotalLabel(task: RecTask): string {
@@ -137,7 +136,8 @@ async function stop(task: RecTask) {
   message.success(t('rec.stopped'))
 }
 async function openFolder(dir: string) {
-  await api.recOpenFolder(dir)
+  // 静默失败等于「按钮坏了」: 主进程只在目录真的打开后才回 true, false 要说出来
+  if (!(await api.recOpenFolder(dir))) message.error(t('rec.openDirFail'))
 }
 
 // ---- 监控总览(页头三件事之一) ----
@@ -230,9 +230,11 @@ const savePath = computed(() => store.settings?.savePath || '')
           <!-- 快捷入口: 这一页不能挑房间开录, 但必须能一步够到直播页/落盘目录/录制参数 -->
           <div class="flex items-center gap-2">
             <n-button size="small" tertiary @click="router.push({ name: 'live', params: { plat: qPlat } })">{{ t('rec.qLive') }}</n-button>
-            <!-- 没设目录时这一枚不去"打开"一个不存在的路径, 而是把人带去能设它的地方: 禁用按钮是死路, 不是提示 -->
-            <n-button size="small" tertiary @click="savePath ? openFolder(savePath) : router.push({ name: 'settings' })">{{ t('rec.openSaveDir') }}</n-button>
-            <n-button size="small" tertiary @click="router.push({ name: 'settings' })">{{ t('rec.qSettings') }}</n-button>
+            <!-- 空 savePath 不等于「没有保存目录」: 录制一律落默认录制根, 这一枚就开那个根
+                 (主进程按同一口径解析并补建目录)。原来这里把它当成"没设"跳去设置页, 用户点的是
+                 「打开保存目录」却被甩到别处 —— 改目录的入口是旁边那枚「录制设置」 -->
+            <n-button size="small" tertiary @click="openFolder(savePath)">{{ t('rec.openSaveDir') }}</n-button>
+            <n-button size="small" tertiary @click="router.push({ name: 'settings', query: { sec: 'record' } })">{{ t('rec.qSettings') }}</n-button>
           </div>
         </div>
       </div>
@@ -243,8 +245,8 @@ const savePath = computed(() => store.settings?.savePath || '')
           <span class="w-[7px] h-[7px] rounded-full bg-live" :class="active.length ? 'animate-breathe' : ''"></span>{{ t('rec.secActive') }}
           <span class="sec-n">{{ active.length }}</span>
         </h2>
-        <span class="w-px h-4 bg-line mx-0.5"></span>
-        <span class="sec-tools">{{ secCaption }}</span>
+        <span v-if="secCaption" class="w-px h-4 bg-line mx-0.5"></span>
+        <span v-if="secCaption" class="sec-tools">{{ secCaption }}</span>
       </div>
 
       <div v-if="active.length" class="space-y-3.5">
@@ -350,11 +352,8 @@ const savePath = computed(() => store.settings?.savePath || '')
       <div v-else class="flex-1 min-h-[200px] rounded-card border border-dashed border-line pt-12 grid items-start justify-center bg-card/40">
         <n-empty :description="t('rec.emptyActive')" size="small" class="text-ink3">
           <template #extra>
-            <!-- 空态的下一步要能点: 原来这里只有一句「到直播页点 ⏺」的文字描述, 动作本身在页头另一侧 -->
-            <div class="flex flex-col items-center gap-2">
-              <span class="text-[11.5px] text-ink3">{{ t('rec.emptyActiveHint') }}</span>
-              <n-button size="small" secondary @click="router.push({ name: 'live', params: { plat: qPlat } })">{{ t('rec.qLive') }}</n-button>
-            </div>
+            <!-- 只给指引, 不再放第二枚「去直播页」: 页头右上角那枚是同屏唯一的同类入口, 两处并存是重复布线 -->
+            <span class="text-[11.5px] text-ink3">{{ t('rec.emptyActiveHint') }}</span>
           </template>
         </n-empty>
       </div>

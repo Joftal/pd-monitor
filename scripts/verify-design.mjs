@@ -425,7 +425,7 @@ const ph = (s) => [...String(s).matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().
   const lib = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'LibrarySection.vue'), 'utf8')
   assert(/v-if="totalCount" class="sec-bar"/.test(lib), 'D14e 库为 0 条时段条(五枚 chip + 平台 + 分组 + 搜索)整条不出现')
   assert(!/emptyFilter[^"]*\?:|:. *t\('library\.emptyFilter'/.test(lib), 'D14f emptyFilter 不再被三元当全局空态用')
-  assert(/t\('library\.emptyNoDir'\)/.test(lib) && /t\('library\.emptyGoLive'\)/.test(lib), 'D14g 库空态按「有没有保存目录」给两种下一步')
+  assert(!/emptyNoDir|emptyGoLive/.test(lib), 'D14g 库空态收成一句事实(去向入口在录制页页头, 不再按有没有目录给两种下一步)')
 }
 
 // ============================================================================
@@ -466,14 +466,15 @@ const ph = (s) => [...String(s).matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().
   const dock = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'LiveDock.vue'), 'utf8')
   assert(!/onLiveView/.test(dock) && !/onLiveView/.test(ws), 'D15m2 onLiveView 已删: 收起后「全部在播」永远往别处跳, 无需自我指向开关')
 
-  // ㉗ 空态的下一步必须是动作: 只写「到某某页去做」而手上没有可点的东西, 等于把动作推回给用户记
-  assert(/<template #extra>[\s\S]{0,420}<n-button[^>]*@click="router\.push\(\{ name: 'live'/.test(rec), 'D15n 录制页「进行中」空态带可点的下一步按钮')
+  // ㉗′(2026-09-30 订正) 同一屏的同类入口只留一处: 录制页的快捷入口是页头右上角那一排
+  //    (去直播页 / 打开保存目录 / 录制设置)。空态里再挂一枚同去向的按钮, 让人先判断该点哪个。
+  assert(!/<template #extra>[\s\S]{0,300}<n-button/.test(rec), 'D15n 「进行中」空态不挂按钮, 只留指引句(去直播页由页头给)')
   const libsec = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'LibrarySection.vue'), 'utf8')
-  assert(/function gotoNextStep\(\): void/.test(libsec) && /@click="gotoNextStep"/.test(libsec), 'D15n2 库空态行的下一步是可点链接(无目录跳设置, 有目录跳直播)')
+  assert(!/gotoNextStep/.test(libsec), 'D15n2 库空态行只剩一句事实, 末尾链接撤掉(页头已有录制设置)')
   const zh = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'zh-CN.ts'), 'utf8')
   assert(
-    !/emptyActiveHint: '到「直播」页/.test(zh) && !/emptyGoLive: '到「直播」页/.test(zh) && !/emptyNoDir:[^\n]*先到「录制设置」/.test(zh),
-    'D15n3 空态文案不再重复按钮/链接里已经写明的去向'
+    !/emptyGoLive:/.test(zh) && !/emptyNoDir:/.test(zh) && !/emptyActiveHint: '到「直播」页/.test(zh),
+    'D15n3 空态的去向说明文案键已删(链接没了, 句子也不必再报地址)'
   )
 
   // ㉘ 空槽要长满剩余视口: 数据为零时页面下半截是裸页面底, 与「坏了」只隔一层边框

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, toRaw, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { NButton, NInput, NInputNumber, NSwitch, useMessage } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api'
@@ -17,6 +17,7 @@ const PROXY_PH = 'http://127.0.0.1:7890'
 
 const store = useAppStore()
 const router = useRouter()
+const route = useRoute()
 const message = useMessage()
 const form = ref<Settings | null>(null)
 /** 进页快照。脏判定跟这份比, 不跟 store.settings 比 —— 后者会被别的写入方(账号页、
@@ -333,6 +334,18 @@ function scrollToSec(key: NavKey): void {
     ?.querySelector(`[data-sec="${key}"]`)
     ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
+
+/** 深链落位(?sec=record): 录制页那枚按钮写着「录制设置」, 把人放到设置页第一屏(外观)就是没兑现。
+ *  挂载即滚不可靠 —— 整页在 v-if="form" 里, settings 未到则容器还不存在, 所以挂在 scrollRef 上 */
+watch(
+  () => scrollRef.value,
+  (el) => {
+    const sec = String(route.query.sec ?? '') as NavKey
+    if (!el || !navs.value.some((n) => n.key === sec)) return
+    scrollToSec(sec)
+  },
+  { immediate: true }
+)
 
 function onScroll(): void {
   const box = scrollRef.value
