@@ -27,11 +27,12 @@ const following = computed(() => store.isFollowing(platform, userId))
 const loading = ref(true)
 const errorMsg = ref('')
 const m3u8 = ref('')
-const title = ref('')
-const nick = ref(anchor.value?.nick || userId)
-const userImg = ref(anchor.value?.userImg || '')
-const thumb = ref(anchor.value?.thumbUrl || '')
-const tags = ref<AnchorTag | null>(anchor.value?.tags || null)
+/** loadPlay 的回包: 一次性, 只有取源成功那一次会说话 */
+const playTitle = ref('')
+const playNick = ref('')
+const playUserImg = ref('')
+const playThumb = ref('')
+const playTags = ref<AnchorTag | null>(null)
 const needPw = ref(false)
 /** 该房要登录态(SOOP 的 19+/限区房): 给"去登录"入口, 不能当成未开播 */
 const needLogin = ref(false)
@@ -48,7 +49,35 @@ const fetchedAt = ref(0) // 当前源包(主线分档+备用线路)在主进程�
 const recording = computed(() => store.isRecording(platform, userId))
 // 「站内发现」数据源只覆盖 pandalive 房间(SOOP 无全站列表接口)
 const discoveryItem = computed(() => (platform === 'pandalive' ? store.discovery.find((d) => d.userId === userId) : undefined))
-const viewers = computed(() => anchor.value?.viewerCount || discoveryItem.value?.viewers || 0)
+
+/** 这一房的「已知事实」快照: 关注列表优先, 其次站内发现 —— 两者都是主进程每轮轮询整包推下来的,
+ *  所以这条链天然随轮询刷新。站内发现进来的房大多没被关注, 那时 anchor 根本不存在 ——
+ *  此前身份与数值只认 anchor, 于是快照里明摆着的昵称/封面/19+/点赞/粉丝被渲染成裸 ID 与「—」
+ *  (实机 znvely00: 快照 likes 2652 / fans 5681, 侧栏两行「—」)。 */
+const room = computed(() => {
+  const a = anchor.value
+  const d = discoveryItem.value
+  return {
+    nick: a?.nick || d?.nick || '',
+    userImg: a?.userImg || d?.userImg || '',
+    thumb: a?.thumbUrl || d?.thumbUrl || '',
+    title: a?.title || d?.title || '',
+    startTime: a?.startTime || d?.startTime || '',
+    viewers: a?.viewerCount || d?.viewers || 0,
+    likes: a?.likes || d?.likes || 0,
+    fans: a?.fans || d?.fans || 0,
+    tags: (a?.tags || (d ? { isAdult: d.isAdult, isPw: d.isPw, type: d.type, liveType: d.liveType } : null)) as AnchorTag | null
+  }
+})
+
+/** 展示值 = 回包(取源成功那一次亲口说的) > 轮询快照 > 裸 ID。
+ *  回包优先是既有口径不动它; 补的是后两级 —— 源失效/密码房取不到源时, 屏幕上不该连这是谁的房都不知道 */
+const title = computed(() => playTitle.value || room.value.title)
+const nick = computed(() => playNick.value || room.value.nick || userId)
+const userImg = computed(() => playUserImg.value || room.value.userImg)
+const thumb = computed(() => playThumb.value || room.value.thumb)
+const tags = computed(() => playTags.value || room.value.tags)
+const viewers = computed(() => room.value.viewers)
 
 const isVod = computed(() => tags.value?.liveType === 'rec')
 
@@ -67,7 +96,8 @@ const labelList = computed(() => {
   if (g.liveType === 'rec') out.push(t('account.tagRec'))
   return out.join(' · ')
 })
-/** 点赞/粉丝只有 Panda 的关注列表回传; SOOP 侧官方不给 → 写「不适用 + 原因」, 不许填 0(3.2) */
+/** 点赞/粉丝: 关注列表与站内发现快照都回传(Panda), 两处都没有才写「—」;
+ *  SOOP 侧官方不给 → 写「不适用 + 原因」, 不许填 0(3.2) */
 function numOrNa(v: number | undefined): string {
   if (isSoop) return t('player.naSoop')
   return v ? String(v) : '—'
@@ -99,11 +129,11 @@ const levelOptions = computed(() =>
   })
 )
 
-/** 开播时长(来自关注卡 / 站内发现快照的 startTime; utils.fmtLiveDuration 收敛) */
-const liveDuration = computed(() => fmtLiveDuration(anchor.value?.startTime || discoveryItem.value?.startTime, t))
+/** 开播时长(来自 room 快照的 startTime; utils.fmtLiveDuration 收敛) */
+const liveDuration = computed(() => fmtLiveDuration(room.value.startTime, t))
 
 const sinceText = computed(() => {
-  const st = anchor.value?.startTime || discoveryItem.value?.startTime
+  const st = room.value.startTime
   if (!st) return ''
   // startTime 为 KST(UTC+9)钟面: 转本地时间再显示, 裸切片会把韩国钟点当本地时刻(差 1 小时)
   const d = new Date(st.replace(' ', 'T') + '+09:00')
@@ -170,11 +200,11 @@ async function loadPlay(password = '', forceFresh = false): Promise<boolean> {
   const qi = Math.min(quality.value, Math.max(0, variants.value.length - 1))
   const newUrl = variants.value[qi]?.url || r.m3u8 || ''
   if (newUrl && newUrl !== m3u8.value) m3u8.value = newUrl
-  if (r.title) title.value = r.title
-  if (r.nick) nick.value = r.nick
-  if (r.thumbUrl) thumb.value = r.thumbUrl
-  if (r.userImg) userImg.value = r.userImg
-  if (r.tags) tags.value = r.tags
+  if (r.title) playTitle.value = r.title
+  if (r.nick) playNick.value = r.nick
+  if (r.thumbUrl) playThumb.value = r.thumbUrl
+  if (r.userImg) playUserImg.value = r.userImg
+  if (r.tags) playTags.value = r.tags
   if (r.fetchedAt) fetchedAt.value = r.fetchedAt
   loading.value = false
   return true
@@ -538,11 +568,11 @@ async function manualRefresh() {
             </div>
             <div class="kv">
               <span class="kv-k">{{ t('player.likes') }}</span>
-              <span class="kv-v" :class="isSoop ? 'text-ink3' : 'text-ink1'">{{ numOrNa(anchor?.likes) }}</span>
+              <span class="kv-v" :class="isSoop ? 'text-ink3' : 'text-ink1'">{{ numOrNa(room.likes) }}</span>
             </div>
             <div class="kv">
               <span class="kv-k">{{ t('player.fans') }}</span>
-              <span class="kv-v" :class="isSoop ? 'text-ink3' : 'text-ink1'">{{ numOrNa(anchor?.fans) }}</span>
+              <span class="kv-v" :class="isSoop ? 'text-ink3' : 'text-ink1'">{{ numOrNa(room.fans) }}</span>
             </div>
             <!-- 刷新节奏写在卡尾: 这一栏是轮询读数不是实时推流, 不说清楚就会被当秒级数据读 -->
             <p class="text-[10.5px] text-ink3 mt-1.5">{{ t('player.roomPollNote', { sec: pollSec }) }}</p>
