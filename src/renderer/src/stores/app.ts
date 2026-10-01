@@ -91,8 +91,9 @@ export const useAppStore = defineStore('app', {
     accounts: null,
     searchKeyword: '',
     addDraft: '',
-    // 在播默认「最新开播」(人气只有部分采集路径给得出), 发现默认「人气最高」(全站列表的老口径), 离线默认「未播最久」
-    views: { live: newFilter('recent', 20), discover: newFilter('viewers', 20), offline: newFilter('stale', 40) },
+    // 在播/发现两视图的默认档 = 各自筛子栏的第一格(2026-10-01 用户指令把在播默认也换成「人气最高」):
+    // 冷启动第一眼的排序和左手第一格是同一件事, 不让人对不上号。离线那视图刻意例外(默认「未播最久」是管理视角)。
+    views: { live: newFilter('viewers', 20), discover: newFilter('viewers', 20), offline: newFilter('stale', 40) },
     newLive: [],
     anchorsSeeded: false,
     srcCache: []
