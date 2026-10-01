@@ -39,7 +39,8 @@ const fakeFetch = async (url, init = {}) => {
   return { status: 200, text: async () => '#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2.0,\ns1.ts\n', headers: { getSetCookie: () => [] } }
 }
 
-const db = { anchors: [], settings: { keepaliveStream: true, prefetchStream: true } }
+// ㊍ prefetchStream 已进 monitor: 顶层那一格现在是未注册键, 引擎读不到 ⇒ 重铸路径会被静默跳过(假快)
+const db = { anchors: [], settings: { keepaliveStream: true, monitor: { pandalive: { pollIntervalSec: 30, requestGapMs: 300, prefetchStream: true }, soop: { pollIntervalSec: 30, requestGapMs: 300, prefetchStream: true } } } }
 const store = {
   listAnchors: () => db.anchors,
   getSettings: () => db.settings,

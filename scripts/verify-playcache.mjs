@@ -12,6 +12,7 @@
 //   T6  回归: per-anchor 模式下任意开播 — onLiveStart 必须触发(原被吞 bug)
 //   T24 双平台隔离: SOOP 关注只走 SOOP 链路(替身模块), 不污染 Panda 请求/计数/熔断,
 //       也不被 Panda 冷却/风控连坐 —— 详见该段断言清单
+//   T26 ㊍ 监控配置分家: 预取/轮询间隔各按平台那一格 —— 邻居的开关与熔断都带不走本平台
 // ============================================================================
 import { createRequire } from 'module'
 import * as fs from 'fs'
@@ -109,17 +110,24 @@ const store = {
   setSettings: (p) => { db.settings = { ...db.settings, ...p }; return db.settings },
   flush() {}, listHistory: () => db.history, addHistory() {}
 }
-const DEFAULT_SETTINGS = {
+// 每场一份: monitor 是嵌套对象, 浅拷 {...x} 只拷最外层, 场景里写 db.settings.monitor.pandalive.xxx
+// 会写穿模板本身, 下一场就"继承"上一场的开关(㊍ 分家后 monitor 由标量三格变成一个子对象, 这条必须改)
+const mkSettings = () => ({
   savePath: '', splitSeconds: 900, autoMp4: true, deleteTs: false,
-  pollIntervalSec: 3600, // 防止 round finally 的 schedule 在测试窗口内自跑
-  requestGapMs: 300, proxyUrl: '', watchMode: 'list',
+  // ㊍ 节奏三格已按平台分家, 顶层不再有 pollIntervalSec/requestGapMs/prefetchStream(留 3600s 是为了
+  // 让 runRound finally 的 schedule 在测试窗口内不自跑 —— 两平台各一格都要压住)
+  monitor: {
+    pandalive: { pollIntervalSec: 3600, requestGapMs: 300, prefetchStream: true },
+    soop: { pollIntervalSec: 3600, requestGapMs: 300, prefetchStream: true }
+  },
+  proxyUrl: '', watchMode: 'list',
   notifySystem: false, notifySound: false, autoRecordDefault: false,
-  closeToTray: false, diskLimitGb: 1, prefetchStream: true, keepaliveStream: false,
+  closeToTray: false, diskLimitGb: 1, keepaliveStream: false,
   mergeMp4: false, mergeDeleteSegments: true, autoRetryRecord: false,
   tgLive: false, tgOffline: false, tgRecord: false, tgError: false,
   tgChatId: '', tgProxy: '', tgTokenSet: false,
   theme: 'light', locale: 'zh-CN'
-}
+})
 
 const mocks = {
   electron: {
@@ -229,17 +237,27 @@ const waitUntil = async (fn, ms = 1500) => { for (let i = 0; i < ms / 50; i++) {
 async function reset() {
   // 先断开间隙泵/预取泵的后续轮扫 + 等上一场在飞请求落完, 再清计数 —— 否则残留 bj/play/soop 调用污染下一场断言
   watcher.idleQueue = []
-  watcher.prewarmQueue = []
-  await waitUntil(() => !watcher.idlePumping && !watcher.prewarmPumping && !watcher.roundInFlight, 4000)
+  // 预取队列/泵各平台一条(㊍): 清场要两平台各自清空, 不能整体换成数组(读端按平台索引)
+  for (const p of ['pandalive', 'soop']) {
+    watcher.prewarmQueue[p] = []
+    watcher.prewarmPumping[p] = false
+  }
+  await waitUntil(() => !watcher.idlePumping && !watcher.loop.pandalive.inFlight && !watcher.loop.soop.inFlight, 4000)
   // 熔断/冷却状态一并复位(跨场景隔离; pump/round 的熔断语义由 T9/T13 负责触发与观察)
   watcher.errorStreak = 0
   watcher.cooldownUntil = 0
   watcher.soopFailStreak = 0
-  watcher.lastSoopRoundAt = 0 // SOOP 冷却期节流闸门复位(否则 T24 冷却场景被上一轮的时戳挡住)
   watcher.status.circuitOpen = false
   watcher.status.message = ''
+  // 合并读数是 push() 从 byPlatform 现算的(㊍ 熔断账本已按平台分家): 只清顶层那两格会被下一轮覆盖回去
+  for (const p of ['pandalive', 'soop']) {
+    watcher.status.byPlatform[p].circuitOpen = false
+    watcher.status.byPlatform[p].message = ''
+    watcher.status.byPlatform[p].roundFailed = 0
+    watcher.loop[p].roundCnt = 0
+  }
   db.anchors = []
-  db.settings = { ...DEFAULT_SETTINGS }
+  db.settings = mkSettings()
   world.inList = {}; world.bjMedia = {}; world.bj403 = {}; world.bjThrow = {}; world.bjNotFound = {}; world.latency = { liveMs: 0, bjMs: {} }
   world.soopMeta = {}; world.soopThrow = {}; world.soopCalls.length = 0
   watcher.bjGone?.clear?.() // 查无此人内存集跨场景复位(T23)
@@ -248,7 +266,14 @@ async function reset() {
   api.clearPlayCache()
   watcher.running = true // 绕过 start() 的 schedule; round 由脚本手动驱动
 }
-const round = () => watcher.round() // 直接驱动 Watcher 内部轮次(TS private 于 JS 运行时不存在)
+// ㊍ 两套独立定时器: 旧的 watcher.round() 一条链跑两平台已作废。脚本的 round() 保持"两平台各一轮"
+// 的旧语义(无 SOOP 关注时 roundSoopTop 零请求, 不会污染 Panda 场景的请求计数), 需要单独惊动一个
+// 平台的场景用 roundOne(p)。TS private 于 JS 运行时不存在, 所以能直接驱动 runRound。
+const roundOne = (p) => watcher.runRound(p)
+const round = async () => {
+  await roundOne('pandalive')
+  await roundOne('soop')
+}
 
 // ============================================================================
 console.log('\n■ T1 主命题: A 已关注+列表可见+持续在播, 大厅轮询刷新后源缓存必须仍命中')
@@ -364,8 +389,8 @@ world.bjMedia = { ccc: liveItem({ userId: 'ccc', userNick: 'C酱', title: '500�
 
 console.log('\n■ T8 场景: 轮询间隔 300s + 8 个离线关注(第 7 个开播) — 间隙兜底泵发现延迟与间隔脱钩')
 await reset()
-db.settings.pollIntervalSec = 300 // 长间隔: 旧 rotate 方案下最坏 ⌈8/3⌉×300s = 900s 才发现
-db.settings.requestGapMs = 300    // 限速下限(setGap min 300): 泵节奏 ≈300ms/请求
+db.settings.monitor.pandalive.pollIntervalSec = 300 // 长间隔: 旧 rotate 方案下最坏 ⌈8/3⌉×300s = 900s 才发现
+db.settings.monitor.pandalive.requestGapMs = 300    // 限速下限(setGap min 300): 泵节奏 ≈300ms/请求
 const ids = Array.from({ length: 8 }, (_, i) => `t${i + 1}`)
 db.anchors = ids.map((id) => mkAnchor(id, { isLive: false }))
 world.inList = {}
@@ -414,7 +439,7 @@ console.log('\n■ T15 熔断闭环(承接 T9): 冷却压制 → 过期恢复 �
   check('T15-4 上轮断档的 f3 已被间隙泵补扫', got)
 }
 
-console.log('\n■ T10 让路: round 进行中间隙泵不得消费(roundInFlight 检查)')
+console.log('\n■ T10 让路: round 进行中间隙泵不得消费(loop.pandalive.inFlight 检查)')
 await reset()
 db.anchors = ['g1', 'g2'].map((id) => mkAnchor(id, { isLive: false }))
 world.inList = {}
@@ -423,7 +448,7 @@ world.inList = {}
   world.latency.bjMs = { g1: 2500 }
   await sleep(900)                    // 泵的 bj(g1) 正在飞
   world.latency.liveMs = 4500         // round2 主体持续 ~4.5s, 覆盖 bj(g1) 落地窗口
-  const p2 = round()                  // round2 开始: roundInFlight=true
+  const p2 = round()                  // round2 开始: loop.pandalive.inFlight=true
   // bj(g1) 落地后泵应 break; round2 结束后 pumpIdle 才把 g2 发出
   const got = await waitUntil(() => world.bjCalls.some((c) => c.userId === 'g2'), 20000)
   await p2
@@ -466,7 +491,7 @@ world.inList = { z1: true, z2: true } // 双主播同轮开播 → prewarmQueue=
 {
   await round() // 两个 onLiveStart: 预取泵启动, shift z1 拉源后进入 ~1.2s 节流 sleep
   store.removeAnchor('pandalive', 'z2') // 节流窗口内取关 z2(尚未被 shift)
-  await waitUntil(() => !watcher.prewarmPumping && !watcher.idlePumping, 6000)
+  await waitUntil(() => !watcher.prewarmPumping.pandalive && !watcher.prewarmPumping.soop && !watcher.idlePumping, 6000)
   const pulled = new Set(world.playCalls.map((c) => c.userId))
   check('T11-5 z1(在监控)预取已完成', pulled.has('z1'))
   check('T11-6 z2(节流窗口内取关)未再拉源', !pulled.has('z2'), [...pulled].join(','))
@@ -764,6 +789,45 @@ world.soopMeta = { s24: { broadNo: 999, living: true, hostName: 'S主播', roomN
   check('T25-4 Panda 一律不回写房态(每轮由列表原值维护, 两处写=两套真值)', t3 === null && db.anchors[0].tags.isAdult === true && db.anchors[0].tags.type === 'fan')
 }
 
+// ============ T26 ㊍ 监控配置按平台分家: 预取与轮询间隔各走自己那一格 ============
+console.log('\n■ T26 分家实证: 关掉邻居那一格不得带走本平台; Panda 熔断只压自己那条时间轴')
+await reset()
+db.anchors = [mkAnchor('p26', { isLive: false }), mkAnchor('s26', { platform: 'soop', isLive: false })]
+db.settings.monitor.pandalive.prefetchStream = false // 只关 Panda 那一格
+world.inList = { p26: true }
+world.soopMeta = { s26: { living: true, broadNo: 1, hostName: 'S26酱' } }
+{
+  await round()
+  check('T26-1 Panda 预取关: 开播通知照发但不拉源(事件链路不被开关带走)',
+    world.toasts.some((x) => x.type === 'live' && x.platform === 'pandalive') && playCount('p26') === 0)
+  const prewarmSoop = await waitUntil(() => world.soopCalls.includes('getPlayCached:s26'), 3000)
+  check('T26-2 同轮开播的 SOOP 房照旧预取(邻居说"不要秒开"无权代它决定)', prewarmSoop && db.anchors[1].isLive === true)
+}
+// 反向: 只关 SOOP 的预取
+await reset()
+db.anchors = [mkAnchor('p26b', { isLive: false }), mkAnchor('s26b', { platform: 'soop', isLive: false })]
+db.settings.monitor.soop.prefetchStream = false
+world.inList = { p26b: true }
+world.soopMeta = { s26b: { living: true, broadNo: 2, hostName: 'S26b酱' } }
+{
+  await round()
+  const prewarmPanda = await waitUntil(() => playCount('p26b') > 0, 3000)
+  check('T26-3 只关 SOOP: Panda 侧秒开不受影响', prewarmPanda)
+  check('T26-4 SOOP 自己不拉源, 但开播状态照常翻转(开关只关预取, 不关监控)',
+    world.soopCalls.filter((c) => c === 'getPlayCached:s26b').length === 0 && db.anchors[1].isLive === true)
+}
+{
+  db.settings.monitor.pandalive.pollIntervalSec = 120
+  db.settings.monitor.soop.pollIntervalSec = 45
+  check('T26-5 下一轮等多久 = 各自那一格', watcher.intervalFor('pandalive') === 120_000 && watcher.intervalFor('soop') === 45_000)
+  watcher.status.byPlatform.pandalive.circuitOpen = true
+  check('T26-6 Panda 熔断只压自己(旧实现同一条 timer, 这一压会把 SOOP 一起拖到 30s)',
+    watcher.intervalFor('pandalive') === 30_000 && watcher.intervalFor('soop') === 45_000)
+  watcher.status.byPlatform.pandalive.circuitOpen = false
+  db.settings.monitor.soop.pollIntervalSec = 0 // 手改库写出 0: 定时器不得每毫秒发一轮
+  check('T26-7 间隔下限只防坏数据, 不改变正常值', watcher.intervalFor('soop') === 1_000)
+}
+
 console.log('解读: T1/T2/T3 PASS ⇒ 「大厅轮询刷新会清源缓存」不成立(真实源码+可计数请求实证);')
 console.log('      T4 PASS ⇒ 列表内开播翻转的作废链路正常工作(对照);')
 console.log('      T17 PASS ⇒ 粉丝房 fanLive 专用通知+自录正常; T18 PASS ⇒ 下播 toast 单发, 重复判离线不重复;')
@@ -773,10 +837,11 @@ console.log('      T7 PASS ⇒ 开播时 500 名外: 兜底通道能完整拿到
 console.log('      T8 PASS ⇒ 方案A间隙泵: 发现延迟 ≈ N×gap(秒~分钟级), 与轮询间隔(30s/300s)完全脱钩;')
 console.log('      T9/T13 PASS ⇒ 泵失败语义: RiskError 立即熔断停扫, 普通错误即停不熔断, 下轮新快照恢复;')
 console.log('      T15 PASS ⇒ 熔断闭环: 冷却零请求压制 → 过期恢复熔断复位 → 断档者补扫;')
-console.log('      T10 PASS ⇒ 让路语义: round 进行中泵不消费(roundInFlight), 轮后才继续;')
+console.log('      T10 PASS ⇒ 让路语义: round 进行中泵不消费(loop.pandalive.inFlight), 轮后才继续;')
 console.log('      T11 PASS ⇒ 取关守卫: 快照内取关者不发请求, 飞行窗口开播事件不落(无幽灵 toast/自录), 预取队列残留同挡;')
 console.log('      T12 PASS ⇒ 模式切换: per-anchor 分支清 idleQueue, 泵无重复职责;')
 console.log('      T14 PASS ⇒ urgent 回归: 列表外在播主播仍轮内每轮全查, 不被泵重复;')
 console.log('      T16 PASS ⇒ 大厅/关注一份请求两用: 列表可见关注零增量, 全轮请求数恒等于 页数+urgent+rest.')
 console.log('      T25 PASS ⇒ 取源回写按字段合并: 这一路观察不到的 isAdult 不再被写成 false(19+ 旗不被抹掉), 观察得到的 isPw 照写.')
+console.log('      T26 PASS ⇒ ㊍ 监控分家: 预取开关只关本平台那格的秒开, 轮询间隔各按自己那一格, Panda 熔断只压自己那条时间轴.')
 process.exit(failures === 0 ? 0 : 1)

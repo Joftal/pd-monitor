@@ -6,13 +6,13 @@
 // 场景:
 //   A1  老库全局开关 → 矩阵逐格展开(一条不多一条不少, 老用户不该被默认值改行为)
 //   A2  老库关掉系统通知 → 矩阵系统列全 false(不被 DEFAULT 的 true 复活)
-//   A3  老库缺 tg* 键 → 回落值与 DEFAULT_SETTINGS 完全一致
+//   A3  老库缺 tg* 键 → 回落值与 DEFAULT_SETTINGS 完全一致; 三个全局节奏键展开成两平台各一格(㊍)
 //   A4  老库 autoRecordDefault 是单布尔 → 铺到两平台
-//   A5  迁移后落盘: 六个死键必须消失
+//   A5  迁移后落盘: 九个死键必须消失
 //   A6  全新安装(无 settings 段) → 与 DEFAULT_SETTINGS.notify 同构
-//   A7  新库只写半格 → 缺格回落"本事件默认", 绝不拿另一平台的值串台
+//   A7  新库只写半格 → 缺格回落"本事件默认", 绝不拿另一平台的值串台(通知矩阵与节奏矩阵同规约)
 //   A8  setSettings 提交半格矩阵 → 未提交的格保留(浅合并会整块抹掉)
-//   A9  setSettings 提交半格 autoRecordDefault → 另一平台保留
+//   A9  setSettings 提交半格 autoRecordDefault / monitor → 另一平台保留
 //   B1  系统通知列按平台独立
 //   B2  事件行独立(同一平台的开播关、下播开)
 //   B3  声音列只在开播行, 其余行必 silent
@@ -124,10 +124,29 @@ const legacyFull = {
 }
 
 {
-  const { store } = storeWith({ anchors: [], history: [], settings: { pollIntervalSec: 42 } })
+  const { store } = storeWith({ anchors: [], history: [], settings: { pollIntervalSec: 42, requestGapMs: 900, prefetchStream: false } })
   const s = store.getSettings()
   same(s.notify, DEFAULT_SETTINGS.notify, 'A3 老库连 tg* 都没有 → 回落值与 DEFAULT_SETTINGS.notify 逐格相同')
-  assert(s.pollIntervalSec === 42, 'A3 迁移不吃掉其它老字段')
+  // ㊍: 三个老的全局节奏键不再是"留在原地的老字段", 它们展开成两平台各一格 —— 一条不多一条不少
+  same(s.monitor.pandalive, { pollIntervalSec: 42, requestGapMs: 900, prefetchStream: false }, 'A3 老库的三个节奏键铺进 Panda 那一格(逐键取值, 不吃默认)')
+  same(s.monitor.soop, { pollIntervalSec: 42, requestGapMs: 900, prefetchStream: false }, 'A3 老库只有一份节奏: SOOP 继承同一个值, 不凭空提速也不凭空变慢')
+  assert(!('pollIntervalSec' in s) && !('requestGapMs' in s) && !('prefetchStream' in s), 'A3 顶层那三格随展开消失(留着就是设置的第二份真相, 且 setSettings 的浅合并会永远带着它们)')
+}
+
+{
+  // 新库半格节奏(㊍): 只写 SOOP 的一格, 缺的格回落【本平台】默认, 另一平台整块不动
+  const { store } = storeWith({ anchors: [], history: [], settings: { monitor: { soop: { pollIntervalSec: 15 } } } })
+  const s = store.getSettings()
+  assert(s.monitor.soop.pollIntervalSec === 15, 'A7b 半格节奏: 提交的那格照落')
+  same(s.monitor.soop, { ...DEFAULT_SETTINGS.monitor.soop, pollIntervalSec: 15 }, 'A7b 缺的格回落本平台默认(不拿 Panda 的值串台)')
+  same(s.monitor.pandalive, DEFAULT_SETTINGS.monitor.pandalive, 'A7b 未提交的平台保持默认(不被半格传染)')
+}
+
+{
+  const { store } = storeWith({ anchors: [], history: [], settings: { monitor: { twitch: { pollIntervalSec: 7 }, soop: { pollIntervalSec: 15 } } } })
+  const s = store.getSettings()
+  assert(s.monitor.soop.pollIntervalSec === 15, 'A7c 未注册平台不连坐: 同批提交的合法平台照落')
+  assert(!('twitch' in s.monitor), 'A7c 未注册平台不落库(库里多一个平台键=设置的第二份真相)')
 }
 
 {
@@ -140,11 +159,12 @@ const legacyFull = {
 
 {
   const { store, file } = storeWith(legacyFull)
-  store.setSettings({ pollIntervalSec: 55 })
+  store.setSettings({ monitor: { pandalive: { pollIntervalSec: 55 } } })
   const onDisk = JSON.parse(fs.readFileSync(file, 'utf-8'))
-  const dead = ['notifySystem', 'notifySound', 'tgLive', 'tgOffline', 'tgRecord', 'tgError'].filter((k) => k in onDisk.settings)
-  assert(dead.length === 0, 'A5 落盘后六个死键全部消失(不再被读却永久留在库里 = 设置文件的第二份真相)', dead.join(','))
+  const dead = ['notifySystem', 'notifySound', 'tgLive', 'tgOffline', 'tgRecord', 'tgError', 'pollIntervalSec', 'requestGapMs', 'prefetchStream'].filter((k) => k in onDisk.settings)
+  assert(dead.length === 0, 'A5 落盘后九个死键全部消失(不再被读却永久留在库里 = 设置文件的第二份真相)', dead.join(','))
   assert(onDisk.settings.notify?.soop?.offline?.telegram === false, 'A5 落盘的是展开后的矩阵本体')
+  assert(onDisk.settings.monitor.pandalive.pollIntervalSec === 55 && onDisk.settings.monitor.soop.pollIntervalSec === 30, 'A5 节奏按平台落盘: 提交的格生效, 另一平台仍是展开出来的老值(㊍)')
 }
 
 {
@@ -169,6 +189,13 @@ const legacyFull = {
     'A8 半格提交不抹掉未提交的格(浅合并会把整张表换成这半格)')
   const auto = store.setSettings({ autoRecordDefault: { pandalive: false } }).autoRecordDefault
   same(auto, { pandalive: false, soop: true }, 'A9 半格 autoRecordDefault 只改本平台')
+  // ㊍: 节奏矩阵同规约 —— 提交半格(只给 SOOP 的一格)不许把 Panda 那一格换成默认
+  store.setSettings({ monitor: { pandalive: { pollIntervalSec: 90, requestGapMs: 3000, prefetchStream: false } } })
+  const mBefore = JSON.parse(JSON.stringify(store.getSettings().monitor))
+  const mAfter = store.setSettings({ monitor: { soop: { pollIntervalSec: 20 } } }).monitor
+  assert(mAfter.soop.pollIntervalSec === 20, 'A9b 半格节奏提交生效')
+  same(mAfter.pandalive, mBefore.pandalive, 'A9b 只交 SOOP 的一格时 Panda 整格原样保住(浅合并会把另一平台换成默认)')
+  same(mAfter.soop, { ...mBefore.soop, pollIntervalSec: 20 }, 'A9b 同一平台未提交的格也保住(半格≠整格覆写)')
 }
 
 console.log('\n===== B 三路门禁: 平台 × 事件 × 通道 =====\n')
@@ -343,7 +370,7 @@ console.log('\n===== C 锚点读库补齐: SOOP 的旧 19+ 残留(㊌) =====\n')
 
 console.log('\n' + '─'.repeat(72))
 console.log(`通过 ${PASS} / 失败 ${FAIL}`)
-console.log('解读: A 组 ⇒ 老库升级后通知行为逐格不变(迁移不是重置), 半格提交不抹掉未提交的格;')
+console.log('解读: A 组 ⇒ 老库升级后通知行为与监控节奏逐格不变(迁移不是重置), 半格提交不抹掉未提交的格;')
 console.log('      B 组 ⇒ 系统通知/推送/提示音三路由「平台 × 事件」两个轴独立决定, 应用内气泡永不受管制.')
 console.log('      C 组 ⇒ 读库补齐只认 soop 的旧 19+ 残留(它已不是房间属性), 正当真值与 null 形状一律不动.')
 process.exit(FAIL === 0 ? 0 : 1)

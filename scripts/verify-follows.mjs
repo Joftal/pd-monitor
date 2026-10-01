@@ -130,7 +130,15 @@ const fakeSession = {
 }
 
 const baseStore = {
-  getSettings: () => ({ ...types.DEFAULT_SETTINGS, prefetchStream: false, requestGapMs: 0, pollIntervalSec: 120 }),
+  // ㊍ 节奏三格已进 monitor: 顶层那几格现在是未注册键(引擎读不到), 预取关不掉就会在同步关注时多发拉源请求
+  getSettings: () => {
+    const s = { ...types.DEFAULT_SETTINGS }
+    s.monitor = {
+      pandalive: { ...s.monitor.pandalive, prefetchStream: false, requestGapMs: 0, pollIntervalSec: 120 },
+      soop: { ...s.monitor.soop, prefetchStream: false, requestGapMs: 0, pollIntervalSec: 120 }
+    }
+    return s
+  },
   listAnchors: () => world.anchors,
   addAnchor: (a) => {
     if (!world.anchors.find((x) => x.platform === a.platform && x.userId === a.userId)) world.anchors.push(a)

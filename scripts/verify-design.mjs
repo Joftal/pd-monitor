@@ -53,6 +53,7 @@
 //   D42 取源回写按字段合并: 这一路看不到的 isAdult 不许写 false(19+ 旗不被抹掉), 看得到的 isPw 照写; Panda 不回收
 //   D43 播放源卡的两个出口各复制各的: 「复制」给屏上那串(本机正在用的), 「复制真实源」从代理地址的 url= 解出官方清单(零请求), 只在真是代理地址时出现; 提示语只归因不警告
 //   D44 SOOP 不带房间级 19+ 标记(㊌): is_adult 全链路不读、applySoopRow 不继承它、已离线房的旧 true 在读库时收敛; 密码房旗仍是三态 + ?? 合并; 下播只清场次属性; Panda 的 19+ 三处消费端都还在
+//   D45 监控节奏三格按平台分家(㊍): 契约只有 Settings.monitor 一份, 老库那三格展开成两格后顶层删净, 闸门逐平台逐格夹, 引擎两条独立定时器(Panda 熔断只压自己那条), 三格住在各自平台节且全局「监控」节连死键一起撤
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -379,8 +380,10 @@ const ph = (s) => [...String(s).matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().
   assert(bad.length === 0, 'D12 设置页每块可点瓷片都挂了点击行为(tileCls 含 cursor-pointer+hover)', bad.slice(0, 10).join('\n         '))
   const src = fs.readFileSync(f, 'utf8')
   assert(/function tileClick\(/.test(src), 'D12b 瓷片点击开关的处理函数存在')
+  assert(/function monTileClick\(/.test(src), 'D12b2 按平台分家的预取瓷片有自己的开关(㊍ 它写的不是顶层布尔)')
   const nTiles = (src.match(/:class="tileCls"/g) || []).length
-  const nClicks = (src.match(/@click="tileClick\(/g) || []).length
+  // 瓷片开关两种: 全局布尔走 tileClick, monitor.<平台>.prefetchStream 走 monTileClick(㊍)
+  const nClicks = (src.match(/@click="(tileClick|monTileClick)\(/g) || []).length
   assert(nTiles === nClicks && nTiles > 0, 'D12c 瓷片数 == 绑定数', `${nTiles} 瓷片 / ${nClicks} 绑定`)
 }
 
@@ -1280,6 +1283,133 @@ checkWithAllowlist(
       'D44g Panda 的 19+ 仍由它自己的列表维护(watcher 的两处 !! 读值): 读库收敛只认 soop, 不许把 pandalive 的正当真值一并擦掉'
     )
   }
+}
+
+// ============================================================================
+// D45 监控配置按平台分家 (2026-10-01 用户指令「现在是 2 个平台公用的, 我要改成 2 个平台独立, 自己用自己的」)
+//   当轮四条决策: ①只拆节奏三格(pollIntervalSec / requestGapMs / prefetchStream), proxyUrl 与 autoRetryRecord 明确不拆;
+//   ②三格搬进各自平台节, 全局「监控」节随之撤销(只剩 defaultWorkspace 一格, 那一节已是空壳, 并入外观);
+//   ③引擎两套独立定时器(用户否掉了"一条时间轴 + 到期判定"的省事方案);
+//   ④SOOP 节里「源保活 / 备用线路 · 官方无对应机制」先不动, 保持只报不改。
+//   规定落在六层: 契约(矩阵取代三标量) → 迁移(老库一格铺成两格、顶层旧键删净) → 闸门(逐平台逐格夹) →
+//   引擎(两条 timer + 两条预取队列, Panda 熔断只压自己那条时间轴) → 消费端(ipc/启动/读数一律带平台) → 界面与文案。
+//   动态面: verify-playcache T26(预取与间隔互不带走、熔断只压自己) + verify-settings A6h/A7d/A16c~A16i/B5b/B5c + verify-notify A3/A5/A7b/A7c/A9b。
+// ============================================================================
+{
+  const ty = fs.readFileSync(R('src', 'shared', 'types.ts'), 'utf8')
+  const st = fs.readFileSync(R('src', 'main', 'services', 'store.ts'), 'utf8')
+  const sg = fs.readFileSync(R('src', 'main', 'services', 'settingsGuard.ts'), 'utf8')
+  const wa = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
+  const ip = fs.readFileSync(R('src', 'main', 'ipc.ts'), 'utf8')
+  const mi = fs.readFileSync(R('src', 'main', 'index.ts'), 'utf8')
+  const pl = fs.readFileSync(R('src', 'preload', 'index.ts'), 'utf8')
+  const sv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'SettingsView.vue'), 'utf8')
+  const tn = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'TopNav.vue'), 'utf8')
+  const wv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'WorkspaceView.vue'), 'utf8')
+  const pv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'PlayerView.vue'), 'utf8')
+  const zh = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'zh-CN.ts'), 'utf8')
+  const en = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'en-US.ts'), 'utf8')
+
+  const setIface = (ty.match(/export interface Settings \{[\s\S]*?\n\}/) || [''])[0]
+  assert(
+    setIface !== '' && /monitor: MonitorMatrix/.test(setIface) && !/^  (pollIntervalSec|requestGapMs|prefetchStream):/m.test(setIface),
+    'D45a 契约只有一份真值: Settings 里那一格是矩阵, 顶层三个标量不许复活(留着就有"到底改哪个"的第二份真相)',
+    setIface.slice(0, 60)
+  )
+  const monIface = (ty.match(/export interface MonitorRules \{[\s\S]*?\n\}/) || [''])[0]
+  assert(
+    monIface !== '' && /pollIntervalSec/.test(monIface) && /requestGapMs/.test(monIface) && /prefetchStream/.test(monIface),
+    'D45b MonitorRules 三格齐 —— 拆的就是这一套节奏'
+  )
+  assert(!/proxyUrl|autoRetryRecord/.test(monIface), 'D45b2 范围守住: proxyUrl / autoRetryRecord 没混进矩阵(决策①明确不拆它们)')
+  const defMon = (ty.match(/  monitor: \{\r?\n    pandalive:[\s\S]*?\r?\n    soop:[\s\S]*?\r?\n  \}/) || [''])[0]
+  assert(
+    /pandalive: \{ pollIntervalSec: 30, requestGapMs: 1200, prefetchStream: true \}/.test(defMon) &&
+      /soop: \{ pollIntervalSec: 30, requestGapMs: 1200, prefetchStream: true \}/.test(defMon),
+    'D45c 两平台默认同值 = 老库那一格铺开后的样子: 全新安装与升级安装不许行为不同(没改过设置的用户不该被换节奏)'
+  )
+  const mig = (st.match(/function migrateSettings[\s\S]*?\n\}/) || [''])[0]
+  assert(
+    mig !== '' && /legacyMon/.test(mig) && /r\.pollIntervalSec/.test(mig) && /r\.requestGapMs/.test(mig) && /r\.prefetchStream/.test(mig) && /toMonitorRules\(mm\.soop,[\s\S]{0,80}legacyMon/.test(mig),
+    'D45d 老库那三格各铺进两平台同值(迁移不是重置: 只把"这一格归谁"说清楚)',
+    mig.slice(0, 60)
+  )
+  const delLoop = (mig.match(/for \(const k of \[[\s\S]*?\]\)[\s\S]*?delete [^\n]*/) || [''])[0]
+  assert(
+    delLoop !== '' && ['pollIntervalSec', 'requestGapMs', 'prefetchStream'].every((k) => delLoop.includes(`'${k}'`)),
+    'D45e 顶层旧键与九个死键在同一处删净: setSettings 是浅合并, 死键留在对象上就会永久回写 db.json',
+    delLoop.slice(0, 60)
+  )
+  assert(
+    /function mergeMonitor\(base: MonitorMatrix, inc: unknown\)/.test(st) && /monitor: mergeMonitor\(db\.settings\.monitor, patch\.monitor\)/.test(st),
+    'D45f 写侧半格提交先与现值逐格兜底: 只交 SOOP 那一格不许把 Panda 整格写掉'
+  )
+  const numRange = (sg.match(/const NUM_RANGE[^=]*= \{[\s\S]*?\n\}/) || [''])[0]
+  assert(
+    numRange !== '' && !/pollIntervalSec|requestGapMs|prefetchStream/.test(numRange),
+    'D45g 顶层数值表不再认识这三键(留着=给未注册键做夹紧, 还与矩阵那套两套口径)',
+    numRange.slice(0, 60)
+  )
+  const monRange = (sg.match(/const MONITOR_RANGE[^=]*= \{[\s\S]*?\n\}/) || [''])[0]
+  assert(/pollIntervalSec: \[5, 600\]/.test(monRange) && /requestGapMs: \[300, 10000\]/.test(monRange), 'D45h 矩阵内的数值区间逐格登记(与设置页控件同口径)')
+  assert(/key === 'monitor'/.test(sg) && /function sanitizeMonitor/.test(sg), 'D45i 闸门认识 monitor 这一格: 未注册平台与拼错格名都要出声, 不是静默丢掉')
+
+  assert(/private loop: Record<Platform, Loop> = \{ pandalive: newLoop\(\), soop: newLoop\(\) \}/.test(wa), 'D45j 决策③落地: 每平台自己的定时器/在飞标志/上次发车时刻/轮次计数')
+  assert(!/this\.lastSoopRoundAt/.test(wa) && !/private timer: NodeJS/.test(wa), 'D45k 那条共用的时间轴与它给 SOOP 单设的节流闸门一并作废(字段留着就是假装有分家)')
+  const ivf = (wa.match(/private intervalFor\(platform: Platform\): number \{[\s\S]*?\n  \}/) || [''])[0]
+  assert(
+    ivf !== '' && /platform === 'pandalive' && this\.status\.byPlatform\.pandalive\.circuitOpen/.test(ivf) && /monitor\[platform\]\.pollIntervalSec/.test(ivf) && /Math\.max\(1,/.test(ivf),
+    'D45l 熔断的 30s 只压 Panda 自己那条(SOOP 不陪着提速), 间隔来自各自那一格, 1s 下限只防手改库写出 0'
+  )
+  assert(/private prewarmQueue: Record<Platform, string\[\]>/.test(wa) && /private prewarmPumping: Record<Platform, boolean>/.test(wa), 'D45m 预取队列与泵各平台一条: 共用版里 Panda 熔断的 length=0 会把排在队里的 SOOP 房一起丢掉')
+  assert(/cfg\.monitor\[a\.platform\]\.prefetchStream/.test(wa), 'D45n 开播是否预取源, 看本平台那一格')
+  assert(/this\.loop\.pandalive\.inFlight\) break/.test(wa), 'D45o 间隙泵让路看的是 Panda 自己那条时间轴(SOOP 在飞与它无关)')
+
+  assert(/cfg\.monitor\[a\.platform\]\.prefetchStream\) watcher\.prewarmNow\(a\.platform/.test(mi), 'D45p 启动自热也按平台取格并只喂自己那条队列')
+  assert(
+    /watcher\.tick\(isPlatform\(platform\) \? platform : undefined\)/.test(ip) && /anchorsRefresh, \(_e, platform: Platform\)/.test(ip),
+    'D45q 工作区「立即刷新」只惊动所在平台那一条, 不为另一个平台多发一轮(平台不认识才退回首轮语义)'
+  )
+  assert(/JSON\.stringify\(before\.monitor\[p\]\) !== JSON\.stringify\(cfg\.monitor\[p\]\)\) nudge\.add\(p\)/.test(ip), 'D45r 设置保存后逐平台比对那一条, 只惊动真的改了的那条时间轴')
+  assert(/anchorsRefresh: \(platform\?: Platform\)/.test(pl), 'D45s preload 桥带上可选平台参数(不传=两平台各一轮的旧语义)')
+
+  assert(!/key: 'monitor'/.test(sv) && !/data-sec="monitor"/.test(sv) && !/\|\s*'monitor'/.test(sv), 'D45t 决策②: 导航项与全局「监控」节一起撤销(那一节已只剩 defaultWorkspace 一格, 空壳节并入外观)')
+  assert(
+    ['pandalive', 'soop'].every((p) => new RegExp(`form\\.monitor\\.${p}\\.(pollIntervalSec|requestGapMs|prefetchStream)`).test(sv)) &&
+      (sv.match(/form\.monitor\.pandalive\./g) || []).length >= 3 &&
+      (sv.match(/form\.monitor\.soop\./g) || []).length >= 3,
+    'D45u 三格在两个平台节里各绑各的, 且两平台都是满三格(少一格就是又一处"只改一半")'
+  )
+  assert(!/form\.(pollIntervalSec|requestGapMs|prefetchStream)\b/.test(sv), 'D45v 界面里不许再出现顶层节奏的读法')
+  const secOf = (name) => {
+    const i = sv.indexOf(`<section data-sec="${name}"`)
+    if (i < 0) return ''
+    const j = sv.indexOf('</section>', i)
+    return sv.slice(i, j < 0 ? sv.length : j)
+  }
+  const pandaSec = secOf('panda')
+  const soopSec = secOf('soop')
+  assert(
+    pandaSec !== '' &&
+      /form\.monitor\.pandalive\.(pollIntervalSec|requestGapMs|prefetchStream)/.test(pandaSec) &&
+      !/form\.monitor\.soop\./.test(pandaSec) &&
+      soopSec !== '' &&
+      /form\.monitor\.soop\.(pollIntervalSec|requestGapMs|prefetchStream)/.test(soopSec) &&
+      !/form\.monitor\.pandalive\./.test(soopSec),
+    'D45v2 每块平台节只绑自己那一格: 绑串了=在 SOOP 页上调间隔写进 Panda 那一格, 三格看着各就各位, 值的归属却错了'
+  )
+  assert(/monitor: \{ pandalive: clampMonitor\(f\.monitor\.pandalive\), soop: clampMonitor\(f\.monitor\.soop\) \}/.test(sv), 'D45w 提交载荷恒带两平台整格(半格=另一平台被浅合并写掉)')
+  assert(
+    /monitor\?\.\[plat\.value\]\?\.pollIntervalSec/.test(tn) && /monitor\?\.\[plat\.value\]\?\.pollIntervalSec/.test(wv) && /monitor\?\.\[platform\]\?\.pollIntervalSec/.test(pv),
+    'D45x 三处轮询读数(顶栏 / 工作区分段 / 播放页)各读自己平台那一格 —— 共用时 SOOP 页报的是 Panda 的节奏'
+  )
+  assert(!/navMonitor|monitorDesc/.test(zh) && !/navMonitor|monitorDesc/.test(en) && !/^\s{4}monitor:/m.test(zh) && !/^\s{4}monitor:/m.test(en), 'D45y 节撤销后死键跟着死: navMonitor / settings.monitor / monitorDesc 双语都不留(有消费端时 D10 会查取词, 无人取词的键只能靠这一条)')
+  assert(!/^\s*(pollSecDesc|gapMsDesc):/m.test(zh) && !/^\s*(pollSecDesc|gapMsDesc):/m.test(en), 'D45z 没有后缀的那两句必须随分家变成两套(留一句"通用说明"就是替另一个平台说话)')
+  assert(['pollSecDescPanda', 'pollSecDescSoop', 'gapMsDescPanda', 'gapMsDescSoop'].every((k) => zh.includes(k) && en.includes(k)), 'D45za 四句分平台文案双语齐(D9 只保证键集合相等, 这一条保证真的各写各的事)')
+  assert(
+    /soopNa:/.test(zh) && /soopNa:/.test(en) && /t\('settings\.soopNa'\)/.test(sv),
+    'D45zb 决策④的口径原样保留: SOOP 那一节仍只报不改(官方无对应机制), 分家这一刀没顺手把它做成假开关'
+  )
 }
 
 // ============================================================================

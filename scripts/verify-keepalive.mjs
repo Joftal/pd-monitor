@@ -111,9 +111,14 @@ const store = {
 }
 db.settings = {
   savePath: '', splitSeconds: 900, autoMp4: true, deleteTs: false,
-  pollIntervalSec: 30, requestGapMs: 300, proxyUrl: '', watchMode: 'list',
+  // ㊍ 节奏三格按平台分家: 保活泵读的是 monitor.pandalive.prefetchStream(它只养 pandalive 的源)
+  monitor: {
+    pandalive: { pollIntervalSec: 30, requestGapMs: 300, prefetchStream: true },
+    soop: { pollIntervalSec: 30, requestGapMs: 300, prefetchStream: true }
+  },
+  proxyUrl: '', watchMode: 'list',
   notifySystem: false, notifySound: false, autoRecordDefault: false,
-  closeToTray: false, diskLimitGb: 1, prefetchStream: true, keepaliveStream: true,
+  closeToTray: false, diskLimitGb: 1, keepaliveStream: true,
   mergeMp4: false, mergeDeleteSegments: true, autoRetryRecord: false,
   theme: 'light', locale: 'zh-CN'
 }

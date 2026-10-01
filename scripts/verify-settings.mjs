@@ -85,6 +85,10 @@ const { DEFAULT_SETTINGS } = types
 const { sanitizeSettingsPatch } = loadTs('src/main/services/settingsGuard.ts')
 const { store } = loadTs('src/main/services/store.ts')
 
+/** 监控节奏的补丁写法(㊍): 三格住在 monitor[平台] 里, 提交必须带平台壳 ——
+ *  测试里若还写顶层 pollIntervalSec, 那本身就是一次"闸门该不该拒收"的考题, 不该混进场景里 */
+const mon = (p, over) => ({ monitor: { [p]: { ...DEFAULT_SETTINGS.monitor[p], ...over } } })
+
 /** 闸门判定: 返回收下的补丁与逐键拒收原因(未收的键取值给 MISSING) */
 const MISSING = Symbol('missing')
 function gate(patch) {
@@ -114,16 +118,16 @@ console.log('\n===== A 入站闸门逐键判定 =====\n')
 
 // A1 合法值原样收下, 一个都不掉
 {
-  const g = gate({ pollIntervalSec: 45, proxyUrl: 'http://127.0.0.1:7899', theme: 'dark' })
+  const g = gate({ monitor: { pandalive: { pollIntervalSec: 45 } }, proxyUrl: 'http://127.0.0.1:7899', theme: 'dark' })
   assert(g.dropped.length === 0, 'A1 合法补丁零拒收', g.dropped.join(', '))
-  assert(g.get('pollIntervalSec') === 45 && g.get('theme') === 'dark', 'A1b 收下的值不变形')
+  assert(g.get('monitor').pandalive.pollIntervalSec === 45 && g.get('theme') === 'dark', 'A1b 收下的值不变形')
 }
 // A2 未注册键拒收且点名(而不是静默落盘成第二份真相)
 {
-  const g = gate({ evilKey: 1, pollIntervalSec: 45 })
+  const g = gate({ evilKey: 1, ...mon('pandalive', { pollIntervalSec: 45 }) })
   assert(rejected(g, 'evilKey'), 'A2 未注册键拒收并点名')
   assert(g.get('evilKey') === MISSING, 'A2b 未注册键不进补丁')
-  assert(g.get('pollIntervalSec') === 45, 'A2c 一键越界不连坐其它键')
+  assert(g.get('monitor').pandalive.pollIntervalSec === 45, 'A2c 一键越界不连坐其它键')
 }
 // A3/A4 主进程投影字段: 真值在保险箱, 渲染层回传一律忽略
 {
@@ -140,8 +144,9 @@ console.log('\n===== A 入站闸门逐键判定 =====\n')
 }
 // A6 区间夹紧(渲染层控件是第一道, 闸门是第二道)
 {
-  assert(gate({ pollIntervalSec: 99999 }).get('pollIntervalSec') === 600, 'A6 轮询间隔上限夹紧 600')
-  assert(gate({ pollIntervalSec: 1 }).get('pollIntervalSec') === 5, 'A6b 轮询间隔下限夹紧 5')
+  assert(gate(mon('pandalive', { pollIntervalSec: 99999 })).patch.monitor.pandalive.pollIntervalSec === 600, 'A6 轮询间隔上限夹紧 600')
+  assert(gate(mon('pandalive', { pollIntervalSec: 1 })).patch.monitor.pandalive.pollIntervalSec === 5, 'A6b 轮询间隔下限夹紧 5')
+  assert(gate(mon('soop', { pollIntervalSec: 99999 })).patch.monitor.soop.pollIntervalSec === 600, 'A6h 夹紧按平台各算(SOOP 越界不该改写成 Panda 那一格)')
   assert(gate({ splitSeconds: 5 }).get('splitSeconds') === 60, 'A6c 分片秒数下限夹紧 60')
   assert(gate({ splitSeconds: 0 }).get('splitSeconds') === 0, 'A6e splitSeconds=0 原样收下(0 是「不分段」这一档, 不是越界)')
   assert(!rejected(gate({ splitSeconds: 0 }), 'splitSeconds'), 'A6f 0 不被当成不合格键拒收(拒收等于让人以为设置没生效)')
@@ -150,9 +155,12 @@ console.log('\n===== A 入站闸门逐键判定 =====\n')
 }
 // A7 非有限数值
 {
-  assert(rejected(gate({ requestGapMs: NaN }), 'requestGapMs'), 'A7 NaN 拒收(而非写成 null 落盘)')
-  assert(rejected(gate({ requestGapMs: Infinity }), 'requestGapMs'), 'A7b Infinity 拒收')
-  assert(rejected(gate({ requestGapMs: '1200' }), 'requestGapMs'), 'A7c 字符串数值拒收(不做隐式转换)')
+  assert(rejected(gate(mon('pandalive', { requestGapMs: NaN })), 'monitor.pandalive.requestGapMs'), 'A7 NaN 拒收(而非写成 null 落盘)')
+  assert(rejected(gate(mon('pandalive', { requestGapMs: Infinity })), 'monitor.pandalive.requestGapMs'), 'A7b Infinity 拒收')
+  assert(rejected(gate(mon('pandalive', { requestGapMs: '1200' })), 'monitor.pandalive.requestGapMs'), 'A7c 字符串数值拒收(不做隐式转换)')
+  // 一格坏 ≠ 整平台坏: 同平台另一格必须照收(否则用户看到的是"改了没生效")
+  const mixedCell = gate(mon('soop', { pollIntervalSec: NaN, requestGapMs: 800 }))
+  assert(rejected(mixedCell, 'monitor.soop.pollIntervalSec') && mixedCell.patch.monitor?.soop?.requestGapMs === 800, 'A7d 同平台一格越界不连坐另一格')
 }
 // A8 落盘目录必须是绝对路径: 相对路径等于把落点交给进程 cwd
 {
@@ -186,6 +194,21 @@ console.log('\n===== A 入站闸门逐键判定 =====\n')
   assert(rejected(gate({ autoRecordDefault: { twitch: true } }), 'autoRecordDefault.twitch'), 'A16 自录默认值按平台点验')
   assert(gate({ autoRecordDefault: { soop: true } }).patch.autoRecordDefault.soop === true, 'A16b 合法自录默认值收下')
 }
+// A16c~A16i 监控节奏(㊍): 三格住进 monitor[平台], 旧顶层键必须不再被认识
+{
+  assert(rejected(gate({ pollIntervalSec: 30 }), 'pollIntervalSec'), 'A16c 旧顶层 pollIntervalSec 已成未注册键(拒收而不是悄悄落盘成第二份真相)')
+  assert(rejected(gate({ requestGapMs: 1200 }), 'requestGapMs'), 'A16d 旧顶层 requestGapMs 同上')
+  assert(rejected(gate({ prefetchStream: true }), 'prefetchStream'), 'A16e 旧顶层 prefetchStream 同上')
+  assert(rejected(gate({ monitor: { twitch: { pollIntervalSec: 30 } } }), 'monitor.twitch'), 'A16f 未注册平台拒收')
+  assert(rejected(gate({ monitor: { soop: { pollIntervalSecs: 30 } } }), 'monitor.soop.pollIntervalSecs'), 'A16g 未注册设置项拒收(拼错的格名不能落盘)')
+  assert(rejected(gate({ monitor: 'x' }), 'monitor'), 'A16h monitor 不是对象 → 整块拒收')
+  const onlyOne = gate({ monitor: { soop: { pollIntervalSec: 60 } } })
+  assert(
+    onlyOne.dropped.length === 0 && onlyOne.patch.monitor.soop.pollIntervalSec === 60 && !onlyOne.patch.monitor.pandalive,
+    'A16i 半格提交只交这一格(未提交的平台不进补丁)',
+    JSON.stringify(onlyOne.patch.monitor)
+  )
+}
 // A17 补丁本身
 {
   for (const [name, v] of [['null', null], ['数组', []], ['字符串', 'theme'], ['undefined', undefined]]) {
@@ -206,12 +229,26 @@ console.log('\n===== B 覆盖性: 闸门跟着 DEFAULT_SETTINGS 走 =====\n')
   const expect = structuredClone(DEFAULT_SETTINGS)
   for (const k of PROJECTED) delete expect[k]
   assert(JSON.stringify(g.patch) === JSON.stringify(expect), 'B3 全量收下的值与默认值逐字段相等(闸门不改写合法值)')
-  // 闸门表里的键必须真实存在: 设置项改名后残留的旧键名会让"夹紧"静默失效
+  // 闸门表里的键必须真实存在: 设置项改名后残留的旧键名会让"夹紧"静默失效。
+  // 按表分别点验 —— 顶层表(NUM_RANGE/ENUMS)认 Settings 顶层键, monitor 表认 monitor 的格名,
+  // 合成一个集合来判会漏掉"格名撞上了另一个平台的顶层键"这类假通过
   const guard = fs.readFileSync(path.join(ROOT, 'src', 'main', 'services', 'settingsGuard.ts'), 'utf8')
-  const listed = [...guard.matchAll(/^\s{2}(\w+): \[?\s*[\d'"]/gm)].map((m) => m[1])
-  const stale = listed.filter((k) => !(k in DEFAULT_SETTINGS))
+  const table = (name) => {
+    const m = guard.match(new RegExp(`const ${name}[^]*?\\n\\}`))
+    return m ? [...m[0].matchAll(/^\s{2}(\w+):/gm)].map((x) => x[1]) : []
+  }
+  const topKeys = new Set(Object.keys(DEFAULT_SETTINGS))
+  const monKeys = new Set(Object.keys(DEFAULT_SETTINGS.monitor.pandalive))
+  const listed = [...table('NUM_RANGE'), ...table('ENUMS'), ...table('MONITOR_RANGE')]
+  const stale = [
+    ...table('NUM_RANGE').filter((k) => !topKeys.has(k)),
+    ...table('ENUMS').filter((k) => !topKeys.has(k)),
+    ...table('MONITOR_RANGE').filter((k) => !monKeys.has(k))
+  ]
   assert(listed.length >= 8, 'B4 区间/枚举表解析合理(≥8 项)', `${listed.length} 项`)
   assert(stale.length === 0, 'B5 区间/枚举表里没有已改名的旧设置项(否则那一格的校验静默失效)', stale.join(', '))
+  assert(table('MONITOR_RANGE').length === 2, 'B5b 监控那两格数值都有区间可夹(第三格是布尔, 不进表)', table('MONITOR_RANGE').join(', '))
+  assert(!table('NUM_RANGE').some((k) => monKeys.has(k)), 'B5c 节奏键已离开顶层表(还留在 NUM_RANGE 就是给未注册键做夹紧)', table('NUM_RANGE').join(', '))
 }
 
 console.log('\n===== C 端到端: 闸门 → store → db.json =====\n')
@@ -219,18 +256,19 @@ console.log('\n===== C 端到端: 闸门 → store → db.json =====\n')
   store.setSettings(structuredClone(DEFAULT_SETTINGS)) // 先落一份: 之后比对的是"文件有没有被写坏"
   // 第一轮: 全是坏值 → 盘上必须一个字都不变
   const before = fs.readFileSync(DB, 'utf8')
-  const bad = gate({ proxyUrl: 123, savePath: 'relative/dir', theme: 'neon', evilKey: 1, pollIntervalSec: NaN })
+  const bad = gate({ proxyUrl: 123, savePath: 'relative/dir', theme: 'neon', evilKey: 1, monitor: { pandalive: { pollIntervalSec: NaN } } })
   store.setSettings(bad.patch)
   assert(fs.readFileSync(DB, 'utf8') === before, 'C1 全坏补丁落盘后 db.json 未变(不是"报错但已经写了")')
   assert(store.getSettings().proxyUrl === '', 'C1b 坏值没有替掉在用的代理设置')
 
   // 第二轮: 混着好坏 → 好的收, 坏的不进盘
-  const mixed = gate({ proxyUrl: 'http://127.0.0.1:7899', theme: 'neon', pollIntervalSec: 45 })
+  const mixed = gate({ proxyUrl: 'http://127.0.0.1:7899', theme: 'neon', ...mon('pandalive', { pollIntervalSec: 45 }) })
   store.setSettings(mixed.patch)
   const onDisk = JSON.parse(fs.readFileSync(DB, 'utf8')).settings
-  assert(onDisk.proxyUrl === 'http://127.0.0.1:7899' && onDisk.pollIntervalSec === 45, 'C2 合格键真的落盘')
+  assert(onDisk.proxyUrl === 'http://127.0.0.1:7899' && onDisk.monitor.pandalive.pollIntervalSec === 45, 'C2 合格键真的落盘')
   assert(onDisk.theme === 'light', 'C2b 越界 theme 留在旧值(不是被写成 undefined)')
   assert(!('evilKey' in onDisk), 'C2c 未注册键不在 db.json 里(否则它就是设置的第二份真相)')
+  assert(onDisk.monitor.soop.pollIntervalSec === DEFAULT_SETTINGS.monitor.soop.pollIntervalSec, 'C2d 只交 Panda 那一格时, SOOP 的间隔保持原值(半格提交不许把另一平台一起写掉)')
 
   // 第三轮: 坏值之后再存好值 —— 一次越界不能把这条通道永久毒掉
   const ok = gate({ proxyUrl: 'http://127.0.0.1:7890' })
@@ -294,25 +332,33 @@ console.log('\n===== E 差量提交: 旧快照不回滚别人的新值 =====\n')
   store.setSettings(structuredClone(DEFAULT_SETTINGS))
   const snap = cloneOf(store.getSettings())
   const edited = { ...snap, theme: snap.theme === 'dark' ? 'light' : 'dark' }
-  store.setSettings({ pollIntervalSec: 45 })
+  store.setSettings(mon('pandalive', { pollIntervalSec: 45 }))
   store.setSettings(structuredClone(edited))
-  assert(store.getSettings().pollIntervalSec === DEFAULT_SETTINGS.pollIntervalSec, 'E1 全量提交确实会回滚并发写入(所以差量提交不是洁癖)', String(store.getSettings().pollIntervalSec))
+  assert(
+    store.getSettings().monitor.pandalive.pollIntervalSec === DEFAULT_SETTINGS.monitor.pandalive.pollIntervalSec,
+    'E1 全量提交确实会回滚并发写入(所以差量提交不是洁癖)',
+    String(store.getSettings().monitor.pandalive.pollIntervalSec)
+  )
 
   // ② 差量提交: 基线是「进页快照」, 只有用户真改过的键进补丁
   store.setSettings(structuredClone(DEFAULT_SETTINGS))
   const base = cloneOf(store.getSettings())
   const form = cloneOf(base)
   form.theme = 'dark'
-  store.setSettings({ pollIntervalSec: 45 }) // 编辑期间另一写入方
+  store.setSettings(mon('pandalive', { pollIntervalSec: 45 })) // 编辑期间另一写入方
   const diff = diffOf(form, base)
   assert(Object.keys(diff).length === 1 && diff.theme === 'dark', 'E2 脏清单恰好只含用户改过的那一键(别人的新值不算脏)', Object.keys(diff).join(','))
   store.setSettings(structuredClone(gate(diff).patch))
-  assert(store.getSettings().pollIntervalSec === 45, 'E3 并发写入的新值保住', String(store.getSettings().pollIntervalSec))
+  assert(store.getSettings().monitor.pandalive.pollIntervalSec === 45, 'E3 并发写入的新值保住', String(store.getSettings().monitor.pandalive.pollIntervalSec))
   assert(store.getSettings().theme === 'dark', 'E3b 用户改过的那一格确实落了')
 
   // ③ 基线为什么必须是快照而不是实时投影: 拿实时投影当基线, 「别人刚改的」会被读成「你没保存的」
   const wrongBase = diffOf(form, store.getSettings())
-  assert(wrongBase.pollIntervalSec === DEFAULT_SETTINGS.pollIntervalSec, 'E4 用实时投影当基线会把别人的新值判成脏并提交回去(回滚链)', Object.keys(wrongBase).join(','))
+  assert(
+    JSON.stringify(wrongBase.monitor?.pandalive) === JSON.stringify(DEFAULT_SETTINGS.monitor.pandalive),
+    'E4 用实时投影当基线会把别人的新值判成脏并提交回去(回滚链)',
+    Object.keys(wrongBase).join(',')
+  )
 
   // ④ 投影键不算脏: 真值在保险箱, 盘上没有这一格
   const withProj = { ...base, secretsEncrypted: !base.secretsEncrypted, tgTokenSet: !base.tgTokenSet }
