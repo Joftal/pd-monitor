@@ -1,5 +1,5 @@
 import * as path from 'path'
-import { DEFAULT_SETTINGS, Platform, Settings } from '../../shared/types'
+import { DEFAULT_SETTINGS, MonitorRules, Platform, Settings } from '../../shared/types'
 
 // ============================================================================
 // 设置补丁入站闸门(渲染层 → settings:set 的唯一校验点)
@@ -14,10 +14,15 @@ import { DEFAULT_SETTINGS, Platform, Settings } from '../../shared/types'
 
 /** 数值区间: 与设置页控件的 min/max 同口径(闸门是第二道, 不是唯一一道) */
 const NUM_RANGE: Partial<Record<keyof Settings, readonly [number, number]>> = {
-  pollIntervalSec: [5, 600],
-  requestGapMs: [300, 10000],
   splitSeconds: [60, 7200],
   diskLimitGb: [0.5, 100]
+}
+
+/** 监控格(㊍)的区间: 与设置页两平台节里的控件同口径。逐格登记是因为这三格现在嵌在平台节内,
+ *  顶层 NUM_RANGE 按 Settings 的键索引, 已经管不到它们 */
+const MONITOR_RANGE: Record<'pollIntervalSec' | 'requestGapMs', readonly [number, number]> = {
+  pollIntervalSec: [5, 600],
+  requestGapMs: [300, 10000]
 }
 
 /** 允许取 0 的数值项: 0 不是"越界被夹到区间下界", 而是"这一档关掉"的显式取值
@@ -86,6 +91,9 @@ export function sanitizeSettingsPatch(input: unknown): GuardedPatch {
     } else if (want === 'boolean') {
       if (typeof v !== 'boolean') dropped.push(`${k}(应为布尔)`)
       else out[k] = v
+    } else if (key === 'monitor') {
+      const m = sanitizeMonitor(v, dropped)
+      if (Object.keys(m).length) out.monitor = m
     } else if (key === 'notify') {
       const n = sanitizeNotify(v, dropped)
       if (Object.keys(n).length) out.notify = n
@@ -137,6 +145,48 @@ function sanitizeNotify(v: unknown, dropped: string[]): Record<string, unknown> 
         else cells[c] = val
       }
       if (Object.keys(cells).length) pe[e] = cells
+    }
+    if (Object.keys(pe).length) out[p] = pe
+  }
+  return out
+}
+
+/** 监控配置: 平台 × 三格(间隔 / 节流 / 预取), 平台键与格名都照 DEFAULT_SETTINGS.monitor 点验。
+ *  数值按 MONITOR_RANGE 夹紧(与顶层数值键同口径), 非有限数值与错类型逐格拒收并各留一条原因。 */
+function sanitizeMonitor(v: unknown, dropped: string[]): Record<string, unknown> {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) {
+    dropped.push('monitor(应为对象)')
+    return {}
+  }
+  const out: Record<string, unknown> = {}
+  for (const [p, cells] of Object.entries(v as Record<string, unknown>)) {
+    const def = DEFAULT_SETTINGS.monitor[p as Platform]
+    if (!def) {
+      dropped.push(`monitor.${p}(未注册平台)`)
+      continue
+    }
+    if (!cells || typeof cells !== 'object' || Array.isArray(cells)) {
+      dropped.push(`monitor.${p}(应为对象)`)
+      continue
+    }
+    const pe: Record<string, unknown> = {}
+    for (const [c, val] of Object.entries(cells as Record<string, unknown>)) {
+      const want = def[c as keyof MonitorRules]
+      if (want === undefined) {
+        dropped.push(`monitor.${p}.${c}(未注册设置项)`)
+        continue
+      }
+      const ck = `monitor.${p}.${c}`
+      if (typeof want === 'number') {
+        if (typeof val !== 'number' || !Number.isFinite(val)) dropped.push(`${ck}(应为有限数值)`)
+        else {
+          const r = MONITOR_RANGE[c as keyof typeof MONITOR_RANGE]
+          pe[c] = r ? Math.min(r[1], Math.max(r[0], val)) : val
+        }
+      } else if (typeof want === 'boolean') {
+        if (typeof val !== 'boolean') dropped.push(`${ck}(应为布尔)`)
+        else pe[c] = val
+      } else dropped.push(`${ck}(未登记的结构类型)`)
     }
     if (Object.keys(pe).length) out[p] = pe
   }

@@ -3,7 +3,7 @@ import { api, RiskError, BjNotFoundError, LiveItem } from './pandalive'
 import { soopApi, SoopFavoriteRow } from './soop'
 import { sourceFor, applyPlayMeta } from './source'
 import { store } from './store'
-import { EV, Platform, roomKey, soopAvatarUrl, WatcherStatus, Anchor, DiscoveryItem } from '../../shared/types'
+import { EV, Platform, platformName, roomKey, soopAvatarUrl, WatcherStatus, Settings, Anchor, DiscoveryItem } from '../../shared/types'
 import { recorder } from './recorder'
 import { sendToast } from './notify'
 import { sleep } from '../util'
@@ -30,19 +30,30 @@ function liveElapsedSec(startTime: string): number {
   return Math.max(0, Math.floor((Date.now() - ts) / 1000))
 }
 
+/** 一个平台的调度态(㊍): 自己的定时器 / 在飞标志 / 上次发车时刻 / 轮次计数。
+ *  旧实现只有一条 timer 跑完两平台, 所以 Panda 熔断把间隔压到 30s 时 SOOP 被同一条时间轴带着,
+ *  只能靠 lastSoopRoundAt 单独设一道闸门 —— 那个字段随分家一起作废。 */
+interface Loop {
+  timer: NodeJS.Timeout | null
+  inFlight: boolean
+  lastAt: number
+  roundCnt: number
+}
+
+const newLoop = (): Loop => ({ timer: null, inFlight: false, lastAt: 0, roundCnt: 0 })
+const PLATS: Platform[] = ['pandalive', 'soop']
+
 class Watcher {
   running = false
-  private timer: NodeJS.Timeout | null = null
+  private loop: Record<Platform, Loop> = { pandalive: newLoop(), soop: newLoop() }
+  /** 连败 / 退避 / 会话作废三枚是 Panda 独有的账本(它才发得出 RiskError, 也只有它有登录态可失效) */
   private errorStreak = 0
   private cooldownUntil = 0
-  private roundInFlight = false
   private sessionDeadStreak = 0
   private discovery: DiscoveryItem[] = []
   /** 在播数分平台记: Panda 冷却/熔断的那几轮不复查 Panda, 只能沿用上次已知值, 不能被 SOOP 覆盖成 0 */
   private pandaLiveFound = 0
   private soopLiveFound = 0
-  /** 上次真发 SOOP 探针的时刻: Panda 冷却期轮次会压到 30s, 用它把 SOOP 的速率钉回用户配的间隔 */
-  private lastSoopRoundAt = 0
   /** SOOP 连续"整轮全灭"轮数: 单轮失败可能是抖动, 连续两轮说明改版/风控/断网, 必须让用户看见 */
   private soopFailStreak = 0
   /** roomKey -> 连续"播放页报下播"轮数: 见 roundSoop, 单次读数不翻转状态 */
@@ -87,136 +98,151 @@ class Watcher {
     this.errorStreak = 0
     this.cooldownUntil = 0
     this.soopFailStreak = 0
-    this.schedule(300)
+    for (const p of PLATS) this.schedule(p, 300)
     this.push()
   }
 
   stop(): void {
     this.running = false
-    if (this.timer) clearTimeout(this.timer)
-    this.timer = null
+    for (const p of PLATS) {
+      const L = this.loop[p]
+      if (L.timer) clearTimeout(L.timer)
+      L.timer = null
+    }
     this.push()
   }
 
-  /** 立即触发一轮(不等待定时器); 一轮进行中则跳过; schedule() 会覆盖未触发的旧定时器, 连续 tick 自然合并为一轮 */
-  tick(): void {
-    if (this.running && !this.roundInFlight) this.schedule(0)
+  /** 立即触发一轮(不等待定时器); 指定平台就只惊动那一条 —— 工作区里的「立即刷新」不该顺手把
+   *  另一个平台的请求也发出去。省略参数=两平台各一轮(设置页改完即时生效走这条)。
+   *  在飞的那一条跳过; schedule() 会覆盖它未触发的旧定时器, 连续 tick 自然合并为一轮 */
+  tick(platform?: Platform): void {
+    for (const p of platform ? [platform] : PLATS) {
+      if (this.running && !this.loop[p].inFlight) this.schedule(p, 0)
+    }
   }
 
-  private schedule(delay: number): void {
-    if (this.timer) clearTimeout(this.timer)
-    this.timer = setTimeout(() => void this.round(), delay)
+  /** 下一轮等多久: 各按自己那一格(㊍)。Panda 熔断期压到 30s 是为了早点探到它自己恢复,
+   *  这个理由与 SOOP 无关; 1s 下限只防手改库写出 0 —— 那等于让定时器每毫秒发一轮 */
+  private intervalFor(platform: Platform): number {
+    if (platform === 'pandalive' && this.status.byPlatform.pandalive.circuitOpen) return 30_000
+    return Math.max(1, store.getSettings().monitor[platform].pollIntervalSec) * 1000
   }
 
-  private async round(): Promise<void> {
-    if (!this.running || this.roundInFlight) return
-    this.roundInFlight = true
+  private schedule(platform: Platform, delay: number): void {
+    const L = this.loop[platform]
+    if (L.timer) clearTimeout(L.timer)
+    L.timer = setTimeout(() => void this.runRound(platform), delay)
+  }
+
+  private async runRound(platform: Platform): Promise<void> {
+    if (!this.running) return
+    const L = this.loop[platform]
+    if (L.inFlight) return
+    L.inFlight = true
     const begin = Date.now()
-    const cfg = store.getSettings()
-    // 两份平台状态各自拥有: 顶栏/卡片读 byPlatform[当前平台], 不再互相抢话
-    // (旧实现只有一个全局 message, 导致 SOOP 瞎了必须看"Panda 是否健康"才敢出声)
-    const P = this.status.byPlatform.pandalive
-    const S = this.status.byPlatform.soop
-    this.status.mode = cfg.watchMode
-    api.setGap(cfg.requestGapMs)
-
+    const st = this.status.byPlatform[platform]
     try {
-      // 本引擎只认 pandalive(api 即 pandalive 客户端): 必须按平台取子集,
-      // 否则 SOOP 关注会被当成"列表里缺失的主播"送去 member/bj 复查 —— 拿频道名打错站接口。
-      const all = store.listAnchors()
-      const anchors = all.filter((a) => a.platform === 'pandalive')
-      const soopAnchors = all.filter((a) => a.platform === 'soop')
-      P.monitored = anchors.length
-      S.monitored = soopAnchors.length
-
-      // 冷却只退避 pandalive: SOOP 是另一套域名与会话, Panda 被风控无权连坐停掉 SOOP 监控
-      // (注意: 此分支的 schedule/push 由 finally 统一兜底, 不写重复调用)
-      const cooling = Date.now() < this.cooldownUntil
-      // Panda 这一轮的异常先攒着: 抛出去会跳过下面的 SOOP 探针(连坐), 熔断语义延后到 SOOP 跑完再交外层
-      let pandaErr: unknown = null
-      if (cooling) {
-        const remain = Math.ceil((this.cooldownUntil - Date.now()) / 1000)
-        P.message = mt('watcher.cooling', { remain })
-      } else {
-        const pBegin = Date.now()
-        try {
-          if (cfg.watchMode === 'list') {
-            this.pandaLiveFound = await this.roundByList(anchors)
-          } else {
-            // 逐个模式下大厅无数据源: 清空并广播, 让大厅显示"模式不可用"空态
-            this.idleQueue = [] // per-anchor 每轮全量复查: list 残留的 rest 快照作废, 间隙泵在此模式无职责
-            if (this.discovery.length) {
-              this.discovery = []
-              this.pushDiscovery()
-            }
-            this.pandaLiveFound = await this.roundByBj(anchors)
-          }
-          this.errorStreak = 0
-          P.circuitOpen = false
-          P.message = ''
-        } catch (e) {
-          pandaErr = e
-        }
-        // 真发了请求才记时: 冷却轮沿用旧读数, 不能把"Panda 上次成功"刷成"刚刚检查过"
-        P.liveFound = this.pandaLiveFound
-        P.roundMs = Date.now() - pBegin
-        P.lastRoundAt = Date.now()
-      }
-
-      // SOOP 每轮一发关注列表(myapi/favorite)即可覆盖全部站内关注; 列表覆盖不到的房才逐发播放页探针。
-      // (全站列表 main_broad_list_api.php 匿名可用但要翻满 43 页/2.7MB 才盖到小主播, 大厅/搜索另开一期)
-      // 冷却期轮次被压到 30s(为早点探 Panda 恢复), SOOP 不跟着加速: 仍按用户配的间隔到期才发
-      if (!soopAnchors.length) {
-        this.soopLiveFound = 0
-        this.soopFailStreak = 0
-        S.liveFound = 0
-        S.roundFailed = 0
-        S.message = ''
-      } else if (!cooling || Date.now() - this.lastSoopRoundAt >= cfg.pollIntervalSec * 1000) {
-        this.lastSoopRoundAt = Date.now()
-        const sBegin = Date.now()
-        this.soopLiveFound = await this.roundSoop(soopAnchors, cfg.requestGapMs)
-        S.liveFound = this.soopLiveFound
-        S.roundMs = Date.now() - sBegin
-        S.lastRoundAt = Date.now()
-        // SOOP 探针永不抛错(防 Panda 连坐), 所以它瞎了必须由这里出声: 顶栏绿点照常跳、卡片保留旧状态,
-        // 用户读到的却是"一切正常"。单轮失败可能是抖动, 连续两轮才够格说"这一站在我们眼里已经哑了"
-        S.message =
-          this.soopFailStreak >= 2
-            ? mt('watcher.soopDown', { n: soopAnchors.length, r: this.soopFailStreak })
-            : // 整轮全灭以外的情况: 探到几个读不到就说几个, 卡片保留旧读数不等于状态正常(设计稿 7.2「整轮部分失败」)
-              S.roundFailed > 0
-              ? mt('watcher.soopPartial', { n: S.roundFailed })
-              : ''
-      }
-      if (pandaErr) throw pandaErr
-
-      // 轮次心跳: 每 10 轮落一行摘要 —— 事后可证"轮询在这些小时里活着且看得见全站"
-      // (每轮都写会刷屏: 30s 间隔下一天 2880 行; 抽稀到 ~5 分钟一行, 14 天约 100KB)
-      if (++this.roundCnt % 10 === 0) {
-        const monitored = P.monitored + S.monitored
-        const liveFound = P.liveFound + S.liveFound
-        logger.info(
-          'watcher',
-          this.status.mode === 'list'
-            ? `第 ${this.roundCnt} 轮 list 全站=${this.status.liveCount} 关注=${monitored} 在播=${liveFound} 本轮=${Date.now() - begin}ms`
-            : `第 ${this.roundCnt} 轮 per-anchor 关注=${monitored} 在播=${liveFound} 本轮=${Date.now() - begin}ms`
-        )
-      }
+      if (platform === 'pandalive') await this.roundPanda(store.getSettings())
+      else await this.roundSoopTop(store.getSettings())
     } catch (e) {
-      this.noteFailure(e)
+      // 连败账本只记 Panda 的: SOOP 一条轮次失败不许推高 errorStreak, 更不许把 Panda 拖进熔断
+      // (旧实现两条链排在同一个 round 里, 靠 pandaErr 延后抛出做到这点)
+      if (platform === 'pandalive') this.noteFailure(e)
+      else logger.warn('watcher', `SOOP 轮次异常: ${String((e as Error).message || e)}`)
     } finally {
-      this.roundInFlight = false
+      L.inFlight = false
+      L.lastAt = Date.now()
       this.status.lastRoundAt = Date.now()
       this.status.roundMs = Date.now() - begin
+      // 轮次心跳: 每 10 轮落一行摘要 —— 事后可证"轮询在这些小时里活着且看得见全站"
+      // (每轮都写会刷屏: 30s 间隔下一天 2880 行; 抽稀到 ~5 分钟一行, 14 天约 100KB)
+      if (++L.roundCnt % 10 === 0) {
+        const all = `${platformName(platform)} 第 ${L.roundCnt} 轮 关注=${st.monitored} 在播=${st.liveFound}`
+        logger.info(
+          'watcher',
+          platform === 'pandalive' && this.status.mode === 'list'
+            ? `${all} 全站=${this.status.liveCount} 本轮=${Date.now() - begin}ms`
+            : `${all} 本轮=${Date.now() - begin}ms`
+        )
+      }
       this.push()
       if (this.running) {
         store.flush()
-        const interval = P.circuitOpen ? 30_000 : store.getSettings().pollIntervalSec * 1000
-        this.schedule(interval)
-        void this.pumpIdle() // 轮次间隙: 启动离线关注兜底泵(幂等, 在跑则 no-op)
+        this.schedule(platform, this.intervalFor(platform))
+        if (platform === 'pandalive') void this.pumpIdle() // 轮次间隙: 离线关注兜底泵(幂等, 在跑则 no-op)
       }
     }
+  }
+
+  /** Panda 一轮: list(全站列表 + 本地匹配 + 大厅) 或 per-anchor(逐个 member/bj)。
+   *  冷却期什么都不发 —— 这一轮只更新"还在退避"这句话, 读数沿用上一轮 */
+  private async roundPanda(cfg: Settings): Promise<void> {
+    const P = this.status.byPlatform.pandalive
+    this.status.mode = cfg.watchMode
+    api.setGap(cfg.monitor.pandalive.requestGapMs)
+    // 本引擎只认 pandalive(api 即 pandalive 客户端): 必须按平台取子集,
+    // 否则 SOOP 关注会被当成"列表里缺失的主播"送去 member/bj 复查 —— 拿频道名打错站接口。
+    const anchors = store.listAnchors().filter((a) => a.platform === 'pandalive')
+    P.monitored = anchors.length
+
+    if (Date.now() < this.cooldownUntil) {
+      const remain = Math.ceil((this.cooldownUntil - Date.now()) / 1000)
+      P.message = mt('watcher.cooling', { remain })
+      return
+    }
+    const pBegin = Date.now()
+    try {
+      if (cfg.watchMode === 'list') {
+        this.pandaLiveFound = await this.roundByList(anchors)
+      } else {
+        // 逐个模式下大厅无数据源: 清空并广播, 让大厅显示"模式不可用"空态
+        this.idleQueue = [] // per-anchor 每轮全量复查: list 残留的 rest 快照作废, 间隙泵在此模式无职责
+        if (this.discovery.length) {
+          this.discovery = []
+          this.pushDiscovery()
+        }
+        this.pandaLiveFound = await this.roundByBj(anchors)
+      }
+      this.errorStreak = 0
+      P.circuitOpen = false
+      P.message = ''
+    } finally {
+      // 真发了请求才记时: 冷却轮在上面就 return 了, 不会走到这里被刷成"刚刚检查过"
+      P.liveFound = this.pandaLiveFound
+      P.roundMs = Date.now() - pBegin
+      P.lastRoundAt = Date.now()
+    }
+  }
+
+  /** SOOP 一轮: 一发站内关注列表(myapi/favorite)覆盖全部站内关注, 列表覆盖不到的房才逐发播放页探针。
+   *  (全站列表 main_broad_list_api.php 匿名可用但要翻满 43 页/2.7MB 才盖到小主播, 大厅/搜索另开一期)
+   *  间隔与节流都取 SOOP 自己那一格: Panda 在不在冷却、Panda 的节流调到多少, 与它无关(㊍) */
+  private async roundSoopTop(cfg: Settings): Promise<void> {
+    const S = this.status.byPlatform.soop
+    const soopAnchors = store.listAnchors().filter((a) => a.platform === 'soop')
+    S.monitored = soopAnchors.length
+    if (!soopAnchors.length) {
+      this.soopLiveFound = 0
+      this.soopFailStreak = 0
+      S.liveFound = 0
+      S.roundFailed = 0
+      S.message = ''
+      return
+    }
+    const sBegin = Date.now()
+    this.soopLiveFound = await this.roundSoop(soopAnchors, cfg.monitor.soop.requestGapMs)
+    S.liveFound = this.soopLiveFound
+    S.roundMs = Date.now() - sBegin
+    S.lastRoundAt = Date.now()
+    // SOOP 探针永不抛错(防 Panda 连坐), 所以它瞎了必须由这里出声: 顶栏绿点照常跳、卡片保留旧状态,
+    // 用户读到的却是"一切正常"。单轮失败可能是抖动, 连续两轮才够格说"这一站在我们眼里已经哑了"
+    S.message =
+      this.soopFailStreak >= 2
+        ? mt('watcher.soopDown', { n: soopAnchors.length, r: this.soopFailStreak })
+        : // 整轮全灭以外的情况: 探到几个读不到就说几个, 卡片保留旧读数不等于状态正常(设计稿 7.2「整轮部分失败」)
+          S.roundFailed > 0
+          ? mt('watcher.soopPartial', { n: S.roundFailed })
+          : ''
   }
 
   // ---- 查无此人(改名/注销/错 id)单点处置: 标离线 + 一次性提醒 + 后续不再发请求 ----
@@ -625,8 +651,8 @@ class Watcher {
   // ---- 轮次间隙兜底泵: rest(离线且列表不可见的关注)在轮询空档持续轮扫 ----
   // 与主轮询共用同一限速队列(gap+抖动), 单请求速率与轮内完全一致, 但节奏摊平到整条
   // 时间轴: 发现延迟 ≈ N×gap(50 离线 ≈ 60s), 与 pollIntervalSec 无关 —— 不论 30s 还是
-  // 300s 一档, 空闲时间轴全部利用起来。让路规则: round 进行中不跑; 熔断期清空停扫;
-  // 每人每轮至多扫一次(快照消费制, 新 round 发新快照)。
+  // 300s 一档, 空闲时间轴全部利用起来。让路规则: Panda 轮次进行中不跑(SOOP 那一轮与这条
+  // 队列无关, 它发的是 pandalive 请求); 熔断期清空停扫; 每人每轮至多扫一次(快照消费制, 新 round 发新快照)。
   private idleQueue: Anchor[] = []
   private idlePumping = false
 
@@ -636,7 +662,7 @@ class Watcher {
     try {
       while (this.idleQueue.length) {
         // 让路: 下一轮开始即停(下轮会发新快照); 停轮(stop)同样中止
-        if (!this.running || this.roundInFlight) break
+        if (!this.running || this.loop.pandalive.inFlight) break
         if (this.status.byPlatform.pandalive.circuitOpen) {
           // 熔断高压期避开(与 prewarm 泵同语义)
           this.idleQueue.length = 0
@@ -646,7 +672,7 @@ class Watcher {
         // 快照生成后被取关: 跳过(不再为其发请求; 事件层另有 onLiveStart/onLiveEnd 守卫双保险)
         if (!this.stillMonitored(a.platform, a.userId)) continue
         if (this.isGone(a)) continue // 查无此人: 不发请求(每轮都会被快照带回, 必须在消费前挡)
-        api.setGap(store.getSettings().requestGapMs) // 与轮内同节奏(设置页改动即时生效)
+        api.setGap(store.getSettings().monitor.pandalive.requestGapMs) // 与轮内同节奏(设置页改动即时生效)
         try {
           const info = await api.fetchBj(a.userId)
           if (!this.running) break // 请求在飞期间已停轮: 事件不落, 剩余快照直接作废
@@ -667,15 +693,18 @@ class Watcher {
     }
   }
 
-  // ---- 开播预取源泵: 逐个节流拉源写缓存, 点进房间即命中(两平台共用, 取流走 sourceFor 契约) ----
-  private prewarmQueue: string[] = []
-  private prewarmPumping = false
+  // ---- 开播预取源泵: 逐个节流拉源写缓存, 点进房间即命中(取流走 sourceFor 契约) ----
+  // 队列与泵各平台一条(㊍): 节流各用自己的 requestGapMs, 而 Panda 熔断停的是 Panda 自己的预取 ——
+  // 旧实现共用一条队列, 那一次 length=0 会把排在队里的 SOOP 房一起丢掉(它们本可以继续秒开)。
+  // 队列里只存 userId: 平台已由队列本身表达, 再拼 roomKey 就得在取出时反解回来。
+  private prewarmQueue: Record<Platform, string[]> = { pandalive: [], soop: [] }
+  private prewarmPumping: Record<Platform, boolean> = { pandalive: false, soop: false }
 
   private enqueuePrewarm(platform: Platform, userId: string): void {
-    const key = roomKey(platform, userId)
-    if (this.prewarmQueue.includes(key)) return
-    this.prewarmQueue.push(key)
-    void this.pumpPrewarm()
+    const q = this.prewarmQueue[platform]
+    if (q.includes(userId)) return
+    q.push(userId)
+    void this.pumpPrewarm(platform)
   }
 
   /** 对外入口: 关注"已在播"主播时补一发预取(列表模式下该类主播永不再触发 onLiveStart, 预取泵对其缺席) */
@@ -683,30 +712,28 @@ class Watcher {
     this.enqueuePrewarm(platform, userId)
   }
 
-  private async pumpPrewarm(): Promise<void> {
-    if (this.prewarmPumping) return
-    this.prewarmPumping = true
+  private async pumpPrewarm(platform: Platform): Promise<void> {
+    if (this.prewarmPumping[platform]) return
+    this.prewarmPumping[platform] = true
+    const q = this.prewarmQueue[platform]
     try {
-      while (this.prewarmQueue.length) {
-        // 熔断期间不预取(避免高压撞墙)
-        if (this.status.byPlatform.pandalive.circuitOpen) {
-          this.prewarmQueue.length = 0
+      while (q.length) {
+        // 熔断期间不预取(避免高压撞墙) —— 只挡 Panda 自己这条队列
+        if (platform === 'pandalive' && this.status.byPlatform.pandalive.circuitOpen) {
+          q.length = 0
           break
         }
-        const key = this.prewarmQueue.shift()!
-        const sep = key.indexOf(':')
-        const platform = (sep > 0 ? key.slice(0, sep) : 'pandalive') as Platform
-        const uid = sep > 0 ? key.slice(sep + 1) : key
+        const uid = q.shift()!
         // 入队后被取关: 不再为其拉源(与 pumpIdle/事件守卫同规约; 开播入口(onLiveStart)已挡)
         if (!this.stillMonitored(platform, uid)) continue
-        const cfg = store.getSettings()
-        api.setGap(cfg.requestGapMs)
+        const gap = store.getSettings().monitor[platform].requestGapMs
+        if (platform === 'pandalive') api.setGap(gap)
         const r = await sourceFor(platform).getPlayCached(uid).catch(() => undefined) // 失败静默(不打扰用户流)
         if (r) applyPlayMeta(platform, uid, r) // SOOP: 顺手把 BTIME 反推的开播时刻/密码房标记写回关注卡
-        await sleep(Math.max(1200, cfg.requestGapMs) * (0.8 + Math.random() * 0.4))
+        await sleep(Math.max(1200, gap) * (0.8 + Math.random() * 0.4))
       }
     } finally {
-      this.prewarmPumping = false
+      this.prewarmPumping[platform] = false
     }
   }
 
@@ -715,14 +742,12 @@ class Watcher {
     return store.listAnchors().some((x) => x.platform === platform && x.userId === userId)
   }
 
-  private roundCnt = 0
-
   private onLiveStart(a: Anchor): void {
     if (!this.stillMonitored(a.platform, a.userId)) return
     sourceFor(a.platform).invalidatePlay(a.userId) // 主播(重)开播: 旧源作废
     logger.info('watcher', `开播: ${a.nick}(@${a.userId}) title"${a.title}" 自录=${a.autoRecord ? '开' : '关'}`)
     const cfg = store.getSettings()
-    if (cfg.prefetchStream) this.enqueuePrewarm(a.platform, a.userId) // 后台预取新源写缓存
+    if (cfg.monitor[a.platform].prefetchStream) this.enqueuePrewarm(a.platform, a.userId) // 后台预取新源写缓存
     if (a.tags?.type === 'fan') {
       // 粉丝房开播: 专用通知(与普通开播区分, 仍进系统通知与应用内气泡)
       sendToast({ type: 'fanLive', platform: a.platform, title: mt('watcher.fanLiveStart', { nick: a.nick }), body: a.title || mt('watcher.clickWatch') }, { ev: 'fanLive', ctx: { anchor: a } })

@@ -175,15 +175,22 @@ app.whenReady().then(() => {
 
   // 启动轮询
   watcher.start()
-  logger.info('watcher', `轮询启动(mode=${cfg.watchMode}, 间隔=${cfg.pollIntervalSec}s, gap=${cfg.requestGapMs}ms)`)
+  // 两平台各一行(㊍): 节奏已经分家, 挤成一行等于把"谁在跑多快"重新糊回去
+  for (const p of ['pandalive', 'soop'] as const) {
+    const m = cfg.monitor[p]
+    logger.info(
+      'watcher',
+      p === 'pandalive'
+        ? `Panda 轮询启动(mode=${cfg.watchMode}, 间隔=${m.pollIntervalSec}s, gap=${m.requestGapMs}ms)`
+        : `SOOP 轮询启动(间隔=${m.pollIntervalSec}s, gap=${m.requestGapMs}ms)`
+    )
+  }
   // 源保活泵: 维持已缓存源的会话活性(退出观看后满员房也能凭旧源继续看)
   api.startKeepalive()
   // 重启后源缓存(内存态)为空: 对库态"已关注且在播"的主播补一轮预取 ——
   // 与 anchorsAdd 关注已在播补洞同构; db 陈旧态(实际已下播)拉源失败不落缓存, 仅白耗一发节流请求
-  if (cfg.prefetchStream) {
-    for (const a of store.listAnchors()) {
-      if (a.isLive) watcher.prewarmNow(a.platform, a.userId)
-    }
+  for (const a of store.listAnchors()) {
+    if (a.isLive && cfg.monitor[a.platform].prefetchStream) watcher.prewarmNow(a.platform, a.userId)
   }
 
   app.on('second-instance', () => {

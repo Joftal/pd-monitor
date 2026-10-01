@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { NButton, NInput, NInputNumber, NSwitch, useMessage } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api'
-import type { AppInfo, NotifyEvent, NotifyRow, Platform, Settings, UpdateCheckResult } from '@shared/types'
+import type { AppInfo, MonitorRules, NotifyEvent, NotifyRow, Platform, Settings, UpdateCheckResult } from '@shared/types'
 import { platformName, REC_RETRY_MAX } from '@shared/types'
 import SpinIcon from '@/components/SpinIcon.vue'
 import Seg from '@/components/Seg.vue'
@@ -118,6 +118,16 @@ function clampSplit(v: unknown): number {
   return n === 0 ? 0 : Math.min(7200, Math.max(60, n))
 }
 
+/** 一格监控节奏(㊍): 上下界与入站闸门的 MONITOR_RANGE、控件的 min/max 同口径。
+ *  分家前这两个夹取写在顶层键上, 平台各一格后逐格过一遍, 不然清空的那格会把 null 提交上去 */
+function clampMonitor(m: MonitorRules): MonitorRules {
+  return {
+    pollIntervalSec: clampNum(m.pollIntervalSec, 5, 600, 30),
+    requestGapMs: clampNum(m.requestGapMs, 300, 10000, 1200),
+    prefetchStream: m.prefetchStream
+  }
+}
+
 async function pickDir() {
   const d = await api.settingsSelectDir()
   if (d && form.value) form.value.savePath = d
@@ -145,8 +155,7 @@ async function save() {
       proxyUrl: (f.proxyUrl || '').trim(),
       tgChatId: (f.tgChatId || '').trim(),
       tgProxy: (f.tgProxy || '').trim(),
-      pollIntervalSec: clampNum(f.pollIntervalSec, 5, 600, 30),
-      requestGapMs: clampNum(f.requestGapMs, 300, 10000, 1200),
+      monitor: { pandalive: clampMonitor(f.monitor.pandalive), soop: clampMonitor(f.monitor.soop) },
       splitSeconds: clampSplit(f.splitSeconds),
       diskLimitGb: clampNum(f.diskLimitGb, 0.5, 100, 1)
     }
@@ -250,11 +259,11 @@ function hideBrokenImg(e: Event): void {
 }
 
 // ---- 左侧锚点导航(手动 scrollspy) ----
-// 三域: 全局 / 平台(Panda、SOOP) / 关于。平台专属键(检测模式、源保活、自录默认、通知行)
-// 只出现在平台节里 —— 混在全局节里时, 改一个 SOOP 的开关要在一屏全局项里找平台徽标
+// 三域: 全局 / 平台(Panda、SOOP) / 关于。平台专属键(检测模式、源保活、自录默认、通知行、
+// 监控节奏)只出现在平台节里 —— 混在全局节里时, 改一个 SOOP 的开关要在一屏全局项里找平台徽标
+// (㊍: 「监控」节随三格分家撤销, 全局节里没有节奏可配了, 启动落点并入外观)
 type NavKey =
   | 'appearance'
-  | 'monitor'
   | 'record'
   | 'network'
   | 'push'
@@ -267,7 +276,6 @@ const navGroups = computed<{ label: string; items: { key: NavKey; label: string 
     label: t('settings.navGroupGlobal'),
     items: [
       { key: 'appearance', label: t('settings.navAppearance') },
-      { key: 'monitor', label: t('settings.navMonitor') },
       { key: 'record', label: t('settings.navRecord') },
       { key: 'network', label: t('settings.navNetwork') },
       { key: 'push', label: t('settings.navNotify') },
@@ -289,15 +297,12 @@ const scrollRef = ref<HTMLElement | null>(null)
 const activeNav = ref<NavKey>('appearance')
 
 /** 设置键 → 所在节: 脏标记只写在吸底条上等于让人逐屏找, 亮的应该是「哪一屏有没保存的项」。
- *  跨平台的两个键(autoRecordDefault / notify)不在这张表里: 它们一节一半,
+ *  跨平台的三个键(autoRecordDefault / notify / monitor)不在这张表里: 它们一节一半,
  *  只改 SOOP 那一半时亮 Panda 的点就是谎报 —— 见 dirtySecs 的逐平台比对 */
 const SEC_OF_KEY: Partial<Record<keyof Settings, NavKey>> = {
   theme: 'appearance',
   locale: 'appearance',
-  pollIntervalSec: 'monitor',
-  requestGapMs: 'monitor',
-  defaultWorkspace: 'monitor',
-  prefetchStream: 'monitor',
+  defaultWorkspace: 'appearance',
   savePath: 'record',
   splitSeconds: 'record',
   diskLimitGb: 'record',
@@ -319,7 +324,7 @@ const dirtySecs = computed<Set<NavKey>>(() => {
   const f = form.value
   const b = baseline.value
   for (const k of dirtyKeys.value) {
-    if (k === 'autoRecordDefault' || k === 'notify') {
+    if (k === 'autoRecordDefault' || k === 'notify' || k === 'monitor') {
       if (!f || !b) continue
       for (const p of PLATS) {
         if (JSON.stringify(f[k][p]) !== JSON.stringify(b[k][p])) out.add(p === 'pandalive' ? 'panda' : 'soop')
@@ -371,9 +376,9 @@ function onScroll(): void {
 const tileCls =
   'flex items-center gap-2.5 w-full text-left rounded-ctl px-3 py-2.5 cursor-pointer transition-colors bg-fill hover:bg-fillh'
 
-/** 磁贴里能被翻的布尔项。全部是 Settings 顶层 boolean, 所以一次成型而不是一堆专用 handler */
+/** 磁贴里能被翻的顶层布尔项。全部是 Settings 顶层 boolean, 所以一次成型而不是一堆专用 handler
+ *  (开播预取不在这张表里: ㊍ 之后它住在 monitor[平台] 那一格, 见 monTileClick) */
 type BoolKey =
-  | 'prefetchStream'
   | 'keepaliveStream'
   | 'autoMp4'
   | 'deleteTs'
@@ -394,6 +399,17 @@ function tileClick(e: MouseEvent, key: BoolKey): void {
 function tileKey(key: BoolKey): void {
   const f = form.value
   if (f) f[key] = !f[key]
+}
+
+/** 开播预取(㊍)按平台各一格: 顶层那张 BoolKey 表够不到嵌套格, 命中规则照抄一遍 */
+function monTileClick(e: MouseEvent, p: Platform): void {
+  if ((e.target as HTMLElement | null)?.closest('.n-switch')) return
+  const f = form.value
+  if (f) f.monitor[p].prefetchStream = !f.monitor[p].prefetchStream
+}
+function monTileKey(p: Platform): void {
+  const f = form.value
+  if (f) f.monitor[p].prefetchStream = !f.monitor[p].prefetchStream
 }
 
 // ---- 嵌套设置的深拷贝 ----
@@ -473,8 +489,7 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
               : 'text-ink2 hover:text-ink1 hover:bg-fillh'"
             @click="scrollToSec(n.key)"
           >
-          <svg v-if="n.key === 'monitor'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="2.2"/><path stroke-linecap="round" d="M12 6.5a5.5 5.5 0 015.5 5.5M12 2.8a9.2 9.2 0 019.2 9.2"/></svg>
-          <svg v-else-if="n.key === 'record'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="3.5"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/></svg>
+          <svg v-if="n.key === 'record'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="3.5"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/></svg>
           <svg v-else-if="n.key === 'network'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" d="M3 12h18M12 3c2.5 2.6 3.8 5.7 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.7-3.8-9S9.5 5.6 12 3z"/></svg>
           <svg v-else-if="n.key === 'push'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2a2 2 0 01-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1"/></svg>
           <svg v-else-if="n.key === 'panda' || n.key === 'soop'" class="w-4 h-4 shrink-0" :class="activeNav === n.key ? 'text-brand' : 'text-ink3'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3l7 4v5c0 4.4-3 7.4-7 9-4-1.6-7-4.6-7-9V7l7-4z"/></svg>
@@ -555,24 +570,8 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
                 @update:model-value="applyLocale"
               />
             </div>
-          </div>
-        </section>
-
-        <!-- 监控: 两平台共用一条轮询时间轴; 平台专属采集项在各自的平台节里 -->
-        <section data-sec="monitor" class="mb-5">
-          <div class="flex items-baseline gap-2.5 px-1 pb-2">
-            <h2 class="sec-h">{{ t('settings.monitor') }}</h2>
-            <span class="text-[11px] text-ink3 ml-auto">{{ t('settings.monitorDesc') }}</span>
-          </div>
-          <div class="bg-card rounded-card shadow-card overflow-hidden">
-            <div class="flex items-center justify-between gap-4 px-4 py-3">
-              <div>
-                <div class="text-[13px] font-medium text-ink1">{{ t('settings.pollSec') }}</div>
-                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.pollSecDesc') }}</div>
-              </div>
-              <n-input-number v-model:value="form.pollIntervalSec" :min="5" :max="600" size="small" class="!w-28" />
-            </div>
-            <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-line/40">
+            <!-- ㊍: 「监控」节撤了(三格分家进各自平台节), 只剩这一格讲"开哪页"—— 它是启动落点, 归外观 -->
+            <div class="flex items-center justify-between gap-4 px-4 pb-3 border-t border-line/40 pt-3">
               <div>
                 <div class="text-[13px] font-medium text-ink1">{{ t('settings.defaultWs') }}</div>
                 <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.defaultWsD') }}</div>
@@ -587,22 +586,6 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
                   { value: 'soop', label: platformName('soop') }
                 ]"
               />
-            </div>
-            <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-line/40">
-              <div>
-                <div class="text-[13px] font-medium text-ink1">{{ t('settings.gapMs') }}</div>
-                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.gapMsDesc') }}</div>
-              </div>
-              <n-input-number v-model:value="form.requestGapMs" :min="300" :max="10000" :step="100" size="small" class="!w-28" />
-            </div>
-            <div class="grid grid-cols-1 gap-2.5 px-4 py-3 border-t border-line/40">
-              <div :class="tileCls" role="switch" :aria-checked="form.prefetchStream" tabindex="0" @click="tileClick($event, 'prefetchStream')" @keydown.space.prevent="tileKey('prefetchStream')" @keydown.enter="tileKey('prefetchStream')">
-                <div class="min-w-0 flex-1">
-                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.prefetch') }}</div>
-                  <div class="text-[10.5px] text-ink3">{{ t('settings.prefetchD') }}</div>
-                </div>
-                <n-switch size="small" v-model:value="form.prefetchStream" />
-              </div>
             </div>
           </div>
         </section>
@@ -803,7 +786,30 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
                 ]"
               />
             </div>
+            <!-- 节奏两格(㊍): Panda 每轮是翻页的全站列表 = N 个请求, 提速直接换作风控面,
+                 所以这一格只归 Panda 自己; SOOP 那一格在下面的 SOOP 节里 -->
+            <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-line/40">
+              <div>
+                <div class="text-[13px] font-medium text-ink1">{{ t('settings.pollSec') }}</div>
+                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.pollSecDescPanda') }}</div>
+              </div>
+              <n-input-number v-model:value="form.monitor.pandalive.pollIntervalSec" :min="5" :max="600" size="small" class="!w-28" />
+            </div>
+            <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-line/40">
+              <div>
+                <div class="text-[13px] font-medium text-ink1">{{ t('settings.gapMs') }}</div>
+                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.gapMsDescPanda') }}</div>
+              </div>
+              <n-input-number v-model:value="form.monitor.pandalive.requestGapMs" :min="300" :max="10000" :step="100" size="small" class="!w-28" />
+            </div>
             <div class="grid grid-cols-1 gap-2.5 px-4 py-3 border-t border-line/40">
+              <div :class="tileCls" role="switch" :aria-checked="form.monitor.pandalive.prefetchStream" tabindex="0" @click="monTileClick($event, 'pandalive')" @keydown.space.prevent="monTileKey('pandalive')" @keydown.enter="monTileKey('pandalive')">
+                <div class="min-w-0 flex-1">
+                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.prefetch') }}</div>
+                  <div class="text-[10.5px] text-ink3">{{ t('settings.prefetchD') }}</div>
+                </div>
+                <n-switch size="small" v-model:value="form.monitor.pandalive.prefetchStream" />
+              </div>
               <div :class="tileCls" role="switch" :aria-checked="form.keepaliveStream" tabindex="0" @click="tileClick($event, 'keepaliveStream')" @keydown.space.prevent="tileKey('keepaliveStream')" @keydown.enter="tileKey('keepaliveStream')">
                 <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.keepalive') }}</div>
@@ -878,7 +884,7 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
           </div>
         </section>
 
-        <!-- SOOP: 采集链是只读事实(设计稿 S6 读状态不给假开关), 可写的只有自录默认与通知矩阵 -->
+        <!-- SOOP: 采集链是只读事实(设计稿 S6 读状态不给假开关), 可写的是自己的节奏三格、自录默认与通知矩阵 -->
         <section data-sec="soop" class="mb-5">
           <div class="flex items-baseline gap-2.5 px-1 pb-2">
             <h2 class="sec-h">{{ platformName('soop') }}</h2>
@@ -896,6 +902,31 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
                 <div v-if="soopStatus" class="text-[11px] text-ink3 mt-0.5 tabular-nums">
                   {{ t('settings.soopRound', { ms: soopStatus.roundMs, n: soopStatus.monitored, at: soopStatus.lastRoundAt ? roundTime(soopStatus.lastRoundAt) : '—' }) }}
                 </div>
+              </div>
+            </div>
+            <!-- 节奏两格(㊍): SOOP 每轮只发一发关注列表, 与 Panda 的翻页列表不同量级 ——
+                 共用一格时"想早点发现 SOOP 开播"只能把 Panda 一起提速, 那是拿一个平台的风险换另一个平台的读数 -->
+            <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-line/40">
+              <div>
+                <div class="text-[13px] font-medium text-ink1">{{ t('settings.pollSec') }}</div>
+                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.pollSecDescSoop') }}</div>
+              </div>
+              <n-input-number v-model:value="form.monitor.soop.pollIntervalSec" :min="5" :max="600" size="small" class="!w-28" />
+            </div>
+            <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-line/40">
+              <div>
+                <div class="text-[13px] font-medium text-ink1">{{ t('settings.gapMs') }}</div>
+                <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.gapMsDescSoop') }}</div>
+              </div>
+              <n-input-number v-model:value="form.monitor.soop.requestGapMs" :min="300" :max="10000" :step="100" size="small" class="!w-28" />
+            </div>
+            <div class="grid grid-cols-1 gap-2.5 px-4 py-3 border-t border-line/40">
+              <div :class="tileCls" role="switch" :aria-checked="form.monitor.soop.prefetchStream" tabindex="0" @click="monTileClick($event, 'soop')" @keydown.space.prevent="monTileKey('soop')" @keydown.enter="monTileKey('soop')">
+                <div class="min-w-0 flex-1">
+                  <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.prefetch') }}</div>
+                  <div class="text-[10.5px] text-ink3">{{ t('settings.prefetchD') }}</div>
+                </div>
+                <n-switch size="small" v-model:value="form.monitor.soop.prefetchStream" />
               </div>
             </div>
             <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-line/40">

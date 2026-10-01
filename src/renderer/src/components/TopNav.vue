@@ -68,7 +68,7 @@ function tabBadge(name: string): number {
 const watcherState = computed(() => {
   const w = store.watcher?.byPlatform?.[plat.value]
   if (!w) return { tone: 'idle', text: '—', tip: t('nav.wUnknown') }
-  const interval = store.settings?.pollIntervalSec ?? '?'
+  const interval = store.settings?.monitor?.[plat.value]?.pollIntervalSec ?? '?'
   const cost = w.roundMs < 1000 ? `${w.roundMs} ${t('common.ms')}` : `${(w.roundMs / 1000).toFixed(1)} ${t('common.sec')}`
   const heartbeat = t('nav.wTip', { sec: interval, cost })
   if (w.circuitOpen) return { tone: 'bad', text: t('nav.wCooling'), tip: `${w.message} · ${heartbeat}` }

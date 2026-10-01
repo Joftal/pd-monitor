@@ -85,7 +85,7 @@ const isVod = computed(() => tags.value?.liveType === 'rec')
 // ---- 侧栏信息卡取数(设计稿 S5: 失效自动续录 / 房间信息 / 本房间录制参数) ----
 const st = computed(() => store.settings)
 /** 房间信息不是实时推流, 是随轮询刷的 —— 把节奏写在卡头上, 免得用户拿它当秒级读数 */
-const pollSec = computed(() => st.value?.pollIntervalSec ?? 0)
+const pollSec = computed(() => st.value?.monitor?.[platform]?.pollIntervalSec ?? 0)
 /** 自动续录: 上限来自共享常量 REC_RETRY_MAX(与主进程同一个数, 不是抄的); 回放下载不续 —— 进度无法无损接回 */
 const retryText = computed(() => {
   if (isVod.value) return t('player.retryNaVod')

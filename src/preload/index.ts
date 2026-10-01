@@ -34,7 +34,7 @@ const apiBridge: ApiBridge = {
   anchorsImportPanda: (): Promise<FollowImportResult> => ipcRenderer.invoke(CH.anchorsImportPanda),
   anchorsSetAuto: (platform: Platform, userId: string, auto: boolean): Promise<boolean> =>
     ipcRenderer.invoke(CH.anchorsSetAuto, platform, userId, auto),
-  anchorsRefresh: (): Promise<boolean> => ipcRenderer.invoke(CH.anchorsRefresh),
+  anchorsRefresh: (platform?: Platform): Promise<boolean> => ipcRenderer.invoke(CH.anchorsRefresh, platform),
 
   // 播放
   livePlay: (platform: Platform, userId: string, password?: string, fresh?: boolean): Promise<PlayInfo> =>

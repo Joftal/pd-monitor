@@ -240,7 +240,7 @@ const seg = computed(() => {
   parts.push(isSoop.value ? t('ws.segOffline', { n: platAnchors.value.filter((a) => !a.isLive).length }) : t('ws.segDiscovery', { n: store.discovery.length }))
   const w = store.watcher?.byPlatform?.[plat.value]
   if (w?.lastRoundAt) parts.push(t('ws.segRoundAt', { time: fmtClock(w.lastRoundAt) }))
-  else parts.push(t('ws.segInterval', { sec: store.settings?.pollIntervalSec ?? '?' }))
+  else parts.push(t('ws.segInterval', { sec: store.settings?.monitor?.[plat.value]?.pollIntervalSec ?? '?' }))
   return parts.join(' · ')
 })
 
@@ -268,7 +268,7 @@ const refreshing = ref(false)
 async function refreshNow(): Promise<void> {
   refreshing.value = true
   try {
-    await api.anchorsRefresh()
+    await api.anchorsRefresh(plat.value)
     setTimeout(() => (refreshing.value = false), 2500)
   } catch (e) {
     refreshing.value = false

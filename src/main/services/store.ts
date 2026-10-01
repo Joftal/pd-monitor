@@ -1,7 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { dataDir } from '../util'
-import { Anchor, DEFAULT_PLATFORM, isPlatform, NotifyLiveRow, NotifyMatrix, NotifyRow, NotifyRules, Platform, RecHistoryItem, Settings, DEFAULT_SETTINGS } from '../../shared/types'
+import { Anchor, DEFAULT_PLATFORM, isPlatform, MonitorMatrix, MonitorRules, NotifyLiveRow, NotifyMatrix, NotifyRow, NotifyRules, Platform, RecHistoryItem, Settings, DEFAULT_SETTINGS } from '../../shared/types'
 import { logger } from './logger'
 
 interface DbShape {
@@ -33,6 +33,11 @@ function migrateHistory(x: RecHistoryItem): RecHistoryItem {
 function boolOr(v: unknown, fallback: boolean): boolean {
   return typeof v === 'boolean' ? v : fallback
 }
+/** 数值格只认有限数: 磁盘上的 JSON 可能是 NaN/字符串(手改过的库、写坏的一半),
+ *  而轮询间隔会被直接乘进 setTimeout —— 非有限值等于让定时器每毫秒发一轮 */
+function numOr(v: unknown, fallback: number): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : fallback
+}
 function obj(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' ? (v as Record<string, unknown>) : {}
 }
@@ -63,6 +68,12 @@ function toMatrix(raw: unknown, legacy: (key: string, def: boolean) => boolean, 
   return { pandalive: toRules(o.pandalive, DEFAULT_SETTINGS.notify.pandalive), soop: toRules(o.soop, DEFAULT_SETTINGS.notify.soop) }
 }
 
+/** 监控配置(㊍)的一格: 逐格取值, 缺格回落【本平台】的默认 —— 绝不拿另一平台的值来补 */
+function toMonitorRules(raw: unknown, def: MonitorRules): MonitorRules {
+  const o = obj(raw)
+  return { pollIntervalSec: numOr(o.pollIntervalSec, def.pollIntervalSec), requestGapMs: numOr(o.requestGapMs, def.requestGapMs), prefetchStream: boolOr(o.prefetchStream, def.prefetchStream) }
+}
+
 function migrateSettings(raw: unknown): Settings {
   const r = obj(raw)
   const s = { ...DEFAULT_SETTINGS, ...r } as Settings
@@ -71,8 +82,32 @@ function migrateSettings(raw: unknown): Settings {
   const legacyAuto = typeof r.autoRecordDefault === 'boolean' ? r.autoRecordDefault : false
   const a = obj(r.autoRecordDefault)
   s.autoRecordDefault = { pandalive: boolOr(a.pandalive, legacyAuto), soop: boolOr(a.soop, legacyAuto) }
-  // 旧全局开关已并入矩阵: 展开后即删除, 否则六个死键会跟着 setSettings 的浅合并永久留在 db.json
-  for (const k of ['notifySystem', 'notifySound', 'tgLive', 'tgOffline', 'tgRecord', 'tgError']) delete (s as unknown as Record<string, unknown>)[k]
+  // 旧库的三个全局监控键 → 两平台各铺一份同值(迁移不是重置: 只是把"这一格归谁"说清楚,
+  // 老用户没碰过的节奏升级后必须一模一样)。已是新库则逐格取值, 缺格回落本平台默认。
+  const mm = obj(r.monitor)
+  const legacyMon: MonitorRules = {
+    pollIntervalSec: numOr(r.pollIntervalSec, DEFAULT_SETTINGS.monitor.pandalive.pollIntervalSec),
+    requestGapMs: numOr(r.requestGapMs, DEFAULT_SETTINGS.monitor.pandalive.requestGapMs),
+    prefetchStream: boolOr(r.prefetchStream, DEFAULT_SETTINGS.monitor.pandalive.prefetchStream)
+  }
+  const hasMon = Boolean(mm.pandalive || mm.soop)
+  s.monitor = {
+    pandalive: toMonitorRules(mm.pandalive, hasMon ? DEFAULT_SETTINGS.monitor.pandalive : legacyMon),
+    soop: toMonitorRules(mm.soop, hasMon ? DEFAULT_SETTINGS.monitor.soop : legacyMon)
+  }
+  // 旧全局开关与三个监控标量已并入矩阵: 展开后即删除, 否则这些死键会跟着 setSettings 的浅合并永久留在 db.json
+  for (const k of [
+    'notifySystem',
+    'notifySound',
+    'tgLive',
+    'tgOffline',
+    'tgRecord',
+    'tgError',
+    'pollIntervalSec',
+    'requestGapMs',
+    'prefetchStream'
+  ])
+    delete (s as unknown as Record<string, unknown>)[k]
   return s
 }
 
@@ -80,6 +115,10 @@ function migrateSettings(raw: unknown): Settings {
 function mergeNotify(base: NotifyMatrix, inc: unknown): NotifyMatrix {
   const o = obj(inc)
   return { pandalive: toRules(o.pandalive ?? base.pandalive, base.pandalive), soop: toRules(o.soop ?? base.soop, base.soop) }
+}
+function mergeMonitor(base: MonitorMatrix, inc: unknown): MonitorMatrix {
+  const o = obj(inc)
+  return { pandalive: toMonitorRules(o.pandalive ?? base.pandalive, base.pandalive), soop: toMonitorRules(o.soop ?? base.soop, base.soop) }
 }
 function mergeAutoRec(base: Record<Platform, boolean>, inc: unknown): Record<Platform, boolean> {
   const o = obj(inc)
@@ -182,6 +221,7 @@ export const store = {
   setSettings(patch: Partial<Settings>): Settings {
     if (typeof patch.proxyUrl === 'string') patch = { ...patch, proxyUrl: patch.proxyUrl.trim() }
     if (patch.notify) patch = { ...patch, notify: mergeNotify(db.settings.notify, patch.notify) }
+    if (patch.monitor) patch = { ...patch, monitor: mergeMonitor(db.settings.monitor, patch.monitor) }
     if (patch.autoRecordDefault) patch = { ...patch, autoRecordDefault: mergeAutoRec(db.settings.autoRecordDefault, patch.autoRecordDefault) }
     db.settings = { ...db.settings, ...patch }
     persist(true)

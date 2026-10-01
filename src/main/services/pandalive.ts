@@ -862,7 +862,7 @@ class PandaApi {
     logger.warn('api', `保活连续真死(403/404), 源收尸: @${userId}`)
     this.invalidatePlay(userId)
     // 立即重铸(串行链, 与主请求队列同节奏): 房间未满即秒回有效态; 满员/风控高压则静默失败, 徽标保持熄灭(诚实态)
-    if (a?.isLive && store.getSettings().prefetchStream) {
+    if (a?.isLive && store.getSettings().monitor.pandalive.prefetchStream) {
       this.enqueueRemint(userId)
     }
   }

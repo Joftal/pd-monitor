@@ -193,7 +193,7 @@ async function importFollowRows(platform: Platform, rows: FollowIn[], listComple
     }
     store.addAnchor(anchor)
     added++
-    if (anchor.isLive && cfg.prefetchStream) watcher.prewarmNow(platform, r.userId) // 限速泵逐发, 不会齐发
+    if (anchor.isLive && cfg.monitor[platform].prefetchStream) watcher.prewarmNow(platform, r.userId) // 限速泵逐发, 不会齐发
   }
   // D3 反向差值: 站内列表里没有、本地仍在墙上挂着的 → 标「站内已取关 · 本地仍保留」。
   // 只写标注, 一个房间都不删(删墙是用户的决定); 重新被站内列表带回时清掉标注。
@@ -394,7 +394,7 @@ export function registerIpc(): void {
     // 离线→在线翻转, 对关注时已在播的主播永不再触发 —— 这里补洞, 与逐个模式语义对齐。
     // 不作废旧缓存: 先进房再关注 = 命中刚拉取的新鲜源, 预取泵自然 no-op, 不重发请求;
     // 密码房已验证源得以保留(playCache 免密复用契约), 不会二次进房重问密码。
-    if (anchor.isLive && cfg.prefetchStream) {
+    if (anchor.isLive && cfg.monitor[anchor.platform].prefetchStream) {
       watcher.prewarmNow(anchor.platform, anchor.userId)
     }
     // 不再触发 tick: 大厅数据已即时点亮; 列表不可见的由轮询规范的轮换兜底在后续轮次发现
@@ -436,8 +436,10 @@ export function registerIpc(): void {
     return true
   })
 
-  ipcMain.handle(CH.anchorsRefresh, () => {
-    watcher.tick()
+  ipcMain.handle(CH.anchorsRefresh, (_e, platform: Platform) => {
+    // 工作区的「立即刷新」站在某一平台页上: 只惊动那一条时间轴, 不为另一个平台多发一轮请求。
+    // 平台不认识(旧调用/坏入参)才退回首轮语义: 两平台各一轮
+    watcher.tick(isPlatform(platform) ? platform : undefined)
     return true
   })
 
@@ -628,9 +630,18 @@ export function registerIpc(): void {
     try {
       applyProxy(cfg.proxyUrl)
       setMainLocale(cfg.locale) // 语言变更即时注入主进程 i18n(单向数据流)
-      // 只有轮询相关设置的【值真的变了】才即时拉一轮(不能按 key 存在判断)
-      const WATCH_KEYS: (keyof Settings)[] = ['watchMode', 'pollIntervalSec', 'requestGapMs', 'proxyUrl']
-      if (WATCH_KEYS.some((k) => before[k] !== cfg[k])) watcher.tick()
+      // 只有轮询相关设置的【值真的变了】才即时拉一轮(不能按 key 存在判断)。
+      // 节奏分家后(㊍)按平台惊动: 只调 SOOP 那一格就不该为 Panda 多发一轮请求。
+      // watchMode/proxy 仍是全局键 —— 它们动一次, 两条时间轴一起重排。
+      const nudge = new Set<Platform>()
+      if (before.watchMode !== cfg.watchMode || before.proxyUrl !== cfg.proxyUrl) {
+        nudge.add('pandalive')
+        nudge.add('soop')
+      }
+      for (const p of ['pandalive', 'soop'] as const) {
+        if (JSON.stringify(before.monitor[p]) !== JSON.stringify(cfg.monitor[p])) nudge.add(p)
+      }
+      for (const p of nudge) watcher.tick(p)
     } catch (e) {
       logger.warn('app', `设置已保存但生效动作失败: ${String((e as Error).message || e)}`)
     }

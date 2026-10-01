@@ -184,24 +184,34 @@ export interface NotifyRules {
 /** 按平台的通知矩阵(D4): 两平台混排后"只关一个平台"必须是能点出来的, 全局开关做不到 */
 export type NotifyMatrix = Record<Platform, NotifyRules>
 
+/** 监控节奏(㊍): 一个平台的三格 —— 多久发一轮、轮内每个请求之间隔多久、开播要不要预取源。 */
+export interface MonitorRules {
+  pollIntervalSec: number
+  requestGapMs: number
+  prefetchStream: boolean
+}
+/** 按平台的监控配置(㊍): 两平台的采集量级不同 —— Panda 是翻页的全站列表(每轮 N 个请求, 提速即加风控面),
+ *  SOOP 是一发关注列表(每轮 1 个请求)。共用一格时"想早点发现 SOOP 开播"只能把 Panda 一起提速,
+ *  等于拿一个平台的风险换另一个平台的读数。 */
+export type MonitorMatrix = Record<Platform, MonitorRules>
+
 export interface Settings {
   savePath: string
   /** TS 分段时长(秒); 0 = 不分段, 整场录成单个 TS(与回放同一支单文件直出, 仍不直写 MP4) */
   splitSeconds: number
   autoMp4: boolean
   deleteTs: boolean
-  pollIntervalSec: number
-  requestGapMs: number
   proxyUrl: string
   watchMode: 'list' | 'per-anchor'
+  /** 轮询间隔 / 单请求节流 / 开播预取, 按平台各一套(㊍)。取代旧的三个全局键 ——
+   *  三个键都在这一格里, 缺哪一格由读库补齐兜住, 提交半格不抹另一平台(见 store.mergeMonitor) */
+  monitor: MonitorMatrix
   /** 通知矩阵(平台 × 事件 × 通道), 取代旧的全局 notifySystem/notifySound + tg* 四开关 */
   notify: NotifyMatrix
   /** 新增关注时的「开播自动录制」初始值: 两平台的可用面不同(SOOP 有 19+/限区房), 各留一档 */
   autoRecordDefault: Record<Platform, boolean>
   closeToTray: boolean
   diskLimitGb: number
-  /** 开播即预取直播源(后台节流泵), 点进房间零等待 */
-  prefetchStream: boolean
   /** 源保活: 对已缓存源做轻量心跳维持 IVS 会话活性(退出观看后满员房间仍能凭旧源继续看), 死源及时作废重铸 */
   keepaliveStream: boolean
   /** 录制收尾时自动把分段 MP4 合并为单个文件 */
@@ -232,10 +242,14 @@ export const DEFAULT_SETTINGS: Settings = {
   splitSeconds: 900,
   autoMp4: true,
   deleteTs: false,
-  pollIntervalSec: 30,
-  requestGapMs: 1200,
   proxyUrl: '',
   watchMode: 'list',
+  // 两平台同初值: 这是"从共用一格改成各用各的"的第一步, 默认值必须等于老库迁移后的样子,
+  // 否则全新安装与升级安装行为不同(老用户没改过设置却被换了节奏)
+  monitor: {
+    pandalive: { pollIntervalSec: 30, requestGapMs: 1200, prefetchStream: true },
+    soop: { pollIntervalSec: 30, requestGapMs: 1200, prefetchStream: true }
+  },
   notify: {
     // 默认全关: 通知是往外发声的通道, 未经用户确认就默认出声 = 拿用户的系统通知栏替应用说话。
     // 想要哪一格由用户在矩阵里逐格打开(设置页两块面板 + 整块开/关按钮都在平台节内)
@@ -255,7 +269,6 @@ export const DEFAULT_SETTINGS: Settings = {
   autoRecordDefault: { pandalive: false, soop: false },
   closeToTray: true,
   diskLimitGb: 1,
-  prefetchStream: true,
   keepaliveStream: true,
   mergeMp4: false,
   mergeDeleteSegments: true,
@@ -476,7 +489,8 @@ export interface ApiBridge {
   /** 把站内 Panda 关注(북마크, 官方上限 200)全量导入本地库; 落库语义与 SOOP 导入一致 */
   anchorsImportPanda(): Promise<FollowImportResult>
   anchorsSetAuto(platform: Platform, userId: string, auto: boolean): Promise<boolean>
-  anchorsRefresh(): Promise<boolean>
+  /** 立即触发一轮监控; 传平台只惊动那一平台(㊍ 两套定时器) */
+  anchorsRefresh(platform: Platform): Promise<boolean>
   livePlay(platform: Platform, userId: string, password?: string, fresh?: boolean): Promise<PlayInfo>
   /** 返回 roomKey 集(非裸 userId) */
   liveSrcCache(): Promise<string[]>
