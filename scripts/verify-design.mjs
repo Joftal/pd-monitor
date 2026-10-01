@@ -48,6 +48,7 @@
 //   D37 分段时长填 0 = 不分段: 整场一个不带段号的 TS, 合并档/管线第四棒随之收起, 库里与手动合并产物同归「整文件」一类
 //   D38 「关注在播」一屏只留一个现场: 头像坞退役, 读数只剩分段第一档 + 顶栏徽标, 组件/样式/文案/store getter 不留残骸
 //   D39 SOOP 头像按频道 ID 派生并落卡(404 回落兜底, 不画破图); 面板点赞/粉丝只在有数时摆行, 「不适用」那句连死键一起删
+//   D40 SOOP 的 ID 槽只放裸频道名: 「房间」前缀连 ws.roomNo 双语死键一起撤(Panda 的 @ 是可粘贴地址的一部分, 留着)
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -1122,6 +1123,24 @@ checkWithAllowlist(
 
   assert(!/naSoop/.test(pv) && !/naSoop/.test(zh) && !/naSoop/.test(en), 'D39g「不适用 · SOOP 接口不返回」连同两语言键一起绝迹: 撤掉的是一行占位, 不是给它换一句解释')
   assert(!/isSoop \? 'text-ink3'/.test(pv) && /const isSoop = platform === 'soop'/.test(pv), 'D39h 侧栏不再按平台分色(有数才摆行, 摆出来的行本来就都是真值), isSoop 仍服务于线路/保活那两处真实能力差异')
+}
+
+// ============================================================================
+// D40 SOOP 的 ID 槽只放 ID: 「房间」那两个字是给自说明的东西写说明书 (2026-10-01 用户指令「这里的房间+ID, 直接显示ID就行」)
+//   这一格的位置就是判据: 它在头像与昵称旁边, 前面还有直播状态与标题, 没有人会把它读成别的字段;
+//   Panda 侧的 @ 不是文案而是用户名的一部分(粘出去就是 @xxx), SOOP 侧的频道名粘出去就是裸的 tnwl9630 ——
+//   所以两平台各自的写法保留, 撤掉的只有我们替它加上去的那个前缀。
+// ============================================================================
+{
+  const lc = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'LiveCard.vue'), 'utf8')
+  const wsv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'WorkspaceView.vue'), 'utf8')
+  const zh = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'zh-CN.ts'), 'utf8')
+  const en = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'en-US.ts'), 'utf8')
+
+  assert(/\? m\.userId : '@' \+ m\.userId/.test(lc) && /\? a\.userId : '@' \+ a\.userId/.test(wsv), 'D40a 卡片与离线行的 SOOP ID 槽都是裸频道名(Panda 仍 @用户名 —— 那是可粘贴地址的一部分, 不是文案)')
+  assert(!/roomNo/.test(zh) && !/roomNo/.test(en) && !/房间 \{id\}|Room \{id\}/.test(zh + en), 'D40b「房间 {id}」这个带前缀的写法连两语言键一起绝迹(唯一消费方已改口, 死键不留)')
+  const prefixed = RENDERER.filter((f) => /t\(['"][\w.]*roomNo['"]/.test(fs.readFileSync(f, 'utf8')))
+  assert(prefixed.length === 0, 'D40c 全仓不再有任何一处给 ID 加「房间」前缀', prefixed.map(rel).join(', '))
 }
 
 // ============================================================================
