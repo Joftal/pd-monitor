@@ -145,8 +145,10 @@ export interface SoopFavoriteLive {
   startTime: string
   thumbUrl: string
   viewers: number
-  isAdult: boolean
-  isPw: boolean
+  /** 房态旗: 平台这一行说了才算数 —— 键缺席/非布尔一律留 undefined(= 不知道),
+   *  塌成 false 就等于替上一轮的真值下结论(watcher 的列表回写按这一格合并) */
+  isAdult?: boolean
+  isPw?: boolean
 }
 
 export interface SoopFavoriteRow {
@@ -211,8 +213,10 @@ function parseFavoriteRow(raw: unknown): SoopFavoriteRow | null {
     startTime: favClock(live.broad_start),
     thumbUrl: favThumb(live.broad_img),
     viewers: favViewers(live),
-    isAdult: live.is_adult === true,
-    isPw: live.is_password === true
+    // 只有平台真说了才落值: 键缺席/非布尔一律留 undefined(= 不知道)。
+    // 塌成 false 就是"知道它不是 19+"，而列表这一路的消费方(watcher.applySoopRow)会拿它覆盖上一轮的真值
+    isAdult: typeof live.is_adult === 'boolean' ? live.is_adult : undefined,
+    isPw: typeof live.is_password === 'boolean' ? live.is_password : undefined
   }
   return row
 }

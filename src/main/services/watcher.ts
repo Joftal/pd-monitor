@@ -47,6 +47,9 @@ class Watcher {
   private soopFailStreak = 0
   /** roomKey -> 连续"播放页报下播"轮数: 见 roundSoop, 单次读数不翻转状态 */
   private soopOfflineStreak = new Map<string, number>()
+  /** 诊断用: 上一轮「列表说在播、却没带 is_adult」的房数。只在数值变化时打一行,
+   *  用来分清"平台这一行确实没有这个字段"与"我们读错了键名", 不做逐房每轮刷屏 */
+  private soopBlindAdult = -1
   status: WatcherStatus = {
     running: false,
     mode: 'list',
@@ -249,12 +252,14 @@ class Watcher {
 
   /** 翻离线的统一补丁。lastLiveAt 必须在这里、在 Object.assign 之前从 a.startTime 取:
    *  updateAnchor 改的就是 listAnchors 返回的那个 a 本体, 调用点之后再读 a.startTime 恒为空串,
-   *  「上次开播」会被自己抹掉。拿不到开播时刻(旧数据)时保留原值, 不写空。 */
+   *  「上次开播」会被自己抹掉。拿不到开播时刻(旧数据)时保留原值, 不写空。
+   *  tags 按"房态"与"本场"分家: isAdult/type 是房间属性, 下播后依然成立, 整对象清 null 会把
+   *  已知真值抹成"无标签"; isPw/liveType 属于这一场, 场次结束就是没有, 必须清。 */
   private offPatch(a: Anchor, extra: Partial<Anchor> = {}): Partial<Anchor> {
     return {
       isLive: false,
       title: '',
-      tags: null,
+      tags: a.tags ? { isAdult: a.tags.isAdult, isPw: false, type: a.tags.type, liveType: '' } : null,
       startTime: '',
       viewerCount: 0,
       thumbUrl: '',
@@ -481,14 +486,23 @@ class Watcher {
     // 列表里判不了状态的房回落播放页探针: 整表拿不到(未登录/风控/改版)=全部回落,
     // 单房缺席(应用内关注 ≠ 站内关注)或"说在播却没给场次"=只回落它
     const probe: Anchor[] = []
+    let blindAdult = 0
     for (const a of anchors) {
       const row = byId?.get(a.userId)
       if (row && (!row.isLive || row.live)) {
+        // 在播行没带 is_adult(布尔缺席)= 这一轮我们读不到房态, applySoopRow 只能沿用旧值:
+        // 攒一个计数, 数值变了才落一行(见下方), 免得每轮逐房刷屏
+        if (row.live && row.live.isAdult === undefined) blindAdult++
         found += this.applySoopRow(a, row, now)
       } else {
         if (row) logger.info('soop', `列表报在播但无场次信息, 回落播放页 @${a.userId}`)
         probe.push(a)
       }
+    }
+    if (blindAdult !== this.soopBlindAdult) {
+      if (blindAdult > 0) logger.info('soop', `关注列表有 ${blindAdult} 个在播房未带 is_adult, 本轮这些房的 19+ 沿用上一轮`)
+      else if (this.soopBlindAdult > 0) logger.info('soop', '关注列表已带回 is_adult, 19+ 恢复按原值')
+      this.soopBlindAdult = blindAdult
     }
 
     let fail = 0
@@ -531,7 +545,14 @@ class Watcher {
         startTime: live.startTime || a.startTime,
         thumbUrl: live.thumbUrl || a.thumbUrl,
         viewerCount: live.viewers,
-        tags: { isAdult: live.isAdult, isPw: live.isPw, type: '', liveType: 'live' },
+        // 按字段合并而不是整包覆写: 单帧列表没带 is_adult/is_password 时留 undefined(不知道), 这里必须保住上一轮的真值 ——
+        // 塌成 false 会让 19+ 徽标隔轮闪、把房从「只看 19+」筛子里筛掉, 还被 onRoomShift 读成一次「转 19+」变更
+        tags: {
+          isAdult: live.isAdult ?? a.tags?.isAdult ?? false,
+          isPw: live.isPw ?? a.tags?.isPw ?? false,
+          type: '', // SOOP 结构性没有粉丝团(与 ㊇ 同口径): 这里的 '' 是断言, 不是缺席
+          liveType: 'live'
+        },
         lastSeenAt: now,
         // 在播期间就同步落「上次开播」: 我们未必守得到他下播那一轮(应用退出/关注移除), 事后无从补
         lastLiveAt: live.startTime || a.startTime || a.lastLiveAt

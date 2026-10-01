@@ -176,6 +176,8 @@ async function importFollowRows(platform: Platform, rows: FollowIn[], listComple
       userImg: live?.userImg || r.userImg || '',
       isLive: !!live,
       title: live?.title || '',
+      // 出生写: 这一支只在"库里还没有这个房间"时走到(上面已跳过在库的), 没有既有真值可覆盖,
+      // 所以 !! 把未知压成 false 是安全默认; 后续每轮由 applySoopRow 的 ?? 合并纠正
       tags: live ? { isAdult: !!live.isAdult, isPw: !!live.isPw, type: live.type || '', liveType: live.liveType || 'live' } : null,
       startTime: live?.startTime || '',
       viewerCount: live?.viewers || 0,
