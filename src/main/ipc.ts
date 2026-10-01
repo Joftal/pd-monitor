@@ -453,7 +453,8 @@ export function registerIpc(): void {
       // needLogin 必须透传: 前端据此弹"去登录"引导, 丢了就只剩一句无法行动的报错文案
       return { ok: false, needPassword: r.needPassword, needLogin: r.needLogin, error: r.error }
     }
-    applyPlayMeta(platform, userId, r) // SOOP: 点开播就把开播时刻/密码房标记补回关注卡(零额外请求)
+    // SOOP: 点开播就把开播时刻/密码房标记补回关注卡(零额外请求), 并拿回"与库里同一份"的房态给渲染层
+    const merged = applyPlayMeta(platform, userId, r)
     return {
       ok: true,
       vod: !!r.vod,
@@ -465,14 +466,15 @@ export function registerIpc(): void {
       nick: r.nick || '',
       thumbUrl: r.thumbUrl || '',
       userImg: r.userImg || '',
-      tags: r.media
+      // Panda 走不到 merged(applyPlayMeta 对它直接返回 null —— 它的房态每轮由列表原值维护), 仍按回包整包给
+      tags: merged ?? (r.media
         ? {
             isAdult: !!r.media.isAdult,
             isPw: !!r.media.isPw,
             type: String(r.media.type || ''),
             liveType: String(r.media.liveType || '')
           }
-        : undefined
+        : undefined)
     }
   })
 

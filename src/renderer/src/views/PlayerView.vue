@@ -86,17 +86,6 @@ const isVod = computed(() => tags.value?.liveType === 'rec')
 const st = computed(() => store.settings)
 /** 房间信息不是实时推流, 是随轮询刷的 —— 把节奏写在卡头上, 免得用户拿它当秒级读数 */
 const pollSec = computed(() => st.value?.pollIntervalSec ?? 0)
-/** 房态标签: 官方没有"分区"字段可给, 只有 19+/密码/粉丝/回放四种房态; 一个都没有就是「—」 */
-const labelList = computed(() => {
-  const g = tags.value
-  if (!g) return ''
-  const out: string[] = []
-  if (g.isAdult) out.push('19+')
-  if (g.isPw) out.push(t('account.tagPw'))
-  if (g.type === 'fan') out.push(t('account.tagFan'))
-  if (g.liveType === 'rec') out.push(t('account.tagRec'))
-  return out.join(' · ')
-})
 /** 自动续录: 上限来自共享常量 REC_RETRY_MAX(与主进程同一个数, 不是抄的); 回放下载不续 —— 进度无法无损接回 */
 const retryText = computed(() => {
   if (isVod.value) return t('player.retryNaVod')
@@ -560,10 +549,6 @@ async function manualRefresh() {
             <PlatTag :platform="platform" size="sm" surface="onsurf" class="shrink-0" />
           </div>
           <div class="panel-b">
-            <div class="kv">
-              <span class="kv-k">{{ t('player.labels') }}</span>
-              <span class="kv-v" :class="labelList ? 'text-ink1' : 'text-ink3'">{{ labelList || '—' }}</span>
-            </div>
             <div class="kv">
               <span class="kv-k">{{ t('player.liveDur') }}</span>
               <span class="kv-v">{{ liveDuration || '—' }}</span>

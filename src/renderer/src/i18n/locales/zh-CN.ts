@@ -220,7 +220,6 @@ export default {
     srcOk: '源状态 · 正常',
     srcDead: '源状态 · 失效',
     liveDur: '开播时长',
-    labels: '标签',
     likes: '点赞',
     fans: '粉丝',
     roomPollNote: '随轮询刷新(每 {sec} 秒), 不是实时推流读数',

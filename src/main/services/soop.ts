@@ -820,8 +820,9 @@ class SoopApi {
       title: info.roomName || meta.roomName,
       nick: info.hostName || meta.hostName,
       startTime,
-      // GRADE 的分级语义未实测(要 19+ 房样本才敢映射), 不臆断为成人房
-      media: { title: info.roomName || meta.roomName, userNick: info.hostName || meta.hostName, liveType: 'live', isPw: info.needPwd, isAdult: false, startTime }
+      // GRADE 的分级语义未实测(要 19+ 房样本才敢映射), 不臆断为成人房 —— 也就不写这一格:
+      // 这里补一个 isAdult: false 不是"不知道", 是"知道它没有", 会把列表 is_adult 的真值抹掉(source.ts applyPlayMeta 按字段合并)
+      media: { title: info.roomName || meta.roomName, userNick: info.hostName || meta.hostName, liveType: 'live', isPw: info.needPwd, startTime }
     }
   }
 

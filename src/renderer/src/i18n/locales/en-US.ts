@@ -217,7 +217,6 @@ export default {
     srcOk: 'Source · OK',
     srcDead: 'Source · dead',
     liveDur: 'On-air time',
-    labels: 'Tags',
     likes: 'Likes',
     fans: 'Followers',
     roomPollNote: 'Refreshed with polling (every {sec}s), not a live stream readout',
