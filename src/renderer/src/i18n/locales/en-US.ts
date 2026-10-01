@@ -75,7 +75,6 @@ export default {
     goneChip: 'Unfollowed on site {n}',
     goneShort: 'Unfollowed on site',
     goneTag: 'Unfollowed on site · kept locally',
-    roomNo: 'Room {id}',
     autoRecShort: 'Auto-rec',
     emptyNoFollow: 'No streamers followed yet',
     emptyKw: 'No room matches "{kw}"',

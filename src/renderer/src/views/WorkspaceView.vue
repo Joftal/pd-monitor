@@ -513,7 +513,7 @@ watch(
           <div class="min-w-0 flex-1">
             <div class="text-[13px] font-semibold text-ink1 truncate">{{ a.nick }}</div>
             <div class="text-[11.5px] text-ink3 truncate">
-              {{ isSoop ? t('ws.roomNo', { id: a.userId }) : '@' + a.userId }} · {{ fmtLastLive(a) }}
+              {{ isSoop ? a.userId : '@' + a.userId }} · {{ fmtLastLive(a) }}
               <span v-if="(daysGone(a) ?? 0) > 90" class="text-warnink">· {{ t('ws.staleTag') }}</span>
               <span v-if="a.siteGone" class="text-warnink">· {{ t('ws.goneTag') }}</span>
             </div>

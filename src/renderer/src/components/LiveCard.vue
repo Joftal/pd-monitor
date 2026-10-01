@@ -158,8 +158,9 @@ async function toggleRecord(): Promise<void> {
         <svg v-if="m.following" class="w-3.5 h-3.5 text-live shrink-0" viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 21s-7-4.6-9.3-9A5.4 5.4 0 0112 6.3 5.4 5.4 0 0121.3 12C19 16.4 12 21 12 21z"/>
         </svg>
-        <!-- ⑧ ID 槽: 两平台语义不同但宽度守恒 —— Panda 认 @用户名, SOOP 认房间号(登录 ID 不是用户能输入的地址) -->
-        <span class="text-[11.5px] text-ink3 truncate shrink-0 ml-auto">{{ m.platform === 'soop' ? t('ws.roomNo', { id: m.userId }) : '@' + m.userId }}</span>
+        <!-- ⑧ ID 槽: 两平台语义不同但宽度守恒 —— Panda 认 @用户名, SOOP 认频道名(登录 ID 不是用户能输入的地址);
+             SOOP 侧不加「房间」前缀: 这一格就在头像与昵称旁边, 那两个字是给自说明的东西写说明书 -->
+        <span class="text-[11.5px] text-ink3 truncate shrink-0 ml-auto">{{ m.platform === 'soop' ? m.userId : '@' + m.userId }}</span>
         <slot name="meta" />
       </div>
 

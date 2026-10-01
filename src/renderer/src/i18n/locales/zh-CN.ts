@@ -78,7 +78,6 @@ export default {
     goneChip: '站内已取关 {n}',
     goneShort: '站内已取关',
     goneTag: '站内已取关 · 本地仍保留',
-    roomNo: '房间 {id}',
     autoRecShort: '自动录制',
     emptyNoFollow: '还没有关注任何主播',
     emptyKw: '没有匹配「{kw}」的房间',
