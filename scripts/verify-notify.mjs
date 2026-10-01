@@ -1,5 +1,5 @@
 // ============================================================================
-// 验证脚本: 通知矩阵(D4) —— 老设置迁移 + 平台 × 事件 × 通道 三路门禁
+// 验证脚本: 通知矩阵(D4) —— 老设置迁移 + 平台 × 事件 × 通道 三路门禁 + 锚点读库补齐(㊌)
 //
 // 方法: store.ts 用真实源码(sucrase 现编译)+ 临时 dataDir, 专测读库补齐与落盘;
 //       notify.ts 用真实源码 + electron/secrets/telegram 替身, 替身只负责"有没有出货"计数.
@@ -22,6 +22,9 @@
 //   B7  显式 tg.ev 决定归属行(recError 属录制域, circuit 属异常域)
 //   B8  toast.type → 行的兜底映射(fanLive/roomChange 归开播, info 归录制)
 //   B9  气泡/系统通知标题带平台标签(同名主播跨平台不认错, 标题自带平台词不重复)
+//   C1  SOOP 已离线的房带着旧轮 19+: 读库时清成 false, 同对象其它字段不动(真机拍到 papcon0206)
+//   C2  Panda 的 19+ 不许被同一条补齐擦掉; 无 tags 的房仍是 null; 缺 platform 的老行按默认平台判
+//   C5  补齐幂等(清过再读不再变)
 // ============================================================================
 import { createRequire } from 'module'
 import * as fs from 'fs'
@@ -319,8 +322,28 @@ const toast = (platform, type, title = 't', body = 'b') => ({ platform, type, ti
   assert(world.sends[2].title === 'SOOP 监控已失效', 'B9 标题自带平台词时不重复挂前缀', world.sends[2].title)
 }
 
+console.log('\n===== C 锚点读库补齐: SOOP 的旧 19+ 残留(㊌) =====\n')
+
+{
+  // 在播房的 isAdult 每轮由列表回写成 false, 但**已经离线**的房再无写点(offPatch 保的是房间属性,
+  // 而 SOOP 自 ㊌ 起不带这一格)—— 真机拍到 papcon0206 下播后页头仍挂 19+ 徽标, 就在这里收敛
+  const soopTagged = { platform: 'soop', userId: 'papcon0206', nick: '유아리', isLive: false, lastLiveAt: '2026-10-01 08:05:00', tags: { isAdult: true, isPw: true, type: 'fan', liveType: 'rec' } }
+  const pandaTagged = { platform: 'pandalive', userId: 'lotus82', nick: '강하라', isLive: true, tags: { isAdult: true, isPw: false, type: 'fan', liveType: 'live' } }
+  const noTags = { platform: 'soop', userId: 'tnwl9630', nick: 'x', isLive: false, tags: null }
+  const legacyNoPlat = { userId: 'old_room', nick: '老行', isLive: false, tags: { isAdult: true, isPw: false, type: '', liveType: '' } }
+  const { store } = storeWith({ anchors: [soopTagged, pandaTagged, noTags, legacyNoPlat], history: [], settings: {} })
+  const get = (u) => store.listAnchors().find((a) => a.userId === u)
+  same(get('papcon0206').tags, { isAdult: false, isPw: true, type: 'fan', liveType: 'rec' }, 'C1 SOOP 旧轮的 19+ 读库即清成 false, 同对象的其它字段一个都不动(只擦这一格)')
+  assert(get('lotus82').tags.isAdult === true, 'C2 Panda 的 19+ 是它自己列表维护的正当真值, 补齐不许顺手擦掉')
+  assert(get('tnwl9630').tags === null, 'C3 没有 tags 对象的房仍是 null —— 补齐不是"给每个房造一份标签"')
+  assert(get('old_room').platform === 'pandalive' && get('old_room').tags.isAdult === true, 'C4 缺 platform 的老行按默认平台(pandalive)补齐, 不得因为"认不出来"被当 SOOP 擦旗')
+  const again = storeWith({ anchors: [get('papcon0206')], history: [], settings: {} }).store
+  same(again.listAnchors()[0].tags, { isAdult: false, isPw: true, type: 'fan', liveType: 'rec' }, 'C5 补齐幂等: 清过一遍再读一遍, 值与形状都不再变')
+}
+
 console.log('\n' + '─'.repeat(72))
 console.log(`通过 ${PASS} / 失败 ${FAIL}`)
 console.log('解读: A 组 ⇒ 老库升级后通知行为逐格不变(迁移不是重置), 半格提交不抹掉未提交的格;')
 console.log('      B 组 ⇒ 系统通知/推送/提示音三路由「平台 × 事件」两个轴独立决定, 应用内气泡永不受管制.')
+console.log('      C 组 ⇒ 读库补齐只认 soop 的旧 19+ 残留(它已不是房间属性), 正当真值与 null 形状一律不动.')
 process.exit(FAIL === 0 ? 0 : 1)
