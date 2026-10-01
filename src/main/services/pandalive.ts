@@ -687,11 +687,12 @@ class PandaApi {
     }
   }
 
-  /** 站内关注全量(官方上限 200 个): 一页 100, 按 page.total 收满或短页即停。
+  /** 站内关注全量(官方上限 200 个): 一发 limit=200 收满(2026-10-02 实测 158 条/90KB/page.lastPage=1),
+   *  分页循环保留作"上限被抬高"的保险, 按 page.total 收满或短页即停。
    *  返回 null = 列表不可用(未登录/风控/改版/整表脏): 调用方必须报失败,
    *  绝不能把"没读到"当成"一个关注都没有"而清库或判全员下播。 */
   async fetchBookmarks(): Promise<PandaBookmarkRow[] | null> {
-    const limit = 100
+    const limit = 200
     const out: PandaBookmarkRow[] = []
     let collected = 0
     let dropped = 0

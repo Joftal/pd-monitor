@@ -492,6 +492,9 @@ export function registerIpc(): void {
 
   // ---------- 大厅 ----------
   ipcMain.handle(CH.discoveryList, () => watcher.getDiscovery())
+  // 按需刷新(㊑): 轮询改用站内关注列表后, 全站榜那几页只在用户打开「发现」时拉;
+  // 主进程内 60 秒复用 + 在飞合并, 所以来回切视图不会攒出一串分页请求
+  ipcMain.handle(CH.discoveryRefresh, (_e, force?: boolean) => watcher.refreshDiscovery(force === true))
 
   // ---------- 录制 ----------
   ipcMain.handle(CH.recList, () => recorder.list())

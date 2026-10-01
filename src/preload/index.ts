@@ -45,6 +45,7 @@ const apiBridge: ApiBridge = {
 
   // 大厅
   discoveryList: (): Promise<DiscoveryItem[]> => ipcRenderer.invoke(CH.discoveryList),
+  discoveryRefresh: (force?: boolean): Promise<DiscoveryItem[]> => ipcRenderer.invoke(CH.discoveryRefresh, force),
 
   // 录制
   recList: (): Promise<RecTask[]> => ipcRenderer.invoke(CH.recList),

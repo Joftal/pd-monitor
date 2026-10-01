@@ -240,6 +240,12 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 const seg = computed(() => {
   const parts = [t('ws.segFollowed', { n: platAnchors.value.length }), t('ws.segLive', { n: platAnchors.value.filter((a) => a.isLive).length })]
   parts.push(isSoop.value ? t('ws.segOffline', { n: platAnchors.value.filter((a) => !a.isLive).length }) : t('ws.segDiscovery', { n: store.discovery.length }))
+  // 大厅那一格挂它自己的钟(㊑): 全站榜不再搭轮询的车以后, 在这屏说"上轮拉取"是把轮次的计时器借给大厅,
+  // 而它可能三分钟没动过 —— 没拉过就不编时间, 反正这一屏的刷新正在飞
+  if (view.value === 'discover' && !isSoop.value) {
+    if (store.watcher?.discoveryAt) parts.push(t('ws.segHallAt', { time: fmtClock(store.watcher.discoveryAt) }))
+    return parts.join(' · ')
+  }
   const w = store.watcher?.byPlatform?.[plat.value]
   if (w?.lastRoundAt) parts.push(t('ws.segRoundAt', { time: fmtClock(w.lastRoundAt) }))
   else parts.push(t('ws.segInterval', { sec: store.settings?.monitor?.[plat.value]?.pollIntervalSec ?? '?' }))
@@ -270,7 +276,10 @@ const refreshing = ref(false)
 async function refreshNow(): Promise<void> {
   refreshing.value = true
   try {
-    await api.anchorsRefresh(plat.value)
+    // 按钮刷的是眼前这一屏的数据源(㊑): 发现那一屏来自全站榜, 它已不再搭轮询的车,
+    // 在这里 nudge 监控轮只会得到一份没变的列表
+    if (view.value === 'discover' && !isSoop.value) await api.discoveryRefresh(true)
+    else await api.anchorsRefresh(plat.value)
     setTimeout(() => (refreshing.value = false), 2500)
   } catch (e) {
     refreshing.value = false
@@ -321,23 +330,21 @@ async function setAuto(a: Anchor, v: boolean): Promise<void> {
 }
 
 // ---- 空态归因(设计稿 7.2: 每条都要说清为什么空、下一步做什么) ----
-/** 发现段为什么空: 未登录 / 匿名受限 / 逐个检测无数据源, 三种空的下一步动作完全不同, 不能共用一句「暂无」 */
+/** 发现段为什么空: 未登录 / 匿名受限 / 全站榜还没拉到, 三种空的下一步动作完全不同, 不能共用一句「暂无」 */
 const discoverEmpty = computed(() => {
   if (kw.value) return t('ws.emptyKw', { kw: store.searchKeyword.trim() })
   if (isSoop.value) return loggedIn.value ? t('ws.emptyDiscovery') : t('ws.emptyDiscoverAnon')
   if (!loggedIn.value) return t('ws.emptyDiscoverLogin')
-  if (store.watcher?.mode === 'per-anchor') return t('ws.emptyDiscoverPerAnchor')
   return t('ws.emptyDiscovery')
 })
 /** 空态的下一步动作: 必须与 listEmpty 同一顺序、同一判据 —— 墙上一句「没有匹配 X」而手里没有清除搜索,
  *  等于让用户自己去顶栏找回那个词(顶栏搜索框没有 ✕)。文案与出口分两处判断就会漂移, 所以合为一处。 */
-type EmptyAction = 'clearFilters' | 'clearKw' | 'gotoLogin' | 'gotoDetectList' | 'firstUse' | null
+type EmptyAction = 'clearFilters' | 'clearKw' | 'gotoLogin' | 'firstUse' | null
 const emptyAction = computed<EmptyAction>(() => {
   if (activeFilters.value.length && baseCount.value) return 'clearFilters'
   if (view.value === 'discover') {
     if (kw.value) return 'clearKw'
     if (!loggedIn.value) return 'gotoLogin'
-    if (!isSoop.value && store.watcher?.mode === 'per-anchor') return 'gotoDetectList'
     return null
   }
   if (!platAnchors.value.length) return 'firstUse'
@@ -363,6 +370,9 @@ watch(
   [view, plat],
   () => {
     if (view.value === 'live') store.seenLive(plat.value)
+    // 全站榜不再搭轮询的车(㊑): 只有真的站在「发现」这一屏才发那几页请求, 主进程 60 秒内复用,
+    // 所以来回切 tab / 翻页 / 搜索都是零请求
+    if (view.value === 'discover' && !isSoop.value) void api.discoveryRefresh().catch(() => undefined)
   },
   { immediate: true }
 )
@@ -546,9 +556,6 @@ watch(
               </template>
               <template v-else-if="emptyAction === 'gotoLogin'">
                 <n-button size="small" type="primary" @click="router.push({ name: 'account', query: { plat } })">{{ t('ws.gotoLogin') }}</n-button>
-              </template>
-              <template v-else-if="emptyAction === 'gotoDetectList'">
-                <n-button size="small" secondary @click="router.push({ name: 'settings' })">{{ t('ws.gotoDetectList') }}</n-button>
               </template>
               <template v-else>
                 <n-button size="small" type="primary" @click="openAdd">{{ isSoop ? t('ws.addRoom') : t('monitor.addBtn') }}</n-button>

@@ -11,10 +11,13 @@ import { logger } from './logger'
 import { mt } from '../i18n'
 
 // ============ 轮询引擎 ============
-// list 模式: 每轮拉全站直播列表(分页, 每页一个请求), 本地匹配监控主播 —— 防封核心
+// list 模式: 每轮一发站内关注列表(/v1/live/bookmark, 实测 158 关注/90KB/1 发)判全部关注的在播与下播
+//            —— 它只覆盖"我自己关注的人", 请求面与关注数无关, 是防封主力; 列表不可用(未登录/风控/改版)
+//            才回落全站榜分页匹配(旧链路)。全站榜自此不再搭轮询的车, 大厅按需拉(㊑)。
 // per-anchor 模式: 逐个 member/bj (兜底, 限速队列生效)
-// SOOP: 每轮一发站内关注列表(带 is_live/broad_info)本地匹配, 列表覆盖不到的房才回落播放页探针
-// 列表外离线关注(pumpIdle): 轮次间隙按 gap 持续轮扫, 开播发现延迟 ≈ N×gap, 与轮询间隔脱钩
+// SOOP: 每轮一发站内关注列表(myapi/favorite)本地匹配, 列表覆盖不到的房才回落播放页探针
+// 站内关注表里没有的离线关注(应用内自增/官网侧取关, pumpIdle): 轮次间隙按 gap 持续轮扫,
+//            开播发现延迟 ≈ N×gap, 与轮询间隔脱钩
 // 熔断: 连续失败 N 轮 -> 暂停 + 指数退避, 并通知 UI
 // ==================================
 
@@ -51,6 +54,13 @@ class Watcher {
   private cooldownUntil = 0
   private sessionDeadStreak = 0
   private discovery: DiscoveryItem[] = []
+  /** 大厅快照的在飞请求(㊑): 全站榜不再搭轮询的车, 谁打开谁触发, 60 秒内复用(时刻记在 status.discoveryAt) */
+  private discoveryInFlight: Promise<DiscoveryItem[]> | null = null
+  /** 预言机连续"报下播"轮数: 与 soopOfflineStreak 同规约, 单轮读数不翻转状态 */
+  private pandaOfflineStreak = new Map<string, number>()
+  /** 本轮 Panda 用的是哪条真值链 + 预言机覆盖到的关注数(只服务轮次摘要日志, 让"1 发覆盖 158"可被事后核对) */
+  private pandaOracle: 'bookmark' | 'list' = 'bookmark'
+  private pandaCovered = 0
   /** 在播数分平台记: Panda 冷却/熔断的那几轮不复查 Panda, 只能沿用上次已知值, 不能被 SOOP 覆盖成 0 */
   private pandaLiveFound = 0
   private soopLiveFound = 0
@@ -64,6 +74,7 @@ class Watcher {
     lastRoundAt: null,
     roundMs: 0,
     liveCount: 0,
+    discoveryAt: 0,
     monitored: 0,
     liveFound: 0,
     circuitOpen: false,
@@ -158,11 +169,16 @@ class Watcher {
       // (每轮都写会刷屏: 30s 间隔下一天 2880 行; 抽稀到 ~5 分钟一行, 14 天约 100KB)
       if (++L.roundCnt % 10 === 0) {
         const all = `${platformName(platform)} 第 ${L.roundCnt} 轮 关注=${st.monitored} 在播=${st.liveFound}`
+        const tail = `本轮=${Date.now() - begin}ms`
+        // Panda 的 list 模式现在跑两条形不同的链(㊑): 预言机那条形同"1 发问完 158 个关注",
+        // 全站榜那条才真的看过全站 —— 日志必须说清是哪条, 否则 全站= 会读成上一份大厅快照
         logger.info(
           'watcher',
-          platform === 'pandalive' && this.status.mode === 'list'
-            ? `${all} 全站=${this.status.liveCount} 本轮=${Date.now() - begin}ms`
-            : `${all} 本轮=${Date.now() - begin}ms`
+          platform !== 'pandalive' || this.status.mode !== 'list'
+            ? `${all} ${tail}`
+            : this.pandaOracle === 'bookmark'
+              ? `${all} 站内覆盖=${this.pandaCovered} ${tail}`
+              : `${all} 全站=${this.status.liveCount} ${tail}`
         )
       }
       this.push()
@@ -193,14 +209,14 @@ class Watcher {
     const pBegin = Date.now()
     try {
       if (cfg.watchMode === 'list') {
-        this.pandaLiveFound = await this.roundByList(anchors)
+        // 站内关注列表优先(1 发覆盖全部关注, 实测 158 条/90KB): 它直接对"我关注的人"发言,
+        // 请求数与全站热度无关, 是这一站的风控面下限
+        const viaBookmark = await this.roundByBookmark(anchors)
+        this.pandaLiveFound = viaBookmark === null ? await this.roundByList(anchors) : viaBookmark
       } else {
-        // 逐个模式下大厅无数据源: 清空并广播, 让大厅显示"模式不可用"空态
+        // 逐个模式只管"怎么查我的关注", 大厅是另一件事(㊑: 全站榜按需刷新, 与 watchMode 无关),
+        // 所以这里不再清空快照 —— 旧实现清它是为了让大厅报"模式不可用", 现在同一个 tab 自己会去拉
         this.idleQueue = [] // per-anchor 每轮全量复查: list 残留的 rest 快照作废, 间隙泵在此模式无职责
-        if (this.discovery.length) {
-          this.discovery = []
-          this.pushDiscovery()
-        }
         this.pandaLiveFound = await this.roundByBj(anchors)
       }
       this.errorStreak = 0
@@ -312,22 +328,116 @@ class Watcher {
     }
   }
 
-  /** list 模式: 拉全站列表, 本地匹配; 全量列表同时作为大厅数据源。返回 Panda 侧在播数 */
-  private async roundByList(anchors: Anchor[]): Promise<number> {
-    const liveMap = new Map<string, LiveItem>()
-    let page = 0
-    let loginInfo: unknown = undefined
-    while (page < MAX_PAGES) {
-      const { list, loginInfo: li } = await api.fetchLivePage(page * PAGE_SIZE, PAGE_SIZE)
-      loginInfo = li
-      for (const item of list) liveMap.set(item.userId, item)
-      // 没到满页即已到列表底部
-      if (list.length < PAGE_SIZE) break
-      page++
+  /** Panda 轮询的预言机: 站内关注列表(/v1/live/bookmark)一发给出每个关注的在播/下播与场次元数据。
+   *  返回 null = 列表不可用(未登录/风控/改版/整表脏, fetchBookmarks 内部已收敛为一句话),
+   *  调用方必须回落到全站榜那一轮 —— 绝不把"没读到"当成"全员下播"。
+   *  与 SOOP 那一轮同规约: 三态必分, 下播要两轮才翻转(这一翻要发通知并作废旧源)。 */
+  private async roundByBookmark(anchors: Anchor[]): Promise<number | null> {
+    // 这一发要活会话才说话(实测匿名态必回 result:false): 没罐就直接不试, 全站榜那条是匿名用户的既有链路
+    if (!api.hasSession()) {
+      this.pandaOracle = 'list'
+      return null
     }
-    this.status.liveCount = liveMap.size
+    // 罐里有 cookie ≠ 会话已证明: cookieValid 冷启动是 false, 服务端判死也翻回 false —— "没证明"与"已判死"共用一个假值。
+    // 直接把它当"别发这一发", 冷启动第一轮就整轮落回全站榜四页(实测 403KB)。这里补问一句 login_info:
+    // 30 秒缓存 + 在飞合并, 与启动自愈那次同源(通常零增量), 答案是要的 → 预言机立刻上车;
+    // 答案是"没登录"的 → 本轮照旧走兜底链, 代价是每 30 秒一发小请求, 远小于它省下的那四页
+    if (!api.cookieValid) {
+      const info = await api.checkLoginInfo()
+      if (!info.isLogin) {
+        this.pandaOracle = 'list'
+        return null
+      }
+      api.cookieValid = true
+    }
+    const rows = await api.fetchBookmarks()
+    if (rows === null) {
+      this.pandaOracle = 'list'
+      logger.warn('watcher', '站内关注列表不可用, 本轮回落全站榜分页')
+      return null
+    }
+    this.pandaOracle = 'bookmark'
+    this.pandaCovered = rows.length
+    const now = Date.now()
+    // 抖动计数只服务当前关注集: 已取关的房即时清账, 防这张表无界增长
+    const monitored = new Set(anchors.map((a) => roomKey(a.platform, a.userId)))
+    for (const key of [...this.pandaOfflineStreak.keys()]) if (!monitored.has(key)) this.pandaOfflineStreak.delete(key)
 
-    // 全量在播列表 -> 大厅(按观众数降序)
+    const byId = new Map(rows.map((r) => [r.userId, r]))
+    let liveFound = 0
+    const missing: Anchor[] = []
+    for (const a of anchors) {
+      const key = roomKey(a.platform, a.userId)
+      const row = byId.get(a.userId)
+      if (!row || (row.isLive && !row.live)) {
+        // 站内没这条关注(应用内添加/官网侧已取关) 或"说在播却没给场次"= 判不了, 交回原探针链路
+        if (row) logger.info('watcher', `站内关注列表报在播但无场次信息, 回落 member/bj @${a.userId}`)
+        missing.push(a)
+        continue
+      }
+      const wasLive = a.isLive
+      const prevTags = a.tags // updateAnchor 原地改 a, 变更判定必须先拍旧标签快照
+      if (!row.isLive) {
+        if (!wasLive) {
+          const patch: Partial<Anchor> = {}
+          if (row.nick && row.nick !== a.nick) patch.nick = row.nick
+          if (Object.keys(patch).length) store.updateAnchor(a.platform, a.userId, patch)
+        }
+        this.markPandaOffline(a, wasLive, now)
+        continue
+      }
+      const live = row.live as NonNullable<typeof row.live>
+      const patch: Partial<Anchor> = {
+        isLive: true,
+        nick: row.nick || a.nick,
+        userIdx: row.userIdx ?? a.userIdx,
+        userImg: live.userImg || row.userImg || a.userImg,
+        title: live.title || '',
+        tags: { isAdult: live.isAdult, isPw: live.isPw, type: live.type, liveType: live.liveType },
+        startTime: live.startTime || '',
+        viewerCount: live.viewers,
+        likes: live.likes,
+        fans: live.fans,
+        thumbUrl: live.thumbUrl || '',
+        lastSeenAt: now,
+        // 在播期间就落「上次开播」: 未必守得到他下播那一轮(应用退出/关注移除), 事后无从补
+        lastLiveAt: live.startTime || a.lastLiveAt
+      }
+      store.updateAnchor(a.platform, a.userId, patch)
+      this.pandaOfflineStreak.delete(key)
+      liveFound++
+      if (!wasLive) this.onLiveStart({ ...a, ...patch } as Anchor)
+      else this.onRoomShift(a, prevTags, patch.tags as NonNullable<Anchor['tags']>)
+    }
+
+    // 列表覆盖不到的关注: 与旧链路同一份兜底(轮内复查曾开播的, 离线的那些交间隙泵)
+    const urgent = missing.filter((a) => a.isLive && !this.isGone(a))
+    for (const a of urgent) {
+      try {
+        liveFound += await this.applyBj(a, await api.fetchBj(a.userId))
+      } catch (e) {
+        if (e instanceof BjNotFoundError) {
+          this.onBjNotFound(a)
+          continue // 单点数据错误: 不污染本轮(不升级熔断/连败)
+        }
+        throw e // 其余错误维持轮次失败语义
+      }
+    }
+    this.idleQueue = missing.filter((a) => !a.isLive) // 新快照整批替换(上轮未扫完的按最新状态重排)
+
+    // 会话存续证据: result:true 的整表只可能来自活会话(判死/风控都在 fetchBookmarks 里折成 null)
+    if (api.hasSession()) {
+      this.sessionDeadStreak = 0
+      api.cookieValid = true
+    }
+    this.pushAnchors()
+    return liveFound
+  }
+
+  /** 全站榜 → 大厅读数(按观众数降序) + 全站在播数。两条入口共用: 兜底轮与按需刷新 */
+  private publishDiscovery(liveMap: Map<string, LiveItem>): void {
+    this.status.liveCount = liveMap.size
+    this.status.discoveryAt = Date.now()
     this.discovery = [...liveMap.values()]
       .sort((a, b) => (b.user || 0) - (a.user || 0))
       .map((x) => ({
@@ -349,6 +459,69 @@ class Watcher {
         userImg: x.userImg || ''
       }))
     this.pushDiscovery()
+    // 大厅时刻随快照广播(㊑): 全站榜不再搭轮询的车以后, "这一屏的数据多旧"只有发它的那一处知道,
+    // 而轮次那一条 push 得可能比快照新得多 —— 让页头去读 lastRoundAt 就是把轮次的钟挂在大厅上
+    this.push()
+  }
+
+  /** 大厅(全站榜)按需刷新(㊑): 轮询换用站内关注列表后, 这几页只在用户真的站在「发现」那一屏时才拉。
+   *  60 秒内的快照直接复用 —— 来回切视图/翻页/搜索都不该再打官网四页(实测 4 页 / 403KB)。
+   *  熔断或退避期不发(与 pumpIdle 同语义), 调用方继续看旧快照; 在飞的那次合并, 不重复发。
+   *  失败不空表: 一页都没取到就保留上一份, "没读到"绝不画成"全站没人播"。 */
+  async refreshDiscovery(force = false): Promise<DiscoveryItem[]> {
+    if (this.discoveryInFlight) return this.discoveryInFlight
+    if (!force && Date.now() - this.status.discoveryAt < 60_000) return this.discovery
+    if (this.status.byPlatform.pandalive.circuitOpen || Date.now() < this.cooldownUntil) return this.discovery
+    const p = (async () => {
+      const liveMap = new Map<string, LiveItem>()
+      try {
+        for (let page = 0; page < MAX_PAGES; page++) {
+          const { list } = await api.fetchLivePage(page * PAGE_SIZE, PAGE_SIZE)
+          for (const item of list) liveMap.set(item.userId, item)
+          if (list.length < PAGE_SIZE) break
+        }
+      } catch (e) {
+        logger.warn('watcher', `大厅刷新失败, 沿用上一份快照: ${String((e as Error).message || e)}`)
+      }
+      if (liveMap.size) this.publishDiscovery(liveMap)
+      return this.discovery
+    })()
+    this.discoveryInFlight = p
+    void p.finally(() => {
+      if (this.discoveryInFlight === p) this.discoveryInFlight = null
+    })
+    return p
+  }
+
+  /** 预言机报"没在播": 单轮读数不翻转状态(瞬回离线/改版丢字段都可能), 连续两轮才判下播 */
+  private markPandaOffline(a: Anchor, wasLive: boolean, now: number): void {
+    const key = roomKey(a.platform, a.userId)
+    if (!wasLive) return
+    const n = (this.pandaOfflineStreak.get(key) || 0) + 1
+    this.pandaOfflineStreak.set(key, n)
+    if (n < 2) {
+      logger.info('watcher', `站内关注列表报下播, 待第二轮确认 @${a.userId}`)
+      return
+    }
+    this.pandaOfflineStreak.delete(key)
+    store.updateAnchor(a.platform, a.userId, this.offPatch(a, { lastSeenAt: now }))
+    this.onLiveEnd(a)
+  }
+
+  /** list 模式: 拉全站列表, 本地匹配; 全量列表同时作为大厅数据源。返回 Panda 侧在播数 */
+  private async roundByList(anchors: Anchor[]): Promise<number> {
+    const liveMap = new Map<string, LiveItem>()
+    let page = 0
+    let loginInfo: unknown = undefined
+    while (page < MAX_PAGES) {
+      const { list, loginInfo: li } = await api.fetchLivePage(page * PAGE_SIZE, PAGE_SIZE)
+      loginInfo = li
+      for (const item of list) liveMap.set(item.userId, item)
+      // 没到满页即已到列表底部
+      if (list.length < PAGE_SIZE) break
+      page++
+    }
+    this.publishDiscovery(liveMap)
 
     const now = Date.now()
     let liveFound = 0

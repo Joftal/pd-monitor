@@ -352,6 +352,9 @@ export interface WatcherStatus {
   lastRoundAt: number | null
   roundMs: number
   liveCount: number
+  /** 大厅(全站榜)快照的取回时刻, 0=本次运行还没拉过(㊑): 轮询换用站内关注列表以后,
+   *  大厅的新旧与轮次的新旧是两件事, 「这份数据多旧」只有发它的那一处知道 */
+  discoveryAt: number
   monitored: number
   liveFound: number
   circuitOpen: boolean
@@ -496,6 +499,8 @@ export interface ApiBridge {
   liveSrcCache(): Promise<string[]>
   keepaliveStatus(platform: Platform, userId: string): Promise<KeepaliveStatus>
   discoveryList(): Promise<DiscoveryItem[]>
+  /** 按需刷新大厅(全站榜): 轮询换用站内关注列表后, 这几页只在用户打开「发现」时才拉 */
+  discoveryRefresh(force?: boolean): Promise<DiscoveryItem[]>
   recList(): Promise<RecTask[]>
   recHistory(): Promise<RecHistoryItem[]>
   recStart(platform: Platform, userId: string, password?: string): Promise<RecTask | { ok: false; needPassword?: boolean; error?: string }>
@@ -553,6 +558,7 @@ export const CH = {
   liveSrcCache: 'live:src-cache',
   liveKeepaliveStatus: 'live:keepalive-status',
   discoveryList: 'discovery:list',
+  discoveryRefresh: 'discovery:refresh',
   recList: 'rec:list',
   recHistory: 'rec:history',
   recStart: 'rec:start',
