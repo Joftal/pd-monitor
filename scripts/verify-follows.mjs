@@ -62,7 +62,7 @@ const world = {
   /** 播放页探针应答: live=有场次号 / offline=页面明确 null / broken=两者都没有(风控页或改版) */
   pageMode: 'live',
   pageFail: false,
-  /** api.pandalive.co.kr/v1/live/bookmark 的逐页应答数组(按 offset/100 取); bmStatus 覆盖 HTTP 码 */
+  /** api.pandalive.co.kr/v1/live/bookmark 的逐页应答数组(按 offset/200 取); bmStatus 覆盖 HTTP 码 */
   bmPages: [],
   bmStatus: 200,
   /** 观测点 */
@@ -99,7 +99,7 @@ const fakeSession = {
     // Panda 站内关注(북마크): POST body 里的 offset 决定第几页(分页不发第三页由场景自己断言)
     if (String(url).includes('api.pandalive.co.kr/v1/live/bookmark')) {
       const offset = Number(/(?:^|&)offset=(\d+)/.exec(String(init.body || ''))?.[1] || 0)
-      const page = world.bmPages[offset / 100]
+      const page = world.bmPages[offset / 200]
       const text = page === undefined ? '{"result":false,"message":"no page seeded"}' : typeof page === 'string' ? page : JSON.stringify(page)
       return { status: world.bmStatus, url, text: async () => text, headers: { getSetCookie: () => [] } }
     }
@@ -680,7 +680,7 @@ const BM_OFF = {
   userImg: '',
   isBookmark: true
 }
-const bmPage = (list, total = list.length) => ({ list, page: { offset: 0, limit: 100, total, page: 1, lastPage: 1 }, result: true, message: null, userIp: '1.2.3.4' })
+const bmPage = (list, total = list.length) => ({ list, page: { offset: 0, limit: 200, total, page: 1, lastPage: 1 }, result: true, message: null, userIp: '1.2.3.4' })
 
 console.log('E1 Panda 关注列表的请求面(POST /v1/live/bookmark + 会话 Cookie)')
 reset()
@@ -690,19 +690,22 @@ const bmRows = await realPandaApi.fetchBookmarks()
 const bmReq = world.fetches.find((f) => String(f.url).includes('v1/live/bookmark'))
 assert(bmReq && bmReq.url === 'https://api.pandalive.co.kr/v1/live/bookmark', '命中 /v1/live/bookmark 端点')
 assert(bmReq.method === 'POST', '方法是 POST(与官网前端一致)')
-assert(/(?:^|&)offset=0(?:&|$)/.test(bmReq.body) && /(?:^|&)limit=100(?:&|$)/.test(bmReq.body), '首页带 offset=0&limit=100', bmReq.body)
+assert(/(?:^|&)offset=0(?:&|$)/.test(bmReq.body) && /(?:^|&)limit=200(?:&|$)/.test(bmReq.body), '首页带 offset=0&limit=200(官方上限一发收满)', bmReq.body)
 assert(bmReq.headers.Origin === 'https://www.pandalive.co.kr' && bmReq.headers.Referer === 'https://www.pandalive.co.kr/', 'Origin/Referer 停在 www 源根(跨源整路径会被 Chromium 取消)')
 assert(bmReq.headers.Cookie === 'sessKey=test-sess; siteLang=ko', '有会话罐就带 Cookie(未登录时服务端回 result=false)', bmReq.headers.Cookie)
 assert(Array.isArray(bmRows) && bmRows.length === 2, '两条关注解析成两行')
+// ㊑ 这一发是轮询的新真值源: 请求面必须与关注数无关(实测 158 关注 = 1 发 / 90KB / page.lastPage=1),
+// 短页(list<limit)即判到底 —— 再发一页就是拿轮询去撞风控
+assert(world.fetches.filter((f) => String(f.url).includes('bookmark')).length === 1, '短页即停: 一轮只发一发(轮询的风控面下限)')
 
-console.log('E2 分页按 page.total 收满即停')
+console.log('E2 分页保险: 上限被抬高时按 page.total 收满即停')
 reset()
 world.bmPages = [
-  bmPage(Array.from({ length: 100 }, (_, i) => ({ ...BM_OFF, userId: `u${i}` })), 158),
-  bmPage(Array.from({ length: 58 }, (_, i) => ({ ...BM_OFF, userId: `v${i}` })), 158)
+  bmPage(Array.from({ length: 200 }, (_, i) => ({ ...BM_OFF, userId: `u${i}` })), 260),
+  bmPage(Array.from({ length: 60 }, (_, i) => ({ ...BM_OFF, userId: `v${i}` })), 260)
 ]
 const rows2 = await realPandaApi.fetchBookmarks()
-assert(rows2 && rows2.length === 158, '两页合起来 158 条')
+assert(rows2 && rows2.length === 260, '两页合起来 260 条')
 assert(world.fetches.filter((f) => String(f.url).includes('bookmark')).length === 2, '收满 total 就停, 不发第三页')
 
 console.log('E3 降级即 null(绝不解析成"一个关注都没有")')

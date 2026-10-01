@@ -1572,6 +1572,75 @@ checkWithAllowlist(
 }
 
 // ============================================================================
+// D51~D53 ㊑ Panda 轮询换真值源 + 大厅改按需 (2026-10-02 分析指令「保证时效性的同时尽可能避免风控触发」→ 实测后开工)
+//   实测基线: 158 关注 = 1 发 /v1/live/bookmark / 90KB; 全站榜那条 = 4 页 / 403KB + 每轮扫一遍离线关注。
+//   所以 list 模式的真值源换成站内关注列表(请求面与全站热度无关), 全站榜退回它本来的职责(大厅, 用户
+//   真的站在发现页才拉)。这三条契约锁的是"换源不换语义": 读不到必须回落而不是判全员下播、下播仍要两轮、
+//   匿名不发注定失败的那一发、没证明过的会话先问一句 login_info(冷启动不整轮落回四页)
+//   —— 以及大厅不再被 watchMode 牵着走。
+// ============================================================================
+{
+  const wt = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
+  const pl = fs.readFileSync(R('src', 'main', 'services', 'pandalive.ts'), 'utf8')
+  const seg = (decl) => {
+    const i = wt.indexOf(decl)
+    if (i < 0) return ''
+    const j = wt.indexOf('\n  }\n', i)
+    return wt.slice(i, j < 0 ? undefined : j)
+  }
+  assert(/const viaBookmark = await this\.roundByBookmark\(anchors\)/.test(wt) && /viaBookmark === null \? await this\.roundByList\(anchors\) : viaBookmark/.test(wt), 'D51a list 模式先问站内关注列表, 只有"读不到(null)"才回落全站榜 —— 绝不把没读到当成就没人播')
+  const bm = seg('private async roundByBookmark(')
+  assert(bm.length > 0 && !/fetchLivePage|roundByList/.test(bm), 'D51b 预言机自己一页全站榜都不发(它只覆盖"我关注的人", 请求面与全站热度无关)', bm.slice(0, 60))
+  assert(/if \(!api\.hasSession\(\)\) \{[\s\S]{0,120}return null/.test(bm), 'D51c 匿名(罐里没有会话)不发这一发(实测必回 result:false, 每轮白掷)')
+  assert(/if \(!api\.cookieValid\) \{[\s\S]{0,220}await api\.checkLoginInfo\(\)[\s\S]{0,200}api\.cookieValid = true/.test(bm), 'D51g 「罐在但没证明」先问一句 login_info 再决定(30 秒缓存在飞合并): 冷启动第一轮不该因为一个初值 false 就整轮落回全站榜四页 —— 真机实测过这个坑')
+  assert(/this\.pandaOracle = 'list'[\s\S]{0,200}return null/.test(bm) && /this\.pandaOracle = 'bookmark'/.test(bm), 'D51d 两条链各归各的账(轮次日志据此判本轮是"1 发问完 158"还是"真的看过全站")')
+  // 边界必须收在这一个方法体内: `if (n < 2)` 在 SOOP 那两轮里各出现一次, 不设界会把它们当本条的证据(变异测试实测)
+  const mo = seg('private markPandaOffline(')
+  assert(mo.length > 0 && /if \(n < 2\)/.test(mo) && /this\.onLiveEnd\(a\)/.test(mo), 'D51e 预言机报下播仍要两轮才翻转(单轮读数不发通知、不停播、不作废旧源)', mo.slice(0, 60))
+  assert(/async fetchBookmarks\(\)[\s\S]{0,400}const limit = 200/.test(pl), 'D51f 站内关注一发 limit=200 = 官方上限(实测 158 条一发收满, 分页留作上限被抬高的保险)')
+}
+{
+  const wt = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
+  const ipc = fs.readFileSync(R('src', 'main', 'ipc.ts'), 'utf8')
+  const pre = fs.readFileSync(R('src', 'preload', 'index.ts'), 'utf8')
+  const ty = fs.readFileSync(R('src', 'shared', 'types.ts'), 'utf8')
+  const seg = () => {
+    const i = wt.indexOf('async refreshDiscovery(')
+    return i < 0 ? '' : wt.slice(i, wt.indexOf('\n  }\n', i))
+  }
+  const rd = seg()
+  assert(rd.length > 0, 'D52a 大厅有独立的按需刷新入口(轮询不再是全站榜的唯一发车人)')
+  assert(/if \(!force && Date\.now\(\) - this\.status\.discoveryAt < 60_000\)/.test(rd), 'D52b 60 秒内的快照直接复用: 来回切视图/翻页/搜索不再各打一遍官网四页')
+  assert(/circuitOpen \|\| Date\.now\(\) < this\.cooldownUntil/.test(rd), 'D52c 熔断与退避期一发都不发(与间隙泵同语义), 调用方继续看旧快照')
+  assert(/if \(liveMap\.size\) this\.publishDiscovery\(liveMap\)/.test(rd), 'D52d 刷新失败保留上一份快照: 一页都没取到 ≠ 全站没人播')
+  assert(/if \(this\.discoveryInFlight\) return this\.discoveryInFlight/.test(rd), 'D52e 并发刷新合并在飞的那一次(不把整批页发两遍)')
+  assert(!/this\.discovery = \[\]/.test(wt), 'D52f 没有任何一处再把大厅清空(旧实现用"清空"来表达"逐个模式大厅不可用", ㊑ 起大厅与 watchMode 无关)')
+  assert(/discoveryRefresh\(force\?: boolean\): Promise<DiscoveryItem\[\]>/.test(ty) && /discoveryRefresh: 'discovery:refresh'/.test(ty), 'D52g ApiBridge 与通道名成对声明')
+  assert(/discoveryRefresh: \(force\?: boolean\)[\s\S]{0,80}invoke\(CH\.discoveryRefresh, force\)/.test(pre), 'D52h preload 把 force 传到底(手动刷新不许在桥这一层被吞成 false)')
+  assert(/CH\.discoveryRefresh[\s\S]{0,120}watcher\.refreshDiscovery\(force === true\)/.test(ipc), 'D52i IPC 侧只认 force === true(渲染层送来任何非布尔的脏值都不算"强制刷新"的通行证)')
+  const pb = (() => { const i = wt.indexOf('private publishDiscovery('); return i < 0 ? '' : wt.slice(i, wt.indexOf('\n  }\n', i)) })()
+  assert(/this\.status\.discoveryAt = Date\.now\(\)/.test(pb) && !/this\.discoveryAt\b/.test(wt), 'D52j 大厅时刻只有一个家(status.discoveryAt): 私有一式一份的写法迟早漂移, 而渲染层读的是那份公开的')
+  assert(/this\.pushDiscovery\(\)[\s\S]{0,200}this\.push\(\)/.test(pb), 'D52k 快照广播时同步推一次状态: 只有 discovery 那一条落屏、时刻却等下一轮才更新的话, 页头会显示"拉取于 上一轮"')
+}
+{
+  const wv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'WorkspaceView.vue'), 'utf8')
+  const wt = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
+  const zh = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'zh-CN.ts'), 'utf8')
+  const en = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'en-US.ts'), 'utf8')
+  assert(/view\.value === 'discover' && !isSoop\.value\) await api\.discoveryRefresh\(true\)/.test(wv), 'D53a 发现页的手动刷新走大厅自己的入口(不再"重拉关注"绕一圈)')
+  assert(/view\.value === 'discover' && !isSoop\.value\) void api\.discoveryRefresh\(\)\.catch/.test(wv), 'D53b 站到发现页就取一次快照: 全站榜不再搭轮询的车以后, 这一屏自己就是发车人')
+  assert(!/gotoDetectList|emptyDiscoverPerAnchor/.test(wv + zh + en), 'D53c 「大厅在逐个模式不可用, 请切回列表模式」那句话与它的出口一起删净了(模式管的是怎么查关注, 不管大厅有没有数据)')
+  assert(/站内覆盖=\$\{this\.pandaCovered\}/.test(wt) && /全站=\$\{this\.status\.liveCount\}/.test(wt), 'D53d 轮次摘要日志分家: 预言机报覆盖数, 兜底轮才报全站在播数(否则 全站= 会被读成上一份大厅快照)')
+  assert(/一个请求覆盖全部关注/.test(zh) && /one bookmark-list request per round/.test(en), 'D53e 模式说明讲的是"怎么查我的关注", 双语同口径')
+  assert(/列表模式每轮只发一发站内关注列表/.test(zh) && !/大厅/.test(zh.match(/pollSecDescPanda: '[\s\S]{0,200}'/)?.[0] || ''), 'D53f 轮询间隔那格的建议值跟着新真值源改口, 且不再顺带承诺大厅的有无')
+  const segc = (() => { const i = wv.indexOf('const seg = computed'); return i < 0 ? '' : wv.slice(i, wv.indexOf('\n})\n', i)) })()
+  const disc = (() => { const i = segc.indexOf("view.value === 'discover'"); return i < 0 ? '' : segc.slice(i, segc.indexOf('\n  }\n', i)) })()
+  assert(/store\.watcher\?\.discoveryAt/.test(disc) && /ws\.segHallAt/.test(disc), 'D53g 发现页那一格的时间是大厅自己的钟(㊑): 全站榜不再搭轮询的车以后, 在这屏说"上轮拉取"是把轮次的计时器借给大厅')
+  assert(disc.length > 0 && !/segRoundAt|segInterval/.test(disc), 'D53h 发现页不再回落轮次时间或检测间隔(大厅没拉过就不摆时间, 不借别处的钟凑一句)')
+  assert(/segHallAt: '拉取于 \{time\}'/.test(zh) && /segHallAt: 'Pulled \{time\}'/.test(en), 'D53i segHallAt 双语成对(只在发现页出现的一格, 不该留英文界面的孤儿键)')
+}
+
+// ============================================================================
 console.log('\n' + '─'.repeat(72))
 console.log(`设计契约: 通过 ${PASS} / 失败 ${FAIL}`)
 if (FAIL) {

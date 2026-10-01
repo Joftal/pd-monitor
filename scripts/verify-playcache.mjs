@@ -13,6 +13,8 @@
 //   T24 双平台隔离: SOOP 关注只走 SOOP 链路(替身模块), 不污染 Panda 请求/计数/熔断,
 //       也不被 Panda 冷却/风控连坐 —— 详见该段断言清单
 //   T26 ㊍ 监控配置分家: 预取/轮询间隔各按平台那一格 —— 邻居的开关与熔断都带不走本平台
+//   T27 ㊑ Panda 轮询换真值源: 一发站内关注列表判全部关注(下播两轮/列表不可用即回落/会话两道门),
+//       全站榜改按需(进发现页才拉 + 60 秒复用 + 熔断期拒发 + 失败保留旧快照)
 // ============================================================================
 import { createRequire } from 'module'
 import * as fs from 'fs'
@@ -31,6 +33,10 @@ const liveItem = (over = {}) => ({
   startTime: '2026-09-04 10:00:00', isLive: true, thumbUrl: '', userImg: '', ...over
 })
 
+// ㊑ 站内关注行(/v1/live/bookmark 的真接口形状): 在播行带 media, 离线行只有昵称/头像
+const bmLive = (userId, over = {}) => ({ userId, userIdx: 1, userNick: `nick_${userId}`, userImg: '', media: liveItem({ userId, ...over }) })
+const bmOff = (userId, over = {}) => ({ userId, userIdx: 1, userNick: `nick_${userId}`, userImg: '', ...over })
+
 const world = {
   inList: {},     // userId -> bool: 全站列表里是否可见
   bjMedia: {},    // userId -> liveItem|null: member/bj 返回的 media
@@ -38,8 +44,18 @@ const world = {
   bjThrow: {},    // userId -> bool: member/bj 抛普通网络错误(不触发节点兜底, 直抛)
   bjNotFound: {}, // userId -> bool: member/bj 返回 result:false "유저 정보가 없습니다."(查无此人)
   latency: { liveMs: 0, bjMs: {} }, // 请求人为延迟(T10 让路/T11 取关时序窗口)
+  // ㊑ 站内关注列表(预言机): null=该端点不接待(所有旧场景保持匿名→走全站榜那条既有链),
+  // 数组=服务端给的关注行(在播带 media, 离线只有昵称); bmStatus/bmResultFalse 用来造风控与死会话
+  bm: null,
+  bmStatus: 200,
+  bmResultFalse: false,
+  bmCalls: [],   // /v1/live/bookmark 请求记录(预言机的核心读数: 一轮必须恰好 1 发)
+  // ㊑ 会话证明: login_info 的替身。null=服务端说没登录; watchLoginInfo=null 时"未证明"的罐会被问一次
+  loginInfo: { userInfo: { isLogin: true } },
+  liCalls: [],   // /v1/member/login_info 请求记录(冷启动那道门补问的代价: 每 30 秒最多一发)
+  liveFail: false, // true ⇒ /v1/live 直接抛错(大厅按需刷新要证的"拉不到 ≠ 全站没人播")
   playCalls: [],   // /v1/live/play 真实发起记录(判定"是否重新拉源"的唯一依据)
-  liveCalls: [],   // /v1/live 分页请求记录(T16 复用性断言)
+  liveCalls: [],   // /v1/live 分页请求记录(T16 复用性断言 + ㊑"轮询不再搭全站榜的车")
   bjCalls: [],     // /v1/member/bj 调用记录 [{userId, at}](轮扫覆盖/时刻断言)
   toasts: [],      // sendToast 记录
   soopMeta: {},    // channel -> Partial<PageMeta>: SOOP 播放页三态替身(Panda 场景用不到, 仅防御)
@@ -64,8 +80,22 @@ const fakeFetch = async (url, init = {}) => {
     world.bjCalls.push({ userId: new URLSearchParams(init.body || '').get('userId'), at: Date.now() })
     return fakeRes(200, { result: false, message: '유저 정보가 없습니다.' }) // → BjNotFoundError
   }
+  if (u.hostname === 'api.pandalive.co.kr' && u.pathname === '/v1/live/bookmark') {
+    // ㊑ 预言机: 这一发要活会话才接待(hasSession/cookieValid 两道门在 watcher 里)
+    world.bmCalls.push({ at: Date.now() })
+    if (world.bmResultFalse) return fakeRes(200, { result: false, message: '로그인이 필요합니다.' })
+    if (world.bmStatus !== 200) return fakeRes(world.bmStatus, { result: false, message: 'blocked' }) // → RiskError
+    if (world.bm === null) throw new Error('fakeFetch 未分派: ' + url)
+    return fakeRes(200, { result: true, list: world.bm, page: { offset: 0, limit: 200, total: world.bm.length, lastPage: 1 } })
+  }
+  if (u.hostname === 'api.pandalive.co.kr' && u.pathname === '/v1/member/login_info') {
+    // ㊑ 「罐在但没证明」那一问: 答案是没登录 → 本轮落回全站榜那条链; 是要的 → 预言机立刻上车
+    world.liCalls.push({ at: Date.now() })
+    return fakeRes(200, { loginInfo: world.loginInfo })
+  }
   if (u.hostname === 'api.pandalive.co.kr' && u.pathname === '/v1/live') {
     world.liveCalls.push(u.searchParams.get('offset') || '0')
+    if (world.liveFail) throw new Error('boom') // 普通网络错误: 刷新方必须"沿用旧快照", 不空表
     if (world.latency.liveMs) await new Promise((r) => setTimeout(r, world.latency.liveMs))
     const list = Object.keys(world.inList).filter((id) => world.inList[id]).map((id) => liveItem({ userId: id, userNick: `nick_${id}` }))
     return fakeRes(200, { result: true, list, loginInfo: { userInfo: { isLogin: true } } })
@@ -249,6 +279,9 @@ async function reset() {
   watcher.soopFailStreak = 0
   watcher.status.circuitOpen = false
   watcher.status.message = ''
+  // ㊑ 大厅是按需的: 上一场刷新留下的快照与它的钟会污染下一场的"这一轮没碰全站榜"断言
+  watcher.status.discoveryAt = 0
+  watcher.discovery = []
   // 合并读数是 push() 从 byPlatform 现算的(㊍ 熔断账本已按平台分家): 只清顶层那两格会被下一轮覆盖回去
   for (const p of ['pandalive', 'soop']) {
     watcher.status.byPlatform[p].circuitOpen = false
@@ -260,6 +293,23 @@ async function reset() {
   db.settings = mkSettings()
   world.inList = {}; world.bjMedia = {}; world.bj403 = {}; world.bjThrow = {}; world.bjNotFound = {}; world.latency = { liveMs: 0, bjMs: {} }
   world.soopMeta = {}; world.soopThrow = {}; world.soopCalls.length = 0
+  // ㊑ 预言机场景隔离: 默认 bm=null(端点不接待) + 无会话罐(匿名) → 每一场都从"走全站榜那条链"起步,
+  // 想要预言机的场景自己把三件套凑齐: jar={sessKey} + world.bm=[行] + 会话 Either 已证明(cookieValid=true)
+  // Either 能被 login_info 一问证真(world.loginInfo 默认 isLogin:true, 冷启动那条路就是这么走的)
+  world.bm = null; world.bmStatus = 200; world.bmResultFalse = false; world.bmCalls.length = 0
+  world.loginInfo = { userInfo: { isLogin: true } }; world.liCalls.length = 0
+  api.loginInfoCache = null // login_info 有 30 秒缓存 + 在飞合并: 跨场景不清就会"继承"上一场的答案
+  api.loginInfoInflight = null
+  world.liveFail = false
+  api.jar = {}
+  api.cookieValid = false
+  watcher.pandaOracle = 'bookmark'
+  watcher.pandaCovered = 0
+  watcher.pandaOfflineStreak.clear()
+  watcher.discovery = []
+  watcher.status.discoveryAt = 0
+  watcher.discoveryInFlight = null
+  watcher.status.liveCount = 0
   watcher.bjGone?.clear?.() // 查无此人内存集跨场景复位(T23)
   world.playCalls.length = 0; world.liveCalls.length = 0; world.bjCalls.length = 0; world.toasts.length = 0; world.recStarts.length = 0
   world.recStops.length = 0; world.recStartThrow = false; world.stopDelayMs = 0
@@ -828,6 +878,212 @@ world.soopMeta = { s26b: { living: true, broadNo: 2, hostName: 'S26b酱' } }
   check('T26-7 间隔下限只防坏数据, 不改变正常值', watcher.intervalFor('soop') === 1_000)
 }
 
+// ============ T27 ㊑ Panda 轮询的预言机: 一发站内关注列表判全部 + 全站榜改按需 ============
+// 实测基线(2026-10-02): 158 关注 = 1 发 / 90KB / page.lastPage=1 —— 请求面与关注数无关。
+// 上预言机要三件套齐: jar 有 sessKey + cookieValid=true + 服务端给关注行(缺一条必须落回全站榜那条链)
+const login = (rows) => {
+  api.jar = { sessKey: 't27' }
+  api.cookieValid = true
+  world.bm = rows
+}
+
+console.log('\n■ T27-A 预言机一轮一发: 全部关注由它判定, 全站榜与逐房探针同时下车')
+await reset()
+login([bmLive('aaa', { user: 28, title: '预言机标题', startTime: '2026-10-02 18:52:55' }), bmOff('ddd')])
+db.anchors = [mkAnchor('aaa', { isLive: false }), mkAnchor('ddd', { isLive: false })]
+{
+  await roundOne('pandalive')
+  await waitUntil(() => !watcher.idlePumping, 3000)
+  check('T27-A1 一轮恰好一发站内关注列表', world.bmCalls.length === 1, `bm 发数=${world.bmCalls.length}`)
+  check('T27-A2 轮询不再搭全站榜的车(大厅改按需)', world.liveCalls.length === 0, `全站榜页数=${world.liveCalls.length}`)
+  check('T27-A3 列表覆盖到的离线关注不再逐房探针/进间隙泵', world.bjCalls.length === 0 && watcher.idleQueue.length === 0)
+  check('T27-A4 在播/离线各按列表原值判定', db.anchors[0].isLive === true && db.anchors[1].isLive === false)
+  const a = db.anchors[0]
+  check('T27-A5 场次元数据一次到位(标题/观众/开播时刻/房态标签)',
+    a.title === '预言机标题' && a.viewerCount === 28 && a.startTime === '2026-10-02 18:52:55' && !!a.tags && a.tags.type === 'free')
+  check('T27-A6 读数分家: 在播数来自预言机, 全站在播数不再由轮询刷新',
+    watcher.pandaOracle === 'bookmark' && watcher.status.byPlatform.pandalive.liveFound === 1 && watcher.status.liveCount === 0 && watcher.pandaCovered === 2)
+  check('T27-A7 大厅的钟不跟轮次走(预言机一轮不碰 discoveryAt, 页头那格才不能借 lastRoundAt)',
+    watcher.status.discoveryAt === 0)
+}
+
+console.log('\n■ T27-B 预言机里的开播翻转: 通知/预取/自录一样不少(换真值源不换事件链路)')
+await reset()
+db.anchors = [mkAnchor('eee', { isLive: false, autoRecord: true })]
+login([bmLive('eee')])
+{
+  await roundOne('pandalive')
+  const prefetched = await waitUntil(() => playCount('eee') > 0, 3000)
+  check('T27-B1 开播 toast + 自动录制 + 预取拉源',
+    world.toasts.some((x) => x.type === 'live') && world.recStarts.some((r) => r.userId === 'eee') && prefetched)
+}
+
+console.log('\n■ T27-C 下播要两轮: 单轮读数不翻转(这一翻要发通知+作废源缓存)')
+await reset()
+db.anchors = [mkAnchor('fff', { isLive: true, autoRecord: true })]
+login([bmOff('fff')])
+{
+  await api.getPlayCached('fff') // 先在播, 已取过一次源
+  await roundOne('pandalive')
+  check('T27-C1 第一轮报下播: 状态/通知/源缓存全部按兵不动',
+    db.anchors[0].isLive === true && world.toasts.filter((x) => x.type === 'offline').length === 0 && playCount('fff') === 1)
+  await roundOne('pandalive')
+  check('T27-C2 第二轮确认才判下播: 状态翻转 + offline 通知单发',
+    db.anchors[0].isLive === false && world.toasts.filter((x) => x.type === 'offline').length === 1,
+    `isLive=${db.anchors[0].isLive} offline=${world.toasts.filter((x) => x.type === 'offline').length} oracle=${watcher.pandaOracle}`)
+  await api.getPlayCached('fff')
+  check('T27-C3 判下播当轮旧源即作废(假发的旧频道源点播放必暴毙)', playCount('fff') === 2)
+  await roundOne('pandalive')
+  check('T27-C4 已离线后重复读数不再重复发通知', world.toasts.filter((x) => x.type === 'offline').length === 1)
+}
+
+console.log('\n■ T27-D 列表覆盖不到的关注(应用内自增/官网侧取关): 原探针链路一条不少')
+await reset()
+login([bmLive('aaa')])
+db.anchors = [mkAnchor('aaa', { isLive: true }), mkAnchor('ggg', { isLive: true }), mkAnchor('hhh', { isLive: false })]
+world.bjMedia = { ggg: liveItem({ userId: 'ggg' }), hhh: null }
+{
+  await roundOne('pandalive')
+  check('T27-D1 列表外且仍在播的: 轮内立即复查(urgent)', world.bjCalls.some((c) => c.userId === 'ggg'))
+  check('T27-D2 列表内已判在播的: 不重复发探针', !world.bjCalls.some((c) => c.userId === 'aaa'))
+  check('T27-D3 列表外的离线关注交间隙泵轮扫(与旧链路同一份兜底)', await waitUntil(() => world.bjCalls.some((c) => c.userId === 'hhh'), 4000))
+  await waitUntil(() => !watcher.idlePumping, 4000)
+  check('T27-D4 覆盖数=列表行数(轮次日志那句 站内覆盖 的同一枚读数)', watcher.pandaCovered === 1 && db.anchors[0].isLive === true && db.anchors[1].isLive === true)
+}
+
+console.log('\n■ T27-E 列表不可用 = 回落, 绝不等于「全员下播」')
+await reset()
+login(null) // 端点整条不接待 → fetchBookmarks 内部收敛为 null
+world.inList = { aaa: true }
+db.anchors = [mkAnchor('aaa', { isLive: true })]
+{
+  await roundOne('pandalive')
+  check('T27-E1 读不到列表 → 本轮走全站榜分页(旧链路完好)', watcher.pandaOracle === 'list' && world.liveCalls.length > 0)
+  check('T27-E2 在播主播没被「没读到」误判下播', db.anchors[0].isLive === true && world.toasts.filter((x) => x.type === 'offline').length === 0)
+}
+await reset()
+login([bmOff('aaa')])
+world.bmStatus = 403 // 这一发被风控
+world.inList = { aaa: true }
+db.anchors = [mkAnchor('aaa', { isLive: true })]
+{
+  await roundOne('pandalive')
+  check('T27-E3 403 同样降级(不解析成"全部关注都下播"), 连败计数仍由全站榜那轮说了算',
+    watcher.pandaOracle === 'list' && watcher.errorStreak === 0 && db.anchors[0].isLive === true)
+}
+await reset()
+login([bmLive('aaa')])
+world.bmResultFalse = true // 服务端回"没登录"(瞬时/改版)
+world.inList = { aaa: true }
+db.anchors = [mkAnchor('aaa', { isLive: true })]
+{
+  await roundOne('pandalive')
+  world.bmResultFalse = false
+  await roundOne('pandalive')
+  check('T27-E4 降级不自闭: 服务端恢复说话, 下一轮预言机自动再上车',
+    world.bmCalls.length === 2 && watcher.pandaOracle === 'bookmark')
+}
+
+console.log('\n■ T27-F 会话门: 匿名不发这一发; "罐在但没证明"先问一句 login_info(冷启动不再整轮落回四页)')
+await reset()
+world.bm = [bmLive('aaa')]
+world.inList = { aaa: true }
+db.anchors = [mkAnchor('aaa', { isLive: true })]
+{
+  await roundOne('pandalive')
+  check('T27-F1 没有会话罐: 预言机零请求(连那一问都不发), 全站榜那条照跑(匿名用户的既有链路)',
+    world.bmCalls.length === 0 && world.liCalls.length === 0 && world.liveCalls.length > 0 && watcher.pandaOracle === 'list')
+}
+await reset()
+api.jar = { sessKey: 't27' } // 罐还在, 但服务端说没登录(判死)
+api.cookieValid = false
+world.loginInfo = null // 那一问的答案: 没登录
+world.bm = [bmLive('aaa')]
+world.inList = { aaa: true }
+db.anchors = [mkAnchor('aaa', { isLive: true })]
+{
+  await roundOne('pandalive')
+  check('T27-F2 判死期问一句就收: 不发那一发注定 result:false 的 POST', world.liCalls.length === 1 && world.bmCalls.length === 0 && world.liveCalls.length > 0)
+  check('T27-F3 全站榜那条从 loginInfo 把会话重新点亮(自愈不靠运气)', api.cookieValid === true)
+  await roundOne('pandalive')
+  check('T27-F4 点亮后下一轮预言机自动再上车(1 发, 全站榜不再被搭, 也不用再问)',
+    world.bmCalls.length === 1 && world.liCalls.length === 1 && watcher.pandaOracle === 'bookmark')
+}
+await reset()
+api.jar = { sessKey: 't27' } // 冷启动: vault 里有罐, 但本次运行还没证明过(cookieValid 初值 false)
+api.cookieValid = false
+world.bm = [bmLive('aaa')]
+world.inList = { aaa: true }
+db.anchors = [mkAnchor('aaa', { isLive: false })]
+{
+  await roundOne('pandalive')
+  check('T27-F5 冷启动第一轮: login_info 说要的 → 当场转上预言机(不再整轮落回四页全站榜)',
+    world.liCalls.length === 1 && world.bmCalls.length === 1 && world.liveCalls.length === 0 && db.anchors[0].isLive === true)
+  await roundOne('pandalive')
+  check('T27-F6 证明过一次就不再每轮硬闯: 第二问为 0, 全站榜仍是 0', world.liCalls.length === 1 && world.bmCalls.length === 2 && world.liveCalls.length === 0)
+}
+
+console.log('\n■ T27-G 大厅(全站榜)改按需: 谁站在发现页谁拉, 60 秒内复用')
+await reset()
+world.inList = { h1: true, h2: true }
+{
+  const d1 = await watcher.refreshDiscovery()
+  check('T27-G1 进发现页才拉全站榜(短页即到底: 1 页)', world.liveCalls.length === 1 && d1.length === 2 && watcher.status.discoveryAt > 0, `页数=${world.liveCalls.length}`)
+  const d2 = await watcher.refreshDiscovery()
+  check('T27-G2 60 秒内的快照直接复用(切视图/翻页/搜索不再打官网)', world.liveCalls.length === 1 && d2.length === 2)
+  const t0 = watcher.status.discoveryAt
+  await new Promise((r) => setTimeout(r, 3))
+  await watcher.refreshDiscovery(true)
+  check('T27-G3 手动刷新强制越过复用窗口', world.liveCalls.length === 2)
+  check('T27-G3b 快照换了钟就跟着换(页头"拉取于"读的就是这一枚)', watcher.status.discoveryAt > t0)
+}
+await reset()
+world.inList = { h1: true }
+await watcher.refreshDiscovery(true)
+{
+  const n = world.liveCalls.length
+  watcher.status.byPlatform.pandalive.circuitOpen = true
+  const d3 = await watcher.refreshDiscovery(true)
+  check('T27-G4 熔断期一发都不发, 用户继续看旧快照', world.liveCalls.length === n && d3.length === 1)
+  watcher.status.byPlatform.pandalive.circuitOpen = false
+  watcher.cooldownUntil = Date.now() + 60_000
+  await watcher.refreshDiscovery(true)
+  check('T27-G5 退避期同规约(冷却里不硬闯)', world.liveCalls.length === n)
+  watcher.cooldownUntil = 0
+}
+await reset()
+world.inList = { h1: true }
+await watcher.refreshDiscovery(true)
+world.liveFail = true
+{
+  const d4 = await watcher.refreshDiscovery(true)
+  check('T27-G6 刷新失败保留上一份快照(绝不画成"全站没人播"), 且不计轮次连败',
+    d4.length === 1 && watcher.getDiscovery().length === 1 && watcher.errorStreak === 0)
+  world.liveFail = false
+}
+await reset()
+world.inList = { h1: true }
+world.latency.liveMs = 250
+{
+  const [ra, rb] = await Promise.all([watcher.refreshDiscovery(true), watcher.refreshDiscovery(true)])
+  check('T27-G7 并发刷新合并在飞的那一次(不重复发整批页)', world.liveCalls.length === 1 && ra === rb)
+  world.latency.liveMs = 0
+}
+
+console.log('\n■ T27-H 逐个模式不再清空大厅(全站榜与 watchMode 解耦)')
+await reset()
+world.inList = { h1: true }
+db.settings.watchMode = 'per-anchor'
+db.anchors = [mkAnchor('ccc', { isLive: false })]
+world.bjMedia = { ccc: liveItem({ userId: 'ccc' }) }
+{
+  await watcher.refreshDiscovery(true)
+  check('T27-H0 大厅先有一份快照', watcher.getDiscovery().length === 1)
+  await roundOne('pandalive')
+  check('T27-H1 逐个模式的一轮不清快照(它只管"怎么查我的关注")', watcher.getDiscovery().length === 1 && db.anchors[0].isLive === true)
+  check('T27-H2 逐个模式同样不搭全站榜的车(请求数=那一发刷新)', world.liveCalls.length === 1)
+}
+
 console.log('解读: T1/T2/T3 PASS ⇒ 「大厅轮询刷新会清源缓存」不成立(真实源码+可计数请求实证);')
 console.log('      T4 PASS ⇒ 列表内开播翻转的作废链路正常工作(对照);')
 console.log('      T17 PASS ⇒ 粉丝房 fanLive 专用通知+自录正常; T18 PASS ⇒ 下播 toast 单发, 重复判离线不重复;')
@@ -844,4 +1100,7 @@ console.log('      T14 PASS ⇒ urgent 回归: 列表外在播主播仍轮内每
 console.log('      T16 PASS ⇒ 大厅/关注一份请求两用: 列表可见关注零增量, 全轮请求数恒等于 页数+urgent+rest.')
 console.log('      T25 PASS ⇒ 取源回写按字段合并: 这一路观察不到的 isAdult 不再被写成 false(19+ 旗不被抹掉), 观察得到的 isPw 照写.')
 console.log('      T26 PASS ⇒ ㊍ 监控分家: 预取开关只关本平台那格的秒开, 轮询间隔各按自己那一格, Panda 熔断只压自己那条时间轴.')
+console.log('      T27 PASS ⇒ ㊑ 预言机: 一轮一发覆盖全部关注(0 全站榜/0 探针/覆盖数可核对), 开播事件链路不变, 下播两轮才翻,'
+  + ' 列表不可用/风控/匿名/判死会话四种情形都回落且不把"没读到"判成"全员下播"; 会话门只挡匿名, "罐在但没证明"先问一句 login_info(冷启动第一轮当场转上预言机, 不再整轮落回四页);'
+  + ' 大厅改按需(60 秒复用、手动强刷、熔断与退避期拒发、失败保留旧快照、并发合并在飞那次、快照换了钟跟着换).')
 process.exit(failures === 0 ? 0 : 1)
