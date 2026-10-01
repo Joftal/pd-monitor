@@ -45,6 +45,7 @@
 //   D34 工作区视图分段行不常驻快捷键提示: 1/2/3 与 / 的键盘本体保留, 屏上那条 11px 灰字撤掉且双语不留死键
 //   D35 工作区筛选条右端只在真有搜索词时出声: 「排序与页码在本视图内记忆」常驻说明撤掉(记忆本体不动), 无词时不留空转 flex-1
 //   D36 「关注主播」按平台拆成两个专属入口: 无「自动识别」档, 平台由工作区决定, 粘错平台给出口, SOOP 纯数字场次号单独归因
+//   D37 分段时长填 0 = 不分段: 整场一个不带段号的 TS, 合并档/管线第四棒随之收起, 库里与手动合并产物同归「整文件」一类
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -1029,6 +1030,41 @@ checkWithAllowlist(
   assert(dlg.includes("state === 'other'") && /emit\('goto-other', raw\.value\.trim\(\)\)/.test(dlg) && /@goto-other="gotoOtherPlat"/.test(wsSrc) && /store\.addDraft = text/.test(wsSrc) && /ref\(store\.addDraft !== ''\)/.test(wsSrc), 'D36d 粘错平台: 归因之外必须有出口 —— 原文经 store.addDraft 过境换平台, 新实例自己把对话框撑开')
   assert(dlg.includes('/^\\d+$/.test(s)') && dlg.includes("return 'seq'"), 'D36e SOOP 的纯数字是场次号 —— 单独归因, 不许当频道名入库')
   assert(/<AddFollowDialog v-model:show="showAdd" :platform="plat"/.test(wsSrc) && !/addPlatform|addParsed|addInput/.test(wsSrc), 'D36f 工作区只把当前平台交给对话框, 自己不留第二份解析态')
+}
+
+// ============================================================================
+// D37 分段时长填 0 = 不分段 (2026-10-01 用户指令: 「现在似乎是必须要分段录制, 我要支持不分段的」)
+//   形态是「数字框允许 0」而不是新摆一档开关: 0 在这一格不是越界值, 是「这一档关掉」的显式取值,
+//   所以闸门(夹取下界之前)、控件(min)、三处读数面都得各自认这个 0 —— 任何一处按旧惯用法
+//   `x || 900` / `Math.max(60, x)` / `f === 'merged'` 处理, 0 就静默变回 900 或整块UI消失。
+//   归类: 不分段的成品与手动合并的产物同形(一个不带 _NNNN 后缀的文件), 库里合并为一档「整文件」,
+//   不新增字段记"当初怎么录的" —— 那个信息对用户没有下一步动作, 只会多出一个永远对不上的枚举。
+// ============================================================================
+{
+  const rec = fs.readFileSync(R('src', 'main', 'services', 'recorder.ts'), 'utf8')
+  const guard = fs.readFileSync(R('src', 'main', 'services', 'settingsGuard.ts'), 'utf8')
+  const sv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'SettingsView.vue'), 'utf8')
+  const pv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'PlayerView.vue'), 'utf8')
+  const rv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'RecordingsView.vue'), 'utf8')
+  const lib = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'LibrarySection.vue'), 'utf8')
+  const media = fs.readFileSync(R('src', 'renderer', 'src', 'utils', 'media.ts'), 'utf8')
+  const i18n = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'zh-CN.ts'), 'utf8') + fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'en-US.ts'), 'utf8')
+
+  assert(/const segSec = Number\.isFinite\(cfg\.splitSeconds\) \? cfg\.splitSeconds : 900/.test(rec), 'D37a 分段秒数只在"不是有限数"时才兜默认(旧写法 `= cfg.splitSeconds || 900` 会把 0 吞成 900, 注释里留着的那一句不是代码)')
+  assert(/else if \(segSec === 0\) \{[\s\S]{0,300}args\.push\('-i', m3u8, '-map', '0', '-c', 'copy', this\.liveSingleFile\)/.test(rec), 'D37b 0 走单文件直出那一支: -c copy 到 liveSingleFile, 不进 -f segment')
+  assert(/get liveSingleFile\(\): string \{\r?\n\s*return path\.join\(this\.dirPath, `\$\{this\.baseName\}\.ts`\)/.test(rec), 'D37c 单文件产出名 = 基名.ts, 不带 _NNNN —— SEG_RE 认它是"整文件"而不是"某一段", 合并那侧也就喂不进 concat')
+  assert(/'-segment_time', String\(Math\.max\(60, segSec\)\)/.test(rec), 'D37d 分段那一支的 60s 下限照旧(0 已被上面那一支截走, 不该在这里被夹成一个 60 秒的分段档)')
+  assert(/ZERO_OK: readonly \(keyof Settings\)\[\] = \['splitSeconds'\]/.test(guard) && /v === 0 && ZERO_OK\.includes\(key\) \? 0/.test(guard), 'D37e 入站闸门认 0 是显式取值(负数与 1~59 仍夹到 60, 只有白名单里的键的 0 原样落盘)')
+  assert(/function clampSplit\(v: unknown\): number \{[\s\S]{0,200}return n === 0 \? 0 : Math\.min\(7200, Math\.max\(60, n\)\)/.test(sv) && /:min="0" :max="7200"/.test(sv), 'D37f 设置页这一格收 0: 控件 :min="0" 且本地夹取不把 0 抬成 60(清空/NaN 才回默认 900)')
+  assert(/form\.autoMp4 && form\.splitSeconds !== 0[\s\S]{0,40}mergeMp4/.test(sv) && /form\.autoMp4 && form\.mergeMp4 && form\.splitSeconds !== 0/.test(sv), 'D37g 不分段时"合并成片""删分段"两档收起: 没有第二段可合, 摆着就是让人去点一个不会发生的事')
+  assert(pv.includes("t('player.outMerge')") && pv.includes("t('player.segOff')") && /s\.splitSeconds !== 0 \?/.test(pv), 'D37h 播放页侧栏: 产出与分段两个读数各说各的 0, 「合并成片」不再挂在产出那行')
+  assert(/splitOff\.value \? t\('rec\.segOff'\)/.test(rv) && /st\?\.splitSeconds !== 0\) out\.push\(\{ key: 'merge'/.test(rv), 'D37i 录制页: 顶部那句读数是「不分段 · 整场单文件」, 流水线的第四棒(合并)在 0 时不存在')
+  assert(/if \(h\.vod \|\| mp4s\.length !== 1 \|\| \(h\.files \|\| \[\]\)\.length !== 1\) return false/.test(media) && !/isMergedTask/.test(media + lib + rv), 'D37j 库判据改名到位(isMergedTask 全站绝迹): 盘上就一个不带后缀的文件 ⇒ 整文件')
+  assert(lib.includes("type FilterKey = 'all' | 'live' | 'vod' | 'whole' | 'error'") && lib.includes("t('library.fWhole')") && !/fMerged|'merged'/.test(lib), 'D37k 筛档只剩一档「整文件」: 不按"当初怎么录的"分叉, 合并来源与不分段来源同形同归')
+  const mainI18n = fs.readFileSync(R('src', 'main', 'i18n.ts'), 'utf8')
+  assert(/'rec\.fileOne': '1 个文件'/.test(mainI18n) && /'rec\.fileOne': '1 file'/.test(mainI18n) && /this\.files\.length === 1 \? mt\('rec\.fileOne'\)/.test(rec), 'D37l 收尾提示在单文件时说「1 个文件」而不是「共 1 段」(主进程双语齐备)')
+  // 实机抓到的(2026-10-01 第五轮): 录制页进行中的读数写着「已写入 · 1 段」—— 那一档压根没有段
+  assert(/isSingleFileTask\(task\.currentFile\) \? t\('rec\.writtenOne'\)/.test(rv) && !/writtenVod/.test(rv + i18n), 'D37m 进行中卡片的写入数在单文件那一档说「单文件」而不是「1 段」(判据读当前文件名的形状, 旧 vod 键随改名绝迹)')
 }
 
 // ============================================================================

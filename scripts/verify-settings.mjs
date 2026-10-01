@@ -143,6 +143,9 @@ console.log('\n===== A 入站闸门逐键判定 =====\n')
   assert(gate({ pollIntervalSec: 99999 }).get('pollIntervalSec') === 600, 'A6 轮询间隔上限夹紧 600')
   assert(gate({ pollIntervalSec: 1 }).get('pollIntervalSec') === 5, 'A6b 轮询间隔下限夹紧 5')
   assert(gate({ splitSeconds: 5 }).get('splitSeconds') === 60, 'A6c 分片秒数下限夹紧 60')
+  assert(gate({ splitSeconds: 0 }).get('splitSeconds') === 0, 'A6e splitSeconds=0 原样收下(0 是「不分段」这一档, 不是越界)')
+  assert(!rejected(gate({ splitSeconds: 0 }), 'splitSeconds'), 'A6f 0 不被当成不合格键拒收(拒收等于让人以为设置没生效)')
+  assert(gate({ splitSeconds: -1 }).get('splitSeconds') === 60, 'A6g 负数仍然夹到 60(0 是显式取值, 负数仍是越界)')
   assert(gate({ diskLimitGb: 0 }).get('diskLimitGb') === 0.5, 'A6d 磁盘护栏下限夹紧 0.5(0 = 永不触发, 等于关掉护栏)')
 }
 // A7 非有限数值

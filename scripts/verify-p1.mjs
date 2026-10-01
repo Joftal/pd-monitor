@@ -127,11 +127,19 @@ function declaresMp4(args) {
 }
 
 function fakeSpawn(bin, args) {
-  const kind = args.includes('concat') ? 'concat' : args.includes('segment') ? 'seg' : 'remux'
+  // 抓流那一支必带 -protocol_whitelist; 回放直出还多带 -progress(要回报下载时长),
+  // 靠这两把尺把"常驻的录制进程"与"跑完就退的 remux/concat"分开 —— 伪 ffmpeg 不能替录制提前退出
+  const capture = args.includes('-protocol_whitelist') && !args.includes('-progress')
+  const kind = args.includes('concat') ? 'concat' : args.includes('segment') ? 'seg' : capture ? 'capture' : 'remux'
   const child = new FakeChild(args)
   world.ffCalls.push({ kind, args, out: child.out })
   if (kind === 'seg') {
     for (let i = 1; i <= world.segments; i++) fs.writeFileSync(child.out.replace('%04d', String(i).padStart(4, '0')), Buffer.alloc(world.segBytes, 0x54))
+    return child
+  }
+  if (kind === 'capture') {
+    // 不分段(splitSeconds=0): 整场一个 TS 从头写到尾, 进程同样常驻, 收 'q' 才退
+    fs.writeFileSync(child.out, Buffer.alloc(world.segBytes, 0x54))
     return child
   }
   // 真 ffmpeg 按输出扩展名推断封装器。原子产物叫 <x>.mp4.part, 不点名 -f 就直接
@@ -607,6 +615,51 @@ console.log('\n--- H1 无系统密钥时的机密降级必须说实话 ---')
   assert(fs.readFileSync(path.join(world.secretDir, 'secrets.dat'), 'utf-8').startsWith('plain:'), 'H4-1 加密写入异常时回落明文')
   assert(world.logWarn.some((l) => l.includes('加密写入失败')), 'H4-2 异常路径同样留痕')
   assert(s.get('tgToken') === '123:ABC', 'H4-3 功能不因降级中断(值仍可用)')
+}
+
+console.log('\n--- I1 不分段(splitSeconds=0): 整场一个 TS, 不进 segment 也不该进 concat ---')
+{
+  await reset({ splitSeconds: 0, autoMp4: true, deleteTs: false, mergeMp4: true, mergeDeleteSegments: true })
+  await recorder.start({ platform: 'pandalive', userId: 'i1', nick: 'Solo One', title: '', auto: false })
+  const t0 = listTask('i1')
+  const dir = t0.dirPath
+  await waitUntil(() => media(dir).length >= 1)
+  const cap = world.ffCalls.find((c) => c.kind === 'capture')
+  const segSpawn = world.ffCalls.find((c) => c.kind === 'seg')
+  assert(!!cap, 'I1-1 录制走单文件直出那一支(伪 ffmpeg 认成常驻抓流进程, 不是跑完即退的 remux)')
+  assert(!segSpawn && cap && !cap.args.includes('segment') && !cap.out.includes('%04d'), 'I1-2 命令行里没有 -f segment / 没有 %04d 模板', cap && cap.args.join(' '))
+  assert(media(dir).length === 1 && !SEG_RE.test(media(dir)[0]) && media(dir)[0].endsWith('.ts'), 'I1-3 盘上就一个 TS, 名字不带段号(SEG_RE 不认它是"一段")', media(dir).join(','))
+  // 文件是 spawn 时同步落盘的, 统计却是 2s 一跳 —— 不等下一拍就会读到空 currentFile/0 字节(那是时序, 不是缺陷)
+  await waitUntil(() => (listTask('i1')?.bytes ?? 0) > 0, 5000)
+  const t1 = listTask('i1')
+  assert(t1.bytes === world.segBytes && path.basename(t1.currentFile) === media(dir)[0], 'I1-4 下一轮 2s 统计把这个单文件读成"当前文件"(停滞检测读的正是它)', `${t1.bytes}/${t1.currentFile}`)
+  await recorder.stop('pandalive', 'i1')
+  await waitUntil(() => recorder.list().length === 0)
+  const item = hist().find((h) => h.userId === 'i1')
+  assert(world.ffCalls.filter((c) => c.kind === 'concat').length === 0, 'I1-5 mergeMp4 开着也不 spawn concat: 没有第二段可合, 收尾不该承诺合并')
+  const m = media(dir)
+  assert(m.length === 2 && m.some((n) => n.endsWith('.mp4')) && m.some((n) => n.endsWith('.ts')), 'I1-6 remux 出同名 MP4, deleteTs=false 时 TS 保留', m.join(','))
+  assert(!anyOf(dir, '.part') && !anyOf(dir, '.concat.txt'), 'I1-7 不留 .part / .concat.txt 中间产物', fs.readdirSync(dir).join(','))
+  assert(!!item && item.files.length === 2 && item.files.every((f) => !SEG_RE.test(path.basename(f))), 'I1-8 库里两个文件全是"整文件形态"(对账与合并那侧不会把它们当分段)', item && JSON.stringify(item.files.map((f) => path.basename(f))))
+  assert(!!item && item.bytes === world.segBytes * 2, 'I1-9 字节聚合 = TS + 同名 MP4 实长', String(item && item.bytes))
+
+  // I2: deleteTs=true ⇒ 收尾只剩一个 <基名>.mp4 —— 与手动合并的产物同形, 库里的"整文件"判据必须命中
+  await reset({ splitSeconds: 0, autoMp4: true, deleteTs: true, mergeMp4: true, mergeDeleteSegments: true })
+  await recorder.start({ platform: 'pandalive', userId: 'i2', nick: 'Solo Two', title: '', auto: false })
+  await recorder.stop('pandalive', 'i2')
+  await waitUntil(() => recorder.list().length === 0)
+  const item2 = hist().find((h) => h.userId === 'i2')
+  const m2 = media(item2.dirPath)
+  assert(m2.length === 1 && m2[0].endsWith('.mp4') && !SEG_RE.test(m2[0]), 'I2-1 整场录完 + 转 MP4 + 删 TS ⇒ 盘上一个文件', m2.join(','))
+  // 与 src/renderer/src/utils/media.ts 的 isWholeTask 同一把尺(那个模块在渲染层, 这里按同一条正则复算)
+  const whole = item2.files.length === 1 && item2.files[0].toLowerCase().endsWith('.mp4') && !/_(\d{4}|vod)\.mp4$/i.test(path.basename(item2.files[0]))
+  assert(whole, 'I2-2 与合并产物同形 → 库的「整文件」判据命中(不另开一档区分来源)', JSON.stringify(item2.files.map((f) => path.basename(f))))
+
+  // I3: 手动合并对单文件条目如实拒收, 而不是给一个"合并成功"的假动作
+  world.ffCalls.length = 0
+  const r = await recorder.mergeTask(item2.id)
+  assert(!r.ok && r.error === 'rec.mergeFew', 'I3-1 单文件条目拒合并并给出原因', JSON.stringify(r))
+  assert(world.ffCalls.length === 0, 'I3-2 拒合并不再 spawn ffmpeg')
 }
 
 console.log(`\n==== 结果: ${PASS} 通过 / ${FAIL} 失败 ====`)
