@@ -747,6 +747,23 @@ world.soopMeta = { s24: { broadNo: 999, living: true, hostName: 'S主播', roomN
   check('T24-14 Panda 冷却期: Panda 零请求但 SOOP 探针不连坐', world.liveCalls.length === 0 && world.bjCalls.length === 0 && world.soopCalls.includes('pageMeta:s24') && db.anchors[1].isLive === true)
 }
 
+// ============ T25 取源回写的房态合并 (2026-10-01 实机抓到: 19+ 房一开播, 旗就被抹掉) ============
+{
+  console.log('\n--- T25 applyPlayMeta: 这一路看不到的字段不许写 false ---')
+  const { applyPlayMeta } = loadTs('src/main/services/source.ts')
+  await reset()
+  db.anchors = [mkAnchor('s25', { platform: 'soop', isLive: true, tags: { isAdult: true, isPw: false, type: '', liveType: 'live' } })]
+  const t1 = applyPlayMeta('soop', 's25', { ok: true, media: { liveType: 'live', isPw: true } })
+  check('T25-1 回包没有 isAdult ⇒ 列表真值保留(取源看不到 19+, 补 false 等于每次开播擦一次)', t1.isAdult === true && db.anchors[0].tags.isAdult === true)
+  check('T25-2 回包真观察到的 isPw 照样落卡', t1.isPw === true && db.anchors[0].tags.isPw === true)
+  const t2 = applyPlayMeta('soop', 's25', { ok: true, media: { isAdult: false, liveType: 'live', isPw: true } })
+  check('T25-3 回包明确给 false ⇒ 按回包办(既不臆断, 也不拿旧值遮蔽真观察)', t2.isAdult === false && db.anchors[0].tags.isAdult === false)
+  await reset()
+  db.anchors = [mkAnchor('p25', { isLive: true, tags: { isAdult: true, isPw: false, type: 'fan', liveType: 'live' } })]
+  const t3 = applyPlayMeta('pandalive', 'p25', { ok: true, media: { isAdult: false, type: '' } })
+  check('T25-4 Panda 一律不回写房态(每轮由列表原值维护, 两处写=两套真值)', t3 === null && db.anchors[0].tags.isAdult === true && db.anchors[0].tags.type === 'fan')
+}
+
 console.log('解读: T1/T2/T3 PASS ⇒ 「大厅轮询刷新会清源缓存」不成立(真实源码+可计数请求实证);')
 console.log('      T4 PASS ⇒ 列表内开播翻转的作废链路正常工作(对照);')
 console.log('      T17 PASS ⇒ 粉丝房 fanLive 专用通知+自录正常; T18 PASS ⇒ 下播 toast 单发, 重复判离线不重复;')
@@ -761,4 +778,5 @@ console.log('      T11 PASS ⇒ 取关守卫: 快照内取关者不发请求, �
 console.log('      T12 PASS ⇒ 模式切换: per-anchor 分支清 idleQueue, 泵无重复职责;')
 console.log('      T14 PASS ⇒ urgent 回归: 列表外在播主播仍轮内每轮全查, 不被泵重复;')
 console.log('      T16 PASS ⇒ 大厅/关注一份请求两用: 列表可见关注零增量, 全轮请求数恒等于 页数+urgent+rest.')
+console.log('      T25 PASS ⇒ 取源回写按字段合并: 这一路观察不到的 isAdult 不再被写成 false(19+ 旗不被抹掉), 观察得到的 isPw 照写.')
 process.exit(failures === 0 ? 0 : 1)

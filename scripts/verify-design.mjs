@@ -49,6 +49,8 @@
 //   D38 「关注在播」一屏只留一个现场: 头像坞退役, 读数只剩分段第一档 + 顶栏徽标, 组件/样式/文案/store getter 不留残骸
 //   D39 SOOP 头像按频道 ID 派生并落卡(404 回落兜底, 不画破图); 面板点赞/粉丝只在有数时摆行, 「不适用」那句连死键一起删
 //   D40 SOOP 的 ID 槽只放裸频道名: 「房间」前缀连 ws.roomNo 双语死键一起撤(Panda 的 @ 是可粘贴地址的一部分, 留着)
+//   D41 播放页侧栏「标签」整行撤掉: 同一批房态在页头已有徽标, 普通房只剩「—」占位; 撤行不撤信号(四枚徽标 + isVod 必须在位)
+//   D42 取源回写按字段合并: 这一路看不到的 isAdult 不许写 false(19+ 旗不被抹掉), 看得到的 isPw 照写; Panda 不回收
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -1141,6 +1143,41 @@ checkWithAllowlist(
   assert(!/roomNo/.test(zh) && !/roomNo/.test(en) && !/房间 \{id\}|Room \{id\}/.test(zh + en), 'D40b「房间 {id}」这个带前缀的写法连两语言键一起绝迹(唯一消费方已改口, 死键不留)')
   const prefixed = RENDERER.filter((f) => /t\(['"][\w.]*roomNo['"]/.test(fs.readFileSync(f, 'utf8')))
   assert(prefixed.length === 0, 'D40c 全仓不再有任何一处给 ID 加「房间」前缀', prefixed.map(rel).join(', '))
+}
+
+// ============================================================================
+// D41 播放页侧栏的「标签」整行撤掉: 房态在标题下方已有徽标, 普通房那一行只剩「—」 (2026-10-01 用户指令「这显示不了也去掉把, 不要占位」)
+//   能提取到 —— SOOP 的关注行带 is_adult / is_password, 但只有 19+ / 密码 / 普通这一档, 粉丝团与回放是 Panda 的字段;
+//   同一批 tags 在页头 ③ 标题元信息里已经画成徽标, 侧栏再列一遍是第二次呈现, 而"什么旗都没打"的多数房间只剩「—」占位。
+//   撤的是行, 不是信号: 四枚徽标与 isVod(回放判定)必须原样在位。
+// ============================================================================
+{
+  const pv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'PlayerView.vue'), 'utf8')
+  const zh = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'zh-CN.ts'), 'utf8')
+  const en = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'en-US.ts'), 'utf8')
+
+  assert(!/labelList/.test(pv) && !/player\.labels/.test(pv), 'D41a 侧栏「标签」那一行连同它的取值 computed 一起绝迹(留半个死 computed 就是等下次挂回去)')
+  assert(!/^    labels: /m.test(zh) && !/^    labels: /m.test(en), 'D41b player.labels 双语死键同删(唯一消费方已撤)')
+  const badges = ['account.tagPw', '19+', "tags?.type === 'fan'", 'isVod'].filter((k) => !pv.includes(k))
+  assert(badges.length === 0, 'D41c 房态信号仍在页头: 密码 / 19+ / 粉丝团 三枚徽标 + isVod 回放判定一处都不能少', badges.join(', '))
+  assert(/const tags = computed\(\(\) => playTags\.value \|\| room\.value\.tags\)/.test(pv), 'D41d tags 仍走「回包 > 快照」那条链: 徽标读的是它, 撤一行不许把取值链也降级')
+}
+
+// ============================================================================
+// D42 取源回写按字段合并: 这一路观察不到的字段不许写 false (2026-10-01 实机抓到 —— 19+ 房一开播旗就没了)
+//   SOOP 的 getPlay 看不到 19+(GRADE 语义未实测), 过去它交一份 isAdult: false, applyPlayMeta 又整包覆写,
+//   于是"取一次源 = 擦一次真值", 下一轮列表才写回来 —— 卡与页头之间的闪断就是这么来的(库里那一晚就是 false)。
+//   修法在两处: 回包不带看不见的字段; 合并只认回包真给的值。动态面由 verify-playcache 的 T25 覆盖。
+// ============================================================================
+{
+  const so = fs.readFileSync(R('src', 'main', 'services', 'soop.ts'), 'utf8')
+  const sc = fs.readFileSync(R('src', 'main', 'services', 'source.ts'), 'utf8')
+  const ip = fs.readFileSync(R('src', 'main', 'ipc.ts'), 'utf8')
+
+  const mediaLine = (so.match(/media: \{[^}]*isPw[^}]*\}/) || [''])[0]
+  assert(mediaLine !== '' && !/isAdult/.test(mediaLine), 'D42a SOOP 取源回包不再携带 isAdult(看不到 = 不给这一格, 给 false 就是替列表下结论)', mediaLine.slice(0, 90))
+  assert(/: AnchorTag \| null/.test(sc) && /typeof m\.isAdult === 'boolean' \? m\.isAdult : !!prev\?\.isAdult/.test(sc), 'D42b applyPlayMeta 按字段合并并把合并结果交回去(整包覆写的老写法不得复活)')
+  assert(/const merged = applyPlayMeta\(platform, userId, r\)/.test(ip) && /tags: merged \?\?/.test(ip), 'D42c 渲染层拿到的房态 = 库里那一份(SOOP 走合并, Panda 仍走回包整包)')
 }
 
 // ============================================================================
