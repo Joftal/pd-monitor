@@ -85,7 +85,7 @@ src/
 │     ├─ source.ts            #   跨平台取流契约(缓存命中/强制现拉/显式作废): 录制与播放不认平台
 │     ├─ hlsProxy.ts          #   SOOP 本地 HLS 代理: 清单重写 + 鉴权头注入 + 预载分段过滤
 │     ├─ watcher.ts           #   轮询引擎: 列表模式 + 逐个模式 + urgent/间隙泵兜底 + 熔断退避(按平台分账)
-│     ├─ recorder.ts          #   录制引擎: ffmpeg + 停滞检测 + 分段 + remux + 合并 + VOD + 删除(回收站)
+│     ├─ recorder.ts          #   录制引擎: ffmpeg + 停滞检测 + 分段(填 0 不分段·单文件) + remux + 合并 + VOD + 删除(回收站)
 │     ├─ thumbs.ts            #   九宫格缩略图: 采样拼图 + 签名缓存 + 文件集对账 + 孤儿清扫
 │     ├─ authWin.ts           #   网页登录窗(事件驱动)
 │     ├─ vault.ts             #   系统安全存储加密 Cookie(DPAPI / Keychain / libsecret)
