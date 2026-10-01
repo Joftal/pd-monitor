@@ -311,22 +311,7 @@
   .tok .info b { color: var(--ink1); font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; }
   .tok .ratio { display: inline-block; margin-top: 4px; font-size: 10.5px; font-weight: 800; color: var(--ok-ink); }
 
-  /* ============ 工作区: 视图分段 + 在播坞 ============ */
-  .livedock { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 8px;
-              background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card);
-              padding: 8px 12px; box-shadow: var(--sh1); }
-  .livedock .dl { font-size: 12px; font-weight: 800; display: flex; align-items: center; gap: 6px; flex: none; white-space: nowrap; }
-  .livedock .dl .cdot { width: 8px; height: 8px; border-radius: 50%; background: var(--live); }
-  .livedock .dl .n { color: var(--ink3); font-weight: 700; }
-  .livedock .strip { display: flex; align-items: center; gap: 6px; overflow: hidden; }
-  .dchip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px 0 4px; border-radius: var(--r-pill);
-           background: var(--fill); border: 1px solid var(--line); font-size: 11.5px; font-weight: 600; color: var(--ink1); flex: none; cursor: pointer; }
-  .dchip .ava { width: 20px; height: 20px; border-radius: 50%; background: linear-gradient(135deg, #CFD5DE, #E7EBF1); display: grid; place-items: center; font-size: 9.5px; font-weight: 800; color: var(--ink2); }
-  .dchip .rd { width: 6px; height: 6px; border-radius: 50%; background: #FF4D52; flex: none; }
-  .dchip:hover { border-color: var(--brand); color: var(--brand); }
-  .dchip.more { padding: 0 11px; color: var(--ink3); font-weight: 700; }
-  .livedock .goto { margin-left: auto; flex: none; }
-
+  /* ============ 工作区: 视图分段 ============ */
   .viewtabs { display: flex; align-items: center; gap: 4px; margin-top: 14px; border-bottom: 1px solid var(--line); }
   .vt { display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 14px; border: none; background: transparent; cursor: pointer;
         font-size: 13.5px; font-weight: 600; color: var(--ink2); position: relative; white-space: nowrap; }
@@ -375,7 +360,6 @@
   .wire .wbody { padding: 8px; display: flex; flex-direction: column; gap: 6px; min-height: 168px; }
   .blk { border-radius: 6px; border: 1px solid var(--line); background: var(--fill); font-size: 9.5px; font-weight: 700; color: var(--ink3); display: grid; place-items: center; text-align: center; line-height: 1.4; padding: 4px; }
   .blk.acc { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
-  .blk.dock { height: 20px; }
   .wcol { display: flex; gap: 6px; flex: 1; min-height: 0; }
 </style>
 </head>
@@ -402,7 +386,7 @@
     <h1 class="doc">平台优先信息架构与视觉重构 · v1</h1>
     <div class="doc-sub">
       根因不是「缺一个页面」，而是<strong>平台被降格成了一个筛选条件</strong>：两个能力集合不同的平台（Panda 有全站列表 / IVS 直连 / 源保活 / 备用线路，SOOP 只有关注列表整轮 + 逐房探针 / 本地 HLS 代理 / 无保活）
-      共用一条页面轴、一个轮询状态对象、一套排序，结果是谁的能力都在给对方制造空态与误读。本稿把轴换过来：<strong>先选平台，再看内容</strong>；直播大厅与已关注整合为一页，页内按<strong>视图分段</strong>（在播关注 / 站内发现 / 离线关注）切换，并在顶部挂一条「在播坞」保证切去逛发现或做离线管理时仍能一眼看到关注的人在播（坞不挂在「在播关注」视图上，理由见 ㉖；滚动墙形态已被你否决，理由与三个候选见 L 屏）；
+      共用一条页面轴、一个轮询状态对象、一套排序，结果是谁的能力都在给对方制造空态与误读。本稿把轴换过来：<strong>先选平台，再看内容</strong>；直播大厅与已关注整合为一页，页内按<strong>视图分段</strong>（在播关注 / 站内发现 / 离线关注）切换，「关注在播」这一读数只挂在分段第一档与顶栏徽标上，切去逛发现或做离线管理时不在页顶再复制一条头像带（原稿在此挂了一条「在播坞」：先按 ㉖ 收窄到非在播两视图，后按 ㊆ 整体撤掉；滚动墙形态已被你否决，理由与三个候选见 L 屏）；
       主色从中性蓝取，平台色只用于表达身份，不再兼作主题色。录制 / 库 / 账号保持结构不动，只做令牌换皮与可见性修补（账号页的 5 处见 S9）；落地时「库」进一步并进了录制页（㉒）。<span class="d">订正（2026-09-30 三次）：账号页的「结构不动」已作废 —— 页内平台分段撤归顶栏、三张登录方式卡并成一卡三行、徽章与存储文案去重，见 S9 与 ㊀ ㊁。页面仍是一页讲一方，不拆两页这条不变。</span>
     </div>
 
@@ -422,11 +406,11 @@
         </table>
       </div>
       <div>
-        <div class="cap"><span class="tagnew">新</span> 平台为一级，工作区一页三视图 + 在播坞</div>
+        <div class="cap"><span class="tagnew">新</span> 平台为一级，工作区一页三视图</div>
         <table class="spec">
           <thead><tr><th>路由</th><th>内容</th><th>要点</th></tr></thead>
           <tbody>
-            <tr><td class="mono">/:plat/live</td><td>三视图分段：在播关注 / 站内发现 / 离线关注 + 常驻在播坞</td><td>每视图各自排序与分页；Panda 三项齐全，SOOP 的发现项一期为引导卡（布局详见 L 屏）</td></tr>
+            <tr><td class="mono">/:plat/live</td><td>三视图分段：在播关注 / 站内发现 / 离线关注（「关注在播」的计数在这一档本身，不另挂坞，㊆）</td><td>每视图各自排序与分页；Panda 三项齐全，SOOP 的发现项一期为引导卡（布局详见 L 屏）</td></tr>
             <tr><td class="mono">/:plat/recordings</td><td>录制任务 + <strong>库</strong>（原视频库页并入本页第三段，见 ㉒）</td><td>本页不设平台 tab（它没有「在播 / 发现 / 离线」那种视图）；<code class="tok">:plat</code> 段作为库的初始筛选，库段内仍可切「全部平台」</td></tr>
             <tr><td class="mono">/:plat/library</td><td><strong>重定向</strong> → <code class="tok">/:plat/recordings</code></td><td>库不另立页面（㉒）；旧深链必须继续可用，用户的历史 TG 卡片与本仓库脚本都指着它</td></tr>
             <tr><td class="mono">/player/:plat/:userId</td><td>播放 + 录制控制</td><td>返回目标 = 原路返回（见 5.2「返回目标」订正）；能力缺失区块显示「不适用 + 原因」</td></tr>
@@ -518,11 +502,10 @@
     <div class="sec"><h2>L.1 三个候选</h2><span class="d">线框只表达结构，不是视觉稿</span></div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;align-items:start">
       <div>
-        <div class="cap"><span class="tagnew">推荐</span> A · 视图分段 + 在播坞</div>
+        <div class="cap"><span class="tagnew">推荐</span> A · 视图分段（原稿的「+ 在播坞」已按 ㊆ 撤掉）</div>
         <div class="wire">
           <div class="wbar">Panda · SOOP ｜ 直播 · 录制</div>
           <div class="wbody">
-            <div class="blk dock acc">在播坞（横向头像条 · 仅非在播视图出现，㉖）</div>
             <div class="blk" style="height:18px">在播关注 12 ｜ 站内发现 240 ｜ 离线关注 6</div>
             <div class="blk" style="flex:1">当前视图整屏内容<br/>（自己的排序 + 自己的分页）</div>
             <div class="blk" style="height:16px">‹ 1 2 3 … ›</div>
@@ -532,7 +515,7 @@
           <tbody>
             <tr><th class="k">滚动深度</th><td class="yes">恒定可预测，任何视图都只滚自己那段</td></tr>
             <tr><th class="k">切换成本</th><td>1 次点击；视图选择在平台内记忆</td></tr>
-            <tr><th class="k">关注会不会被藏</th><td>不会 —— 逛发现/管离线时坞补回关注在播；站在「在播关注」时整屏就是这批房间，坞按 ㉖ 收起</td></tr>
+            <tr><th class="k">关注会不会被藏</th><td>分段第一档自带「在播关注 N」与呼吸点，顶栏平台徽标跨页报数 —— 一屏一个现场，不在别视图里再摆一条坞（㊆）</td></tr>
             <tr><th class="k">代价</th><td>不能同屏并排看关注墙和发现墙</td></tr>
           </tbody>
         </table>
@@ -584,13 +567,13 @@
       </div>
     </div>
 
-    <div class="sec"><h2>L.2 推荐方案 A 的完整规则</h2><span class="d">「分段切视图」之所以安全，全靠非在播视图上的在播坞兜住「我关注的人有没有开播」这个第一诉求（坞的出现条件按 ㉖ 收窄）</span></div>
+    <div class="sec"><h2>L.2 推荐方案 A 的完整规则</h2><span class="d">「分段切视图」的安全性原来记在一条在播坞上（㉖ 收窄、㊆ 撤掉）；如今「我关注的人有没有开播」由分段第一档的计数 + 顶栏徽标回答</span></div>
     <table class="spec">
       <thead><tr><th style="width:150px">部件</th><th>规则</th></tr></thead>
       <tbody>
         <tr><th class="k">视图分段</th><td>三项：<b>在播关注</b>（计数）· <b>站内发现</b>（计数）· <b>离线关注</b>（计数）。每项<strong>自己的排序 chips、筛选 chips、分页、滚动位置</strong>，全部持久化在 store（沿用现状 <code class="tok">exploreFilter</code> 的做法，扩成 per-view）。切换不重新拉数据，只换渲染。<span class="d">落地订正（2026-10-01）：筛选条右端那句常驻说明「排序与页码在本视图内记忆」已撤 —— 记忆是这一屏的默认行为，不是一条需要提醒的规则，天天说反而成了噪音（与 §键盘 那条同源：屏上的说明书只在「用户会撞见却不自知」时才值得占一格）。右端现在<strong>只在真有搜索词时出声</strong>（「「{kw}」的搜索结果」+「清除搜索」出口），无搜索词时连为顶住那句而摆的 <code class="tok">flex-1</code> 一起收起；<code class="tok">ws.memoryHint</code> 双语死键一并删，由 D35 锁死。per-view 记忆本体（排序/筛选/页码/滚动位存 <code class="tok">store.views</code>）不动。</span></td></tr>
-        <tr><th class="k">默认视图</th><td>进工作区恒为「在播关注」。<strong>有关注开播时不自动跳视图</strong>（现状 MonitorView 会自动切 tab，会打断正在浏览的用户），改为在播坞上对应头像左侧加一个 2px 品牌色竖条 + 顶栏平台徽标计数变红——用户回来时看得见，但当前阅读不被劫持。</td></tr>
-        <tr><th class="k">在播坞</th><td>sticky 在工作区内容顶部，高 44px。<br/>① 只列「关注且在播」，不含发现段房间；<br/>② 顺序 = 开播时间新→旧；<br/>③ 单项 = 头像 + 昵称，录制中的加红点，密码房加锁形；<br/>④ 超过 <b>7</b> 个折叠为 <code class="tok">+N</code> chip，点击展开为两行；<br/>⑤ 右侧「全部在播 12 ›」一键跳「在播关注」视图；<br/>⑥ <strong>0 位关注在播时整条坞收起不占位</strong>，只在分段行显示「在播关注 0」——这是最常见状态，不能让它挂一条空_bar_；<br/>⑦ <strong>「在播关注」视图本身不挂坞</strong>（落地订正，见 ㉖）：那一屏的卡片墙列的就是同一批房间，坞只是第二份呈现并把三层带堆成四层。<span class="d">⑥ 与 ⑦ 是两条独立判据：⑥ 管空态不占位，⑦ 管重复呈现。原设计的「常驻在三个视图之上」由此改为「常驻在非在播的两个视图之上」。</span></td></tr>
+        <tr><th class="k">默认视图</th><td>进工作区恒为「在播关注」。<strong>有关注开播时不自动跳视图</strong>（现状 MonitorView 会自动切 tab，会打断正在浏览的用户），改为顶栏平台徽标计数转红——用户回来时看得见，但当前阅读不被劫持。<span class="d">原稿在这里还挂了「在播坞对应头像左侧 2px 品牌色竖条」，坞按 ㊆ 撤掉后这条信号只剩顶栏一处。</span></td></tr>
+        <tr><th class="k">在播坞</th><td><strong>已整体撤掉（㊆，2026-10-01）</strong>。原规格留档：sticky 在工作区内容顶部、高 44px，只列「关注且在播」（不含发现段房间），按开播时间新→旧，单项头像 + 昵称（录制中加红点、密码房加锁形），超过 <b>7</b> 个折叠为 <code class="tok">+N</code>，右侧「全部在播 N ›」跳「在播关注」视图，<strong>0 位时整条收起不占位</strong>，「在播关注」视图本身不挂（⑥ 管空态不占位、⑦ 管重复呈现，两条独立判据，见 ㉖）。<span class="d">撤它的理由就是 ⑦ 那条判据推到底：分段第一档已经写着「在播关注 N」并带呼吸点，顶栏徽标在别的页面也报同一个数 —— 一条只读、不承载任何管理动作的头像带，在同一屏上是第二批呈现，而不是补缺。随撤：<code class="tok">LiveDock.vue</code>、<code class="tok">dock.*</code> 四键（中英各两）、只喂它的 <code class="tok">store.liveAnchors</code> getter、原型样式 <code class="tok">.livedock</code> / <code class="tok">.dchip</code>。由 D38 锁死。</span></td></tr>
         <tr><th class="k">SOOP 的发现项</th><td>分段仍显示三项（按你确认的 D2 方案 1），但该项右侧带 <code class="tok">未开放</code> 灰标；点进去是引导卡而不是空墙。<strong>段位置固定，二期接口确认后无缝替换</strong>，导航不动。</td></tr>
         <tr><th class="k">深链</th><td><code class="tok">#/:plat/live?view=live|discover|offline</code>，默认 <code class="tok">live</code>。旧 <code class="tok">#/explore → ?view=discover</code>、<code class="tok">#/monitor → ?view=live</code>，语义精确不再靠「滚动到某段」这种不可控行为。</td></tr>
         <tr><th class="k">键盘</th><td>焦点不在输入框时，<code class="tok">1</code> / <code class="tok">2</code> / <code class="tok">3</code> 切视图；<code class="tok">/</code> 聚焦搜索（现状搜索已在顶栏）。这条让「切去发现逛一圈再切回来」几乎零成本，抵消方案 A 唯一的缺点。<span class="d">落地订正（2026-10-01）：快捷键本体照旧，屏上那条常驻提示（分段行右侧的「按 1 / 2 / 3 切换视图 · / 聚焦搜索」）已撤 —— 它是一排分段右侧的第三条声音（分段本身 + 计数药丸 + 一句说明书），而它讲的动作不需要被看见才会发生：键盘是自己会敲的人用的，撞见一次就记住了。文案与 <code class="tok">ws.keyHint</code> 双语键一并删（㊀ 的「无消费方即删」），由 D34 锁死。</span></td></tr>
@@ -604,6 +587,7 @@
       如果你的真实使用习惯是「大部分时间只看关注，偶尔逛发现」，A 是对的（发现被藏一层无所谓）。
       如果是「经常边逛发现边看关注在播」，B 的双栏更贴合，代价是窄窗口要退化。<strong>在播坞是 A 用来把 B 的好处补回来的部件</strong>，所以我的建议是 A + 坞；
       若你更想要 B，我按 B 重画 S1/S2 即可，只是要接受 SOOP 工作区在发现段落地前是「左列表 + 右引导卡」的形态。
+      <span class="d">〔落地后订正：这条「补回来的部件」最终没留住 —— 分段第一档的计数与顶栏徽标已经回答同一个问题，坞按 ㊆ 撤掉，A 由此变成纯粹的「一次一视图」。〕</span>
     </div>
   </div>
 </section>
@@ -638,23 +622,6 @@
         <button class="btn btn-ghost btn-sm">立即拉取一轮</button>
         <button class="btn btn-primary btn-sm">+ 关注主播</button>
       </div>
-    </div>
-
-    <!-- 在播坞: 出现在「逛发现 / 管离线」这两屏之上, 保证切走也不会把关注藏起来;
-         「在播关注」视图本身不挂坞(㉖) —— 下面整屏卡片墙就是同一批房间 -->
-    <div class="livedock" style="margin-top:16px">
-      <div class="dl"><span class="cdot"></span>关注在播 <span class="n">12</span></div>
-      <div class="strip">
-        <span class="dchip"><span class="ava">Z</span>zenith6666<span class="rd" title="正在录制"></span></span>
-        <span class="dchip"><span class="ava">C</span>cine_club</span>
-        <span class="dchip"><span class="ava">N</span>nightowl 🔒</span>
-        <span class="dchip"><span class="ava">L</span>lck_kr</span>
-        <span class="dchip"><span class="ava">B</span>brewjazz</span>
-        <span class="dchip"><span class="ava">S</span>sixstrings</span>
-        <span class="dchip"><span class="ava">M</span>moe_asmr</span>
-        <span class="dchip more">+5</span>
-      </div>
-      <button class="btn btn-ghost btn-sm goto">切到在播视图 ›</button>
     </div>
 
     <div class="viewtabs">
@@ -719,7 +686,7 @@
   </div>
 
   <div class="page">
-    <div class="sec"><h2>1.1 同一工作区的另外两个视图</h2><span class="d">切换只换正文区，顶栏 + 视图分段完全不动，在播坞按 ㉖ 只在这两屏出现 —— 三视图同构，切换没有位移感</span></div>
+    <div class="sec"><h2>1.1 同一工作区的另外两个视图</h2><span class="d">切换只换正文区，顶栏 + 视图分段完全不动 —— 三视图同构，切换没有位移感（这一屏原先还挂在一条在播坞上，已按 ㊆ 撤掉）</span></div>
     <div class="cmp">
       <div>
         <div class="cap">视图 2 · 站内发现</div>
@@ -732,15 +699,6 @@
             <div class="av p">P</div>
           </div>
           <div class="body">
-            <div class="livedock" style="padding:4px 7px;gap:4px">
-              <div class="dl" style="font-size:9.5px;gap:4px"><span class="cdot" style="width:6px;height:6px"></span>关注在播 <span class="n">12</span></div>
-              <div class="strip">
-                <span class="dchip" style="height:20px;font-size:9.5px;padding:0 7px 0 3px"><span class="ava" style="width:14px;height:14px">Z</span>zenith<span class="rd"></span></span>
-                <span class="dchip" style="height:20px;font-size:9.5px;padding:0 7px 0 3px"><span class="ava" style="width:14px;height:14px">C</span>cine</span>
-                <span class="dchip" style="height:20px;font-size:9.5px;padding:0 7px 0 3px"><span class="ava" style="width:14px;height:14px">N</span>night</span>
-                <span class="dchip more" style="height:20px;font-size:9.5px;padding:0 7px">+9</span>
-              </div>
-            </div>
             <div class="viewtabs" style="margin-top:8px;border-bottom-width:1px">
               <button class="vt" style="height:26px;font-size:10.5px;padding:0 8px">在播关注<span class="n" style="font-size:9px;padding:1px 5px">12</span></button>
               <button class="vt on" style="height:26px;font-size:10.5px;padding:0 8px">站内发现<span class="n" style="font-size:9px;padding:1px 5px">240</span></button>
@@ -773,7 +731,7 @@
         </div>
         <div class="note gray" style="margin-top:9px;font-size:11.5px">
           <b>发现视图整屏只属于发现</b>：240 个房间、4 档排序、3 个筛选、独立分页都在这一屏里，卡片墙从分段行下方直接开始，<strong>上面不再压一段关注墙</strong>。
-          关注在播由坞条带过去，随时可见可点。
+          关注在播由分段第一档的计数与顶栏徽标带着（㊆），要看就点过去，不在别视图里再复制一份。
         </div>
       </div>
 
@@ -788,14 +746,6 @@
             <div class="av p">P</div>
           </div>
           <div class="body">
-            <div class="livedock" style="padding:4px 7px;gap:4px">
-              <div class="dl" style="font-size:9.5px;gap:4px"><span class="cdot" style="width:6px;height:6px"></span>关注在播 <span class="n">12</span></div>
-              <div class="strip">
-                <span class="dchip" style="height:20px;font-size:9.5px;padding:0 7px 0 3px"><span class="ava" style="width:14px;height:14px">Z</span>zenith<span class="rd"></span></span>
-                <span class="dchip" style="height:20px;font-size:9.5px;padding:0 7px 0 3px"><span class="ava" style="width:14px;height:14px">C</span>cine</span>
-                <span class="dchip more" style="height:20px;font-size:9.5px;padding:0 7px">+10</span>
-              </div>
-            </div>
             <div class="viewtabs" style="margin-top:8px">
               <button class="vt" style="height:26px;font-size:10.5px;padding:0 8px">在播关注<span class="n" style="font-size:9px;padding:1px 5px">12</span></button>
               <button class="vt" style="height:26px;font-size:10.5px;padding:0 8px">站内发现<span class="n" style="font-size:9px;padding:1px 5px">240</span></button>
@@ -826,7 +776,7 @@
       <b>这一页相对现状改了六处</b>：
       ① 顶栏一级从「直播大厅 / 已关注 / 录制 / 视频库」换成「Panda / SOOP」分段 + 「直播 / 录制」两条页面，平台在播数做红点徽标（原第三条「视频库」落地时并进了录制页，见 ㉒）；
       ② 大厅与已关注合成一个「直播」页，内部用<strong>视图分段</strong>而不是纵向堆叠 —— 内容量最大的两个模块各自拿到整屏与各自的分页；
-      ③ 新增<strong>在播坞</strong>：切去逛发现或做离线管理时，关注在播仍是一条可见可点的常驻带，这是分段方案能成立的前提；
+      ③ ~~新增<strong>在播坞</strong>：切去逛发现或做离线管理时，关注在播仍是一条可见可点的常驻带~~ —— 本条已整体撤掉（㊆）：分段第一档的「在播关注 N」与顶栏徽标回答同一件事，一条只读的头像带是重复呈现；
       ④ 离线行补上「上次开播 / 未播天数」—— 现状完全缺失（<code class="tok">Anchor</code> 只有 <code class="tok">lastSeenAt</code>，那是「我们最后一次拉到他」不是「他最后一次开播」，见 S8 F2）；
       ⑤ 在播排序默认「最新开播」而非「人气最高」：人气只有部分采集路径给得出，纯人气排序会把刚开播的房间永久钉在墙尾；
       ⑥ 卡片动作降为两枚（进入房间 / 录制），关注、取关、打开官方页面收进右键菜单。
@@ -870,18 +820,6 @@
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4M12 17h.01M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
       <span>本轮 <b>3</b> 个房间检测失败（其中 2 个提示需要登录）：<b>19+</b> 与地区限制房间在匿名会话下取不到播放页 —— 在「账号」页登录 SOOP 后即可恢复。</span>
       <div class="acts"><button class="btn btn-ghost btn-sm">去登录</button><button class="btn btn-ghost btn-sm">查看失败清单</button></div>
-    </div>
-
-    <div class="livedock" style="margin-top:14px">
-      <div class="dl"><span class="cdot"></span>关注在播 <span class="n">5</span></div>
-      <div class="strip">
-        <span class="dchip"><span class="ava">1</span>1004ysus<span class="rd" title="正在录制"></span></span>
-        <span class="dchip"><span class="ava">P</span>pubg_kr</span>
-        <span class="dchip"><span class="ava">M</span>muk_lunch</span>
-        <span class="dchip"><span class="ava">W</span>pw_room 🔒</span>
-        <span class="dchip"><span class="ava">G</span>game_daily</span>
-      </div>
-      <button class="btn btn-ghost btn-sm goto">切到在播视图 ›</button>
     </div>
 
     <div class="viewtabs">
@@ -1741,7 +1679,7 @@
           <td>
             ① 路由改 <code class="tok">/:plat/live · /:plat/recordings · /:plat/library</code> + 全部旧深链重定向（TG 正文只含站内网页链接，不生成应用深链，故不在改动范围内）；<br/>
             ② 顶栏改「平台分段 + 三条页面」，平台在播计数上徽标；<br/>
-            ③ 大厅 + 已关注合并为<strong>三视图分段</strong>（在播关注 / 站内发现 / 离线关注，一次只看一视图）+ 常驻在播坞；每视图独立排序、筛选、分页与滚动位置，选中视图与各视图筛选态沿用现有 store 逻辑（<code class="tok">exploreFilter</code> 那套）；<br/>
+            ③ 大厅 + 已关注合并为<strong>三视图分段</strong>（在播关注 / 站内发现 / 离线关注，一次只看一视图；原稿在此另挂一条常驻在播坞，落地后按 ㊆ 撤掉）；每视图独立排序、筛选、分页与滚动位置，选中视图与各视图筛选态沿用现有 store 逻辑（<code class="tok">exploreFilter</code> 那套）；<br/>
             ④ 令牌全套替换（<code class="tok">styles.css</code> 变量 + <code class="tok">tailwind.config.js</code>），徽标三规则、卡片槽位、控件状态表落地；<br/>
             ⑤ 播放页命名统一 + SOOP「不适用」区块改为显示；<br/>
             ⑥ 设置页按三域分节：全局六节（外观/监控/录制/网络/推送与行为/数据与日志）+ <strong>Panda / SOOP 两个平台节</strong> + 关于；平台专属项（检测模式、源保活、开播自录默认、通知矩阵）只出现在平台节，通知矩阵按平台各一张、整块开/关也按平台走（详见 ㉝）；<br/>
@@ -1749,7 +1687,7 @@
             ⑧ 账号页按 S9 的 5 处改动落地（当时结构未动：仍是一页两态分段，只换皮、补状态文字、补校验轨、把密钥降级告警提到页顶、退出确认合并）；<span class="d">2026-09-30 三次：这一条的「结构未动」已被 S9 的 ㊀ ㊁ 取代 —— 两态分段并成顶栏一套、三卡并成一卡三行、校验轨并进状态卡右列，密钥降级告警仍在页顶、退出确认仍合并。</span><br/>
             ⑨ D3 反向差值上线：同步站内关注只<strong>标注</strong>「站内已取关 · 本地仍保留」，一条都不删，离线视图另给一枚筛子。
           </td>
-          <td>类型检查 + <code class="tok">npm run verify</code> 十套脚本全绿；两平台各自的三个视图在真实数据下渲染正确，切换视图后排序/分页/滚动位置互不污染；在播为 0 时在播坞整体收起；「在播关注」视图不挂坞（㉖，D15m）；各屏空态为有界卡且下一步可点（㉕/㉗，D15i–n）、零数据页的下半屏由空槽撑满（㉘，D15o）；旧深链不落到空白页（由 <code class="tok">scripts/verify-deeplink.mjs</code> 在真路由表上断言）；老库的全局通知开关升格为矩阵后行为逐格不变（由 <code class="tok">scripts/verify-notify.mjs</code> 写真 db.json 走真 store 断言迁移与三路门禁）；「站内已取关」只标注不删墙、跨平台同名不串、重新回榜即清、북마크 取满 200 时跳过差值（由 <code class="tok">scripts/verify-follows.mjs</code> 的 D3 / E8 场景走真 <code class="tok">importFollowRows</code> 断言）；<strong>本稿可静态判定的规则已写成 <code class="tok">scripts/verify-design.mjs</code>（D1~D37，230 条断言，进 <code class="tok">npm run verify</code> 与 CI）</strong>：档位/禁原生色/禁硬编码色/纯色状态底白名单/状态色不承载文字/命名表/令牌层完好/双语键位与占位符/取词键存在/动效预算/瓷片可点性/平台分解行/白屏与最小窗宽/首屏不等官方校验与空态有界且可点/关注取关承载矩阵与进度承载面唯一/管线文案与码率差分按任务类型与字节实长走/仓库卫生（死令牌·无横幅历史稿·docs 二进制·README 双平台口径）/圆角四档（模板与 CSS 双向，禁任意值）/平台色点唯一规格/计数药丸唯一规格/等宽数字唯一拼法/naive 主题逐值对齐语义变量/文案品牌形/自绘按钮锁 <code class="tok">h-*</code>/按钮宽度只锁下限（禁 <code class="tok">!w-[Npx]</code>，例外仅限表单列宽与弹窗宽且带命中检查）/筛选条不能被自己筛掉（出现条件看基数而非筛完的条数，基数三视图同一口径「词已生效 · chip 未生效」，筛空的墙必带「取消筛选」出口）/空态文案与出口同一判据（墙上的归因由 <code class="tok">emptyAction</code> 单点决定，点到搜索词就必须给出「清除搜索」）/播放页返回从哪来回哪去（读历史栈落回 <code class="tok">?view=</code> 与录制页，栈空或跨平台才兜底本平台直播页，文案与目的地同源）/播放页侧栏读得完且动作行分轻重（侧栏自带滚动 + 卡片 <code class="tok">shrink-0</code>，动作行按「辅助幽灵 · 可逆描边 · 核心实心」分档且宽度只锁下限 · 观众数一屏只报一次）/播放页侧栏先问最新一帧、再问它记在哪张表（未关注房的标题·标签·点赞·粉丝不得因为值只在发现快照里就画成「—」：展示值 = 一次性回包 &gt; <code class="tok">room</code> 快照 &gt; 裸 ID，回包只写自己的 <code class="tok">play*</code> 引用不挤掉快照，「开播自动录制」按关注关系刻意例外）/工作区快捷键只做不说（<code class="tok">1/2/3</code> 切视图与 <code class="tok">/</code> 聚焦搜索的本体保留、且聚焦目标指得到顶栏那枚输入框，屏上那条常驻提示连同双语死键一并撤）/筛选条右端只在真有搜索词时出声（「排序与页码在本视图内记忆」那句常驻说明书已撤，per-view 记忆本体与搜索态的「清除搜索」出口照旧，无词时连 <code class="tok">flex-1</code> 都不摆）/关注入口一平台一套（标题·示例·占位符·动词·成功提示·错误归因各自成键，「自动识别」档在 i18n·平台控件·弹窗三处同时绝迹；粘错平台除归因外必须给「去另一平台添加」的出口，原文经 <code class="tok">store.addDraft</code> 过境撑开新平台的对话框；SOOP 纯数字单独归因为场次号）/不分段是一档显式取值（<code class="tok">splitSeconds=0</code> 在闸门·控件·三处读数·收尾链四道闸口各自被认下来，禁 <code class="tok">|| 900</code> 把 0 吞回默认；整场一个不带段号的 TS，合并两档与流水线第四棒随之收起；成品与手动合并产物同归「整文件」一类，不因来源分叉）。<br/><span style="color:#b02a31"><strong>验收口径未完成项（如实标注）：</strong></span>「深浅两主题逐屏截图比对」<strong>已执行三轮</strong>（2026-09-30，CDP 驱动真实 Electron 实例 + 真库 876 关注 / 24 在播，覆盖工作区三视图 / 录制页 / 账号页 / 设置页 / 播放页，两主题 × 1380 与 1024 宽；第三轮另真起两段 SOOP 直播录制并正常停止收尾），当场查出并修掉冷启动「加载中」空屏、设置页白屏、页头按钮档位并存、空态整屏居中、取关在播放页穿中性灰、卡片菜单用 div 装按钮、<strong>转码从未产出 MP4 且完全静默</strong>、实时码率是采样噪声、回放行首棒误写「拉取直播源」等 13 项，均由 D14/D15/D16 与 P1 套锁死。<strong>第四轮（㉜ 令牌层收敛，同日）</strong>量的是「同一物件在不在一档上」而非「有没有白屏」：顶栏两枚 <code class="tok">.platn</code>（999px / 实测 5 与 22）、<code class="tok">.pdot</code> 7px + ink3 描边（Panda 粉 #fb7299 / SOOP 黄 #ffd400）、视图分段 <code class="tok">.sec-n</code> 21.25px + <code class="tok">tabular-nums</code>、卡片 14px、在播坞 chip 27px（注入 9 位探针在播房间取证，坞在「在播关注」视图不渲染 = ㉖ 成立）、影院浮层动作行三枚 34px（注入 3 段/1 段探针条目取证）、账号页三枚 CTA 等宽 112px、设置保存条 128/128 对称、深浅两主题下 GitHub 按钮底色逐值等于 <code class="tok">--c-fill</code>。当场查出两处：<strong>设置·关于的自绘「GitHub 主页」按钮 34.35px 与同行 naive 的 28px 并排</strong>（已锁 <code class="tok">h-7</code>，由 D24 锁死）、<strong>深色 naive <code class="tok">errorColor</code> 沿用浅色档的 #e5484d</strong>（已改 <code class="tok">#eb575c</code> = <code class="tok">.dark --c-live</code>，由 D22 锁死）；另把免责文案里的小写 <code class="tok">pandalive</code> 订正为品牌形 <code class="tok">PandaLive</code>（D23，仅「落盘结构」两条保留小写 —— 那里说的就是目录名）。<strong>仍未实机覆盖的只剩一处，且不是「没做」而是现场不存在</strong>：发现卡的 hover 心形 —— Panda 未认证使站内发现为 0 张、SOOP 发现未开放，两平台都渲染空墙。回放管线行的有数据形态按 ㉚ 的口径取证（真机拉源 14/14 失败，改由同形状注入渲染）。<strong>第五轮（㊄ 关注入口拆平台，2026-10-01）</strong>量的是拆分后的对话框五屏：Panda 弹窗标题「关注 Panda 主播」且弹窗内平台分段为 0 段（<code class="tok">platSegments: []</code>）、Panda 里贴 SOOP 地址得到「这是 SOOP 的房间地址 + 去 SOOP 添加」且关注按钮 disabled、点出口后 <code class="tok">hash: #/soop/live</code> 而输入框里仍是原句（<code class="tok">val</code> 逐字相等）、SOOP 纯数字得到场次号专属归因且添加 disabled、对话框重开为空（<code class="tok">draft: ""</code>，寄存是一次性的）。「已关注: zenith6666」那一屏按真实提交取，取完当场取关并从开工前的备份还原 <code class="tok">data/db.json</code>（sha1 回到 <code class="tok">a94f670…</code>）。<strong>第六轮（㊅ 不分段 · 单文件录制，同日）</strong>量的是"0 这一档在屏上说的每句话是不是真的"：设置页同一格在 900 / 0 两档下的实拍（<code class="tok">val</code> 分别回读 900 与 0，输出处理从四档收成两档 —— <code class="tok">合并分段为单文件</code> / <code class="tok">合并后删除分段</code> 随分段一起收起），播放页侧栏「分段时长」两档实拍（<code class="tok">15 分钟</code> / <code class="tok">不分段 · 单文件</code>，产出那行同时从「TS + MP4 + 合并成片」退回「TS + MP4」），录制页在真录进行中的实拍（右上角「不分段 · 整场单文件」、流水线只有四棒、当前文件名不带段号），库 chip 实拍（<code class="tok">全部 / 直播录制 / 回放下载 / 整文件 / 出错</code>，点「整文件」筛出 1 条、点「回放下载」筛空）。<strong>并真起一场 <code class="tok">splitSeconds=0</code> 的直播录制</strong>：76s 后停止，盘上就一个 <code class="tok">…_092555.ts</code>（69,992,448 字节），收尾 remux 出同名 MP4，两文件时长逐字相等（<code class="tok">00:01:16.02</code>，1920×1080p30 + AAC），全程零 concat spawn —— 这条是伪 ffmpeg 测不出来的形状。<strong>当场查出并修掉一处</strong>：进行中的卡片写着「已写入 · 1 段」，而那一档压根没有段（判据改读当前文件名的形状，键 <code class="tok">writtenVod → writtenOne</code>，由 D37m 锁死）；另记一条探针教训 —— 带外 <code class="tok">window.api.settingsSet</code> 不会刷新渲染层的 settings 副本，读数面取证必须走 <code class="tok">store.patchSettings</code>（与真人点「保存设置」同一条路），否则量到的是探针造成的假象。两轮共 4 段探针录制产物当场 <code class="tok">recDelete</code> 删净（203 MB），<code class="tok">data/db.json</code> 从开工前备份还原（sha1 回到 <code class="tok">83c263b…</code>，历史条目归零）。</td>
+          <td>类型检查 + <code class="tok">npm run verify</code> 十套脚本全绿；两平台各自的三个视图在真实数据下渲染正确，切换视图后排序/分页/滚动位置互不污染；「关注在播」一屏只有一个现场 —— 头像坞已整体退役（㊆，D38），读数由分段第一档的呼吸点 + 计数与顶栏徽标承担；各屏空态为有界卡且下一步可点（㉕/㉗，D15i–n）、零数据页的下半屏由空槽撑满（㉘，D15o）；旧深链不落到空白页（由 <code class="tok">scripts/verify-deeplink.mjs</code> 在真路由表上断言）；老库的全局通知开关升格为矩阵后行为逐格不变（由 <code class="tok">scripts/verify-notify.mjs</code> 写真 db.json 走真 store 断言迁移与三路门禁）；「站内已取关」只标注不删墙、跨平台同名不串、重新回榜即清、북마크 取满 200 时跳过差值（由 <code class="tok">scripts/verify-follows.mjs</code> 的 D3 / E8 场景走真 <code class="tok">importFollowRows</code> 断言）；<strong>本稿可静态判定的规则已写成 <code class="tok">scripts/verify-design.mjs</code>（D1~D38，238 条断言，进 <code class="tok">npm run verify</code> 与 CI）</strong>：档位/禁原生色/禁硬编码色/纯色状态底白名单/状态色不承载文字/命名表/令牌层完好/双语键位与占位符/取词键存在/动效预算/瓷片可点性/平台分解行/白屏与最小窗宽/首屏不等官方校验与空态有界且可点/关注取关承载矩阵与进度承载面唯一/管线文案与码率差分按任务类型与字节实长走/仓库卫生（死令牌·无横幅历史稿·docs 二进制·README 双平台口径）/圆角四档（模板与 CSS 双向，禁任意值）/平台色点唯一规格/计数药丸唯一规格/等宽数字唯一拼法/naive 主题逐值对齐语义变量/文案品牌形/自绘按钮锁 <code class="tok">h-*</code>/按钮宽度只锁下限（禁 <code class="tok">!w-[Npx]</code>，例外仅限表单列宽与弹窗宽且带命中检查）/筛选条不能被自己筛掉（出现条件看基数而非筛完的条数，基数三视图同一口径「词已生效 · chip 未生效」，筛空的墙必带「取消筛选」出口）/空态文案与出口同一判据（墙上的归因由 <code class="tok">emptyAction</code> 单点决定，点到搜索词就必须给出「清除搜索」）/播放页返回从哪来回哪去（读历史栈落回 <code class="tok">?view=</code> 与录制页，栈空或跨平台才兜底本平台直播页，文案与目的地同源）/播放页侧栏读得完且动作行分轻重（侧栏自带滚动 + 卡片 <code class="tok">shrink-0</code>，动作行按「辅助幽灵 · 可逆描边 · 核心实心」分档且宽度只锁下限 · 观众数一屏只报一次）/播放页侧栏先问最新一帧、再问它记在哪张表（未关注房的标题·标签·点赞·粉丝不得因为值只在发现快照里就画成「—」：展示值 = 一次性回包 &gt; <code class="tok">room</code> 快照 &gt; 裸 ID，回包只写自己的 <code class="tok">play*</code> 引用不挤掉快照，「开播自动录制」按关注关系刻意例外）/工作区快捷键只做不说（<code class="tok">1/2/3</code> 切视图与 <code class="tok">/</code> 聚焦搜索的本体保留、且聚焦目标指得到顶栏那枚输入框，屏上那条常驻提示连同双语死键一并撤）/筛选条右端只在真有搜索词时出声（「排序与页码在本视图内记忆」那句常驻说明书已撤，per-view 记忆本体与搜索态的「清除搜索」出口照旧，无词时连 <code class="tok">flex-1</code> 都不摆）/关注入口一平台一套（标题·示例·占位符·动词·成功提示·错误归因各自成键，「自动识别」档在 i18n·平台控件·弹窗三处同时绝迹；粘错平台除归因外必须给「去另一平台添加」的出口，原文经 <code class="tok">store.addDraft</code> 过境撑开新平台的对话框；SOOP 纯数字单独归因为场次号）/不分段是一档显式取值（<code class="tok">splitSeconds=0</code> 在闸门·控件·三处读数·收尾链四道闸口各自被认下来，禁 <code class="tok">|| 900</code> 把 0 吞回默认；整场一个不带段号的 TS，合并两档与流水线第四棒随之收起；成品与手动合并产物同归「整文件」一类，不因来源分叉）/关注在播一屏只有一个现场（头像坞的组件、<code class="tok">dock.*</code> 双语四键、只喂它的 <code class="tok">store.liveAnchors</code> getter、原型样式类四处同时绝迹；撤的是重复呈现，分段第一档的呼吸点 + 计数与顶栏徽标两处读数必须各自还在）。<br/><span style="color:#b02a31"><strong>验收口径未完成项（如实标注）：</strong></span>「深浅两主题逐屏截图比对」<strong>已执行三轮</strong>（2026-09-30，CDP 驱动真实 Electron 实例 + 真库 876 关注 / 24 在播，覆盖工作区三视图 / 录制页 / 账号页 / 设置页 / 播放页，两主题 × 1380 与 1024 宽；第三轮另真起两段 SOOP 直播录制并正常停止收尾），当场查出并修掉冷启动「加载中」空屏、设置页白屏、页头按钮档位并存、空态整屏居中、取关在播放页穿中性灰、卡片菜单用 div 装按钮、<strong>转码从未产出 MP4 且完全静默</strong>、实时码率是采样噪声、回放行首棒误写「拉取直播源」等 13 项，均由 D14/D15/D16 与 P1 套锁死。<strong>第四轮（㉜ 令牌层收敛，同日）</strong>量的是「同一物件在不在一档上」而非「有没有白屏」：顶栏两枚 <code class="tok">.platn</code>（999px / 实测 5 与 22）、<code class="tok">.pdot</code> 7px + ink3 描边（Panda 粉 #fb7299 / SOOP 黄 #ffd400）、视图分段 <code class="tok">.sec-n</code> 21.25px + <code class="tok">tabular-nums</code>、卡片 14px、在播坞 chip 27px（注入 9 位探针在播房间取证，坞在「在播关注」视图不渲染 = ㉖ 成立）、影院浮层动作行三枚 34px（注入 3 段/1 段探针条目取证）、账号页三枚 CTA 等宽 112px、设置保存条 128/128 对称、深浅两主题下 GitHub 按钮底色逐值等于 <code class="tok">--c-fill</code>。当场查出两处：<strong>设置·关于的自绘「GitHub 主页」按钮 34.35px 与同行 naive 的 28px 并排</strong>（已锁 <code class="tok">h-7</code>，由 D24 锁死）、<strong>深色 naive <code class="tok">errorColor</code> 沿用浅色档的 #e5484d</strong>（已改 <code class="tok">#eb575c</code> = <code class="tok">.dark --c-live</code>，由 D22 锁死）；另把免责文案里的小写 <code class="tok">pandalive</code> 订正为品牌形 <code class="tok">PandaLive</code>（D23，仅「落盘结构」两条保留小写 —— 那里说的就是目录名）。<strong>仍未实机覆盖的只剩一处，且不是「没做」而是现场不存在</strong>：发现卡的 hover 心形 —— Panda 未认证使站内发现为 0 张、SOOP 发现未开放，两平台都渲染空墙。回放管线行的有数据形态按 ㉚ 的口径取证（真机拉源 14/14 失败，改由同形状注入渲染）。<strong>第五轮（㊄ 关注入口拆平台，2026-10-01）</strong>量的是拆分后的对话框五屏：Panda 弹窗标题「关注 Panda 主播」且弹窗内平台分段为 0 段（<code class="tok">platSegments: []</code>）、Panda 里贴 SOOP 地址得到「这是 SOOP 的房间地址 + 去 SOOP 添加」且关注按钮 disabled、点出口后 <code class="tok">hash: #/soop/live</code> 而输入框里仍是原句（<code class="tok">val</code> 逐字相等）、SOOP 纯数字得到场次号专属归因且添加 disabled、对话框重开为空（<code class="tok">draft: ""</code>，寄存是一次性的）。「已关注: zenith6666」那一屏按真实提交取，取完当场取关并从开工前的备份还原 <code class="tok">data/db.json</code>（sha1 回到 <code class="tok">a94f670…</code>）。<strong>第六轮（㊅ 不分段 · 单文件录制，同日）</strong>量的是"0 这一档在屏上说的每句话是不是真的"：设置页同一格在 900 / 0 两档下的实拍（<code class="tok">val</code> 分别回读 900 与 0，输出处理从四档收成两档 —— <code class="tok">合并分段为单文件</code> / <code class="tok">合并后删除分段</code> 随分段一起收起），播放页侧栏「分段时长」两档实拍（<code class="tok">15 分钟</code> / <code class="tok">不分段 · 单文件</code>，产出那行同时从「TS + MP4 + 合并成片」退回「TS + MP4」），录制页在真录进行中的实拍（右上角「不分段 · 整场单文件」、流水线只有四棒、当前文件名不带段号），库 chip 实拍（<code class="tok">全部 / 直播录制 / 回放下载 / 整文件 / 出错</code>，点「整文件」筛出 1 条、点「回放下载」筛空）。<strong>并真起一场 <code class="tok">splitSeconds=0</code> 的直播录制</strong>：76s 后停止，盘上就一个 <code class="tok">…_092555.ts</code>（69,992,448 字节），收尾 remux 出同名 MP4，两文件时长逐字相等（<code class="tok">00:01:16.02</code>，1920×1080p30 + AAC），全程零 concat spawn —— 这条是伪 ffmpeg 测不出来的形状。<strong>当场查出并修掉一处</strong>：进行中的卡片写着「已写入 · 1 段」，而那一档压根没有段（判据改读当前文件名的形状，键 <code class="tok">writtenVod → writtenOne</code>，由 D37m 锁死）；另记一条探针教训 —— 带外 <code class="tok">window.api.settingsSet</code> 不会刷新渲染层的 settings 副本，读数面取证必须走 <code class="tok">store.patchSettings</code>（与真人点「保存设置」同一条路），否则量到的是探针造成的假象。两轮共 4 段探针录制产物当场 <code class="tok">recDelete</code> 删净（203 MB），<code class="tok">data/db.json</code> 从开工前备份还原（sha1 回到 <code class="tok">83c263b…</code>，历史条目归零）。<strong>第七轮（㊆ 在播坞退役，同日）</strong>量的是"撤掉以后有没有留下空带、死键与指错路的指引"：真库 SOOP 关注在播 25 位（探针那一屏分段行读到 <code class="tok">在播关注 26</code>，轮询期间又开播一位 —— 正是旧规则下坞必然渲染的那一档），逐视图实拍 <code class="tok">站内发现 / 离线关注 / 在播关注</code> 与 Panda 的 <code class="tok">站内发现 214</code> 满屏卡片墙，四屏的 <code class="tok">.livedock</code> 元素计数均为 <strong>0</strong>、屏上「关注在播」四字绝迹、页顶不再多出一条 44px 带，分段三档的计数与呼吸点原样在位（离线行 40 条 / 发现卡 20 张照常渲染）。撤完当场清掉四处残骸：<code class="tok">LiveDock.vue</code> 组件、<code class="tok">dock.*</code> 四键（中英各两）、只喂坞的 <code class="tok">store.liveAnchors</code> getter、SOOP 发现段空态里那句把人引向坞的指引（改口指向分段与顶栏，双语同改）。探针未启动任何录制、未改任何设置，<code class="tok">data/db.json</code> 从开工前备份还原（sha1 回到 <code class="tok">3c0e10fc…</code>，718 关注原样）。</td>
         </tr>
         <tr>
           <th class="k">二期<br/>采集补强</th>
@@ -1801,10 +1739,10 @@
       ㉓ <strong>「黑色」与「图片承载面令牌」的分界</strong>：影院浮层的 <code class="tok">bg-black/55 · /25 · /80</code> 保留裸黑，不换 <code class="tok">bg-onimg</code> —— 影院是一间黑房，深浅两主题都要黑，换成令牌底会让浅色主题的遮罩发灰、视频两侧看起来脏。<strong>令牌管的是「压在图片上的小承载面」</strong>（海报卡的状态徽标、时长徽标、hover 播放罩 → <code class="tok">--tag-onimg</code>），<strong>不管整屏遮罩</strong>。同理，海报卡的状态徽标底从 <code class="tok">bg-liveink/90</code> 改成深阶纯色：<code class="tok">/90</code> 会把透出来的海报算进对比度，实测的 6.52:1 就不成立了。<br/>
       ㉔ <strong>首屏就绪不等官方登录校验</strong>（2026-09-30 实机截图审查发现，typecheck / verify / build 全绿而界面是空的）：<code class="tok">store.init()</code> 原本把 <code class="tok">authState()</code> 放进 <code class="tok">await Promise.all</code>，而它是<strong>两串官方接口</strong>（Panda <code class="tok">login_info</code> + SOOP <code class="tok">get_private_info</code>，且两平台串行）；网络被黑洞或风控拖住时，<code class="tok">ready</code> 不翻转，整个 <code class="tok">&lt;main&gt;</code> 只剩一行居中的「加载中…」——实测十几秒，用户读作「软件坏了 / 这一页是空白页」。现首屏门禁只等本地取数（实测就绪 1.0 秒），账号校验照发但不阻塞、结果经 <code class="tok">EV.account</code> 回挂，两平台改并行取。<strong>态未回填前不能写「未登录」</strong>：顶栏胶囊与账号页分段一律落「校验中」一档，账号页大状态卡用独立的 <code class="tok">mode: 'checking'</code> 而不是复用 <code class="tok">'none'</code> —— 复用会把「立即重新校验」那一行一起藏掉，而「退出登录」在校验中是一枚空承诺，故只在 <code class="tok">ok / warn</code> 出现。由 D15a–h 锁死。<br/>
       ㉕ <strong>空态一律有界，页头动作一律同档</strong>：同一轮实机审查里，站内发现的空态是 <code class="tok">h-full</code> 整屏垂直居中，实测占 71% 视口高、中间一行小字 —— 与 ㉔ 的「加载中」空屏在用户眼里是同一种故障，故工作区空墙改成与「库」「进行中」同一份有界虚线卡（<code class="tok">rounded-card + border-dashed + py-16</code>，实测 30% 视口高）。页头动作按钮曾 <code class="tok">medium</code>（直播页三枚）与 <code class="tok">tiny</code>（录制页三枚）并存，而全应用主流是 <code class="tok">small</code>（58 处）：两页页头收敛为 <code class="tok">small</code>，<code class="tok">tiny</code> 只留给设置页行内控件。录制页监控总览行补上与顶栏胶囊同一判据的「本轮失败」（在跑但整轮看不见：顶栏报失败、页头仍亮红心跳点＋时间戳＝同一屏两套说法）。由 D15i–l 锁死。<br/>
-      ㉖ <strong>在播坞只在「非在播视图」出现</strong>（订正 L 屏方案 A 与 L.2 的「坞常驻在三个视图之上」）：站在「在播关注」视图时，下方整屏卡片墙列的就是同一批「关注且在播」房间，坞在这一屏只是把同一份数据渲染第二遍，还把三层带（坞 / 视图分段 / 排序条）堆成四层。坞要补的是<strong>「切走了就看不见」</strong>，不是「已经看见了再看一遍」，故 <code class="tok">view === 'live'</code> 时整条收起；由此坞右侧的「全部在播 N ›」永远是往别处跳，不再是自我指向，<code class="tok">onLiveView</code> prop 一并删除（避免留下一枚只为隐藏按钮而存在的参数）。<strong>0 位时收起（⑥）与非在播视图才出现（㉖）是两条独立判据</strong>，前者管空态不占位，后者管重复呈现；「开播不自动跳视图、只挂 2px 品牌色竖条」那条承诺不受影响 —— 用户本来就在在播视图时，新房间就在眼前。由 D15m 锁死。<br/>
+      ㉖ <strong>在播坞只在「非在播视图」出现</strong>（订正 L 屏方案 A 与 L.2 的「坞常驻在三个视图之上」；<span class="d">本条已被 ㊆ 整体取代 —— 坞不再出现在任何视图，这里留的是它当时的判据</span>）：站在「在播关注」视图时，下方整屏卡片墙列的就是同一批「关注且在播」房间，坞在这一屏只是把同一份数据渲染第二遍，还把三层带（坞 / 视图分段 / 排序条）堆成四层。坞要补的是<strong>「切走了就看不见」</strong>，不是「已经看见了再看一遍」，故 <code class="tok">view === 'live'</code> 时整条收起；由此坞右侧的「全部在播 N ›」永远是往别处跳，不再是自我指向，<code class="tok">onLiveView</code> prop 一并删除（避免留下一枚只为隐藏按钮而存在的参数）。<strong>0 位时收起（⑥）与非在播视图才出现（㉖）是两条独立判据</strong>，前者管空态不占位，后者管重复呈现；「开播不自动跳视图、只挂 2px 品牌色竖条」那条承诺不受影响 —— 用户本来就在在播视图时，新房间就在眼前。<span class="d">原由 D15m 锁死；㊆ 之后 D15m 改锁「工作区不引不挂坞」。</span><br/>
       ㉗ <strong>空态的「下一步」必须是动作，不是地址描述</strong>：㉕ 把空态收进有界卡解决了「坏屏感」，但下一句仍是纯文字（「到「直播」页点 ⏺ 开始录制」「先到「录制设置」里选一个」）—— 用户读到了动作，手边却没有任何可点的东西，而那个动作就在页头另一侧或另一个页面。<strong>录制页「进行中」空框</strong>补一枚 <code class="tok">small secondary</code> 按钮跳本平台直播页，<strong>库空态行</strong>末尾补一枚品牌色文字链：没设保存目录时跳设置，已设则跳直播页；筛选为「全部平台」时留在当前工作区，不把人甩到默认平台。文案随之删掉与按钮重复的地址（「到「直播」页」「先到「录制设置」里」），只留原因与结果。<span class="d">落地订正（2026-09-30 二次）：这两枚按钮/链接都已撤。页头右上角那一排（去直播页 / 打开保存目录 / 录制设置）是这一屏唯一的快捷入口轴，空态里再各挂一枚同去向的，用户先要判断该点哪个 —— ㉗ 治的是「读到了动作却手边没有可点的东西」，撤掉重复入口治的是「一屏三个入口指向同一页」。两版合起来的正解：<strong>页头给入口，空态给原因</strong>，详见 ㉟。</span>由 D15n 锁死（四条判据已随 ㉟ 反转）。<br/>
       ㉘ <strong>零数据页的下半屏交给空槽，不交给裸页面底</strong>：㉕ 把空态收成有界卡后，实测录制页仍有 <b>380px</b> 的空白落在框外（页面短于视口时，剩余高度什么也不属于）。现录制页正文列 <code class="tok">min-h-full flex flex-col</code>，「进行中」空态改成会长高的空槽（<code class="tok">flex-1 + min-h-[200px]</code>，实测 1380×860 下 538px、1024×660 下 338px），留白因此被边框收进「这一栏在等任务进来」的语义里；<strong>槽内内容贴顶而非居中</strong> —— 居中会让一行小字飘在 538px 框的正中，只是隔了一层边框的「整屏一行小字」，正是 ㉕ 要反对的样子。库为空仍是底部一行提示（页头已有一只大空槽，同一屏摆两只空盒子是自我重复）。账号页实测余量 85px，不动。由 D15o 锁死。<br/>
-      ㉙ <strong>关注/取关的承载矩阵（用真实数据逐点取证后定稿）</strong>：本机 876 位关注、Panda 5 在播 / SOOP 19 在播，四个承载点全部实机看过 —— ① <strong>已关注的卡片形态</strong>（在播关注 / 统一墙）：卡面只有 ⏺（hover 出现）与「…」，取关在「…」菜单里；② <strong>已关注的紧凑行形态</strong>（离线关注）：行尾 ✕；③ <strong>发现卡</strong>：hover 心形，正向关注是这一屏的唯一主行动；④ <strong>播放页</strong>：页头按钮。<strong>在播坞不承载取关</strong>（它是读数条不是管理现场，实机确认坞内只有头像与「全部在播 ›」）。本轮改两处：<strong>播放页的「取消关注」从中性灰改 error 档</strong> —— 其余三处取关全是红字，同一动作在第四处反而最不像它；<strong>卡片菜单的两行动作从 <code class="tok">div+cursor-pointer</code> 改回 <code class="tok">button</code></strong> —— div 键盘 Tab 到不了，而同一动作在离线行上一直是可聚焦的按钮。心形那一处<strong>仍没能实机验到</strong>：Panda 未认证 → 站内发现 0 张卡，SOOP 发现未开放 → 也是 0 张，承载点在空墙上不存在（D16c/c2 只能静态锁「心形只挂在 hoverActions、全应用只两枚」）。由 D16a–e 锁死。<br/>
+      ㉙ <strong>关注/取关的承载矩阵（用真实数据逐点取证后定稿）</strong>：本机 876 位关注、Panda 5 在播 / SOOP 19 在播，四个承载点全部实机看过 —— ① <strong>已关注的卡片形态</strong>（在播关注 / 统一墙）：卡面只有 ⏺（hover 出现）与「…」，取关在「…」菜单里；② <strong>已关注的紧凑行形态</strong>（离线关注）：行尾 ✕；③ <strong>发现卡</strong>：hover 心形，正向关注是这一屏的唯一主行动；④ <strong>播放页</strong>：页头按钮。<strong>在播坞不承载取关</strong>（它是读数条不是管理现场，实机确认坞内只有头像与「全部在播 ›」；<span class="d">2026-10-01：这条"不承载"最终没能救下它 —— 既然什么都不承载，就按 ㊆ 整体撤掉，D16e 改锁顶栏徽标</span>）。本轮改两处：<strong>播放页的「取消关注」从中性灰改 error 档</strong> —— 其余三处取关全是红字，同一动作在第四处反而最不像它；<strong>卡片菜单的两行动作从 <code class="tok">div+cursor-pointer</code> 改回 <code class="tok">button</code></strong> —— div 键盘 Tab 到不了，而同一动作在离线行上一直是可聚焦的按钮。心形那一处<strong>仍没能实机验到</strong>：Panda 未认证 → 站内发现 0 张卡，SOOP 发现未开放 → 也是 0 张，承载点在空墙上不存在（D16c/c2 只能静态锁「心形只挂在 hoverActions、全应用只两枚」）。由 D16a–e 锁死。<br/>
       另有<strong>五处没照字面执行</strong>（保留现状，理由如下）：<br/>
       · <strong>录制页的「历史任务」段已按 ㉒ 落地，但落点不是「历史任务」</strong>：录制页第三段直接叫「库」，就是原视频库页的全部能力（分组 / 索引条 / 搜索 / 缩略图 / 影院浮层 / 合并），不新造「最近完成 + 查看全部」这种同一批数据的第二套说法。<br/>
       · S7「VOD 管线」的 <code class="tok">.meter</code> <strong>没有整条换成文字链，而是拆成两件事</strong>（2026-09-30 按真实代码订正本条早先的失实表述）：<strong>跑在哪一棒</strong>用文字链（录制/下载 → 转码 → 合并 → 入库，已过淡灰 / 当前加粗带呼吸点 / 未跑幽灵灰），<strong>完成多少</strong>仍用 <code class="tok">.meter</code> —— 回放的全长来自 m3u8 清单（<code class="tok">vodTotalSec</code>），是一个真分母，不是猜的百分比；清单拉不到全长时退回纯文字，宁可不画也不画一条永远 0% 的假条。直播任务不给百分比（分段录制没有可预测的终点）。全应用因此<strong>只有一条进度条</strong>，由 D16f–h 锁死（样式有定义 / 唯一落点 / 只在回放分支且被真分母守卫 / 不引 <code class="tok">n-progress</code> 做第二套）。<br/>
@@ -1833,8 +1771,12 @@
       ③ <strong>撤掉的是承诺，不是功能</strong>：<code class="tok">合并分段为单文件</code> / <code class="tok">合并后删除分段</code> 两档在 0 时收起，录制页流水线的第四棒同时不存在 —— 摆着一枚永远不会发生作用的开关，与 ㉞ 的"点了没反应"是同一种病。<br/>
       ④ <strong>两处只有真录才看得见的错话</strong>（实机 CDP 真录抓到）：进行中的卡片写「已写入 · 1 段」，而那一档压根没有段 —— 判据改读当前文件名的形状（<code class="tok">isSingleFileTask</code>；读形状而不是读设置值，中途改设置不会让正在写的文件变成两段），键名 <code class="tok">writtenVod</code> 升为 <code class="tok">writtenOne</code>，回放与不分段共用一句「单文件」；收尾提示同理，一个文件时说「1 个文件」而不是「共 1 段」（主进程 <code class="tok">rec.fileOne</code>）。<br/>
       真录取证：Panda 在播房以 <code class="tok">splitSeconds=0</code> 真录 76s ⇒ 盘上就一个 <code class="tok">…_20261001_092555.ts</code>（69,992,448 字节，名字不带段号），停止收尾 remux 出同名 MP4，两文件时长逐字相等（<code class="tok">00:01:16.02</code> / 1920×1080p30 + AAC），全程零 concat spawn；库 chip「整文件」筛出 1 条、「回放下载」筛空。由 D37a~m 锁死（单文件那一支 / 产出名不带段号 / 闸门 0 白名单 / 控件收 0 / 两档收起 / 三处读数各自说 0 / 「整文件」归类改名到位 / 单文件文案），行为面由 <code class="tok">verify-p1</code> 的 I1~I3（13 条）与 <code class="tok">verify-settings</code> 的 A6e~g 锁死。<br/>
-      · S5 侧栏「失效自动续录 · 连续上限 3 次」只显示开关，不镜像次数：<code class="tok">Recorder.MAX_RETRY = 3</code> 是主进程私有常量，渲染层抄一份必然与真实值漂移 —— 宁可少说一个数字。<br/>
-      · 3.1 ⑫⑬「关注与取关不上卡片」在<strong>站内发现卡</strong>上留了例外（hover 给心形）：发现页的唯一主行动就是关注，收进菜单等于把这一屏的核心动作藏起来；已关注卡与在播坞仍按原规则（取关在「…」菜单里，坞不承载）。四处的完整分工见 ㉙。<br/>
+      ㊆ <strong>同一批房间在一屏上只呈现一次：在播坞整体撤掉</strong>（2026-10-01 用户指令「站内关注和离线关注界面不需要显示关注在播显示区域，移除掉。重复了，没啥意义」）。原状：「站内发现 / 离线关注」两屏顶部一条 sticky 头像坞（列关注在播、>7 折叠 <code class="tok">+N</code>、右侧「全部在播 N ›」），㉖ 曾把它从「在播关注」视图收窄掉，理由是那一屏的卡片墙已是同一批房间。<strong>判据推到底：坞要补的是「切走了就看不见」，可分段第一档就写着「在播关注 N」并带呼吸点、顶栏徽标在别的页面报同一个数</strong> —— 一条只读、不承载任何管理动作的头像带，在别视图里同样是第二份呈现，只是那一份还多占 44px 的 sticky 位。<br/>
+      ① <strong>撤的是承载面不是功能</strong>：坞上的头像点击 = 播放页入口，卡片上本来就有；「录制中红点」「密码房锁形」在 <code class="tok">LiveCard</code> 上是同一批标记；「全部在播 ›」那一枚跳转由分段第一档整档替代（点它比点跳转更直白）。<br/>
+      ② <strong>四处残骸一起清</strong>：<code class="tok">LiveDock.vue</code> 删除（不是留着等下次挂回）；<code class="tok">dock.*</code> 四键（<code class="tok">title/recording/collapse/gotoAll</code>）中英各两同删 —— D9/D10 只查"取词存在"，死键得由 D38c 单独锁；只喂它的 <code class="tok">store.liveAnchors</code> getter 随唯一消费方下线（没有读者的库存字段不留）；原型样式 <code class="tok">.livedock</code> / <code class="tok">.dchip</code> / <code class="tok">.blk.dock</code> 一并撤，不留没有 DOM 的规则。<br/>
+      ③ <strong>指错路的路标比空带更糟</strong>：SOOP 发现段空态那句「…看「在播关注」和顶部的在播坞就够了」是把人引向一个已经不存在的部件，改口指向分段与顶栏（双语同改，由 D38g 锁）。<br/>
+      ④ <strong>留下的两处读数必须各自还在</strong>：分段第一档（呼吸点 + 计数 + 点下去整屏卡片墙）与顶栏徽标 —— 旧坞头像上那条 2px「刚开播」竖条随组件消失，这条信号由顶栏徽标转红接回（<code class="tok">newLive</code> 仍有消费方）。<strong>撤重复呈现不等于撤「该去看」这条提示</strong>，这两件事必须分开判。由 D38a~h 锁死，D15m/m2、D16e 随本轮改口（原锁「坞只在非在播视图出现」「坞不承载取关」）。<br/>
+      · S5 侧栏「失效自动续录 · 连续上限 3 次」只显示开关，不镜像次数：<code class="tok">Recorder.MAX_RETRY = 3</code> 是主进程私有常量，渲染层抄一份必然与真实值漂移 —— 宁可少说一个数字。<br/>      · 3.1 ⑫⑬「关注与取关不上卡片」在<strong>站内发现卡</strong>上留了例外（hover 给心形）：发现页的唯一主行动就是关注，收进菜单等于把这一屏的核心动作藏起来；已关注卡仍按原规则（取关在「…」菜单里）。<span class="d">2026-10-01：当年并列第三处的在播坞已整体撤掉（㊆），承载点从四个收成三个。</span>完整分工见 ㉙。<br/>
       · 设置页 GitHub 按钮保留官方 <code class="tok">#24292f / #0d1117</code>（第三方品牌面，不属于本应用令牌板）；品牌横幅因需三段渐变而用内联 <code class="tok">style</code> 写死深阶蓝 —— 这两处是 D4 白名单的全部条目。
     </div>
 
@@ -1870,7 +1812,7 @@
       <thead><tr><th style="width:60px">状态</th><th style="width:210px">决策点</th><th>结论与依据</th></tr></thead>
       <tbody>
         <tr><td class="yes">✓ 已确认</td><td>一级导航形态</td><td>平台优先：顶栏「Panda / SOOP」分段（换平台、留页面）+ 其下两条页面「直播 / 录制」，平台在播数做分段徽标、录制数做页面徽标。一级轴是平台，页面轴不再混排两平台内容。<strong>（原确认稿写的是三条含「视频库」；落地时库并入录制页第三段，页面轴随之收敛为两条 —— 见 ㉒，此为对已确认项的唯一改动）</strong></td></tr>
-        <tr><td class="yes">✓ L1 已定</td><td>工作区三模块的排列形态</td><td><strong>方案 A · 视图分段 + 常驻在播坞</strong>（你确认）。上一轮「三段单页滚动墙」被否决（关注一多，站内发现被顶到很远，而发现自身内容也不少）；方案 C 横向泳道在 L 屏已写明否决理由。A 的成立前提「在播坞补回看不见的关注在播」把滚动墙丢掉的『一进来就看到我关注的人在播』补回来（坞的出现范围按 ㉖ 收窄为非在播两个视图），一期 8.1③ 按此落地。</td></tr>
+        <tr><td class="yes">✓ L1 已定</td><td>工作区三模块的排列形态</td><td><strong>方案 A · 视图分段</strong>（你确认；原稿的「+ 常驻在播坞」按 ㊆ 撤掉）。上一轮「三段单页滚动墙」被否决（关注一多，站内发现被顶到很远，而发现自身内容也不少）；方案 C 横向泳道在 L 屏已写明否决理由。A 的成立前提原本是「在播坞补回看不见的关注在播」，把滚动墙丢掉的『一进来就看到我关注的人在播』补回来（坞的出现范围先按 ㉖ 收窄为非在播两个视图，后按 ㊆ 整体撤掉 —— 补回这件事改由分段第一档的计数与顶栏徽标做），一期 8.1③ 按此落地。</td></tr>
         <tr><td class="yes">✓ 已确认</td><td>视觉主色</td><td>中性主色 + 平台色仅表身份；具体色值见下方 D1（已锁 <code class="tok">#2F4B7C</code>）。</td></tr>
         <tr><td class="yes">✓ 已确认</td><td>高密度形态</td><td>在播卡片 + 离线紧凑行。</td></tr>
         <tr><td class="yes">✓ D1 已定</td><td>主色到底是哪支蓝</td><td>维持中性蓝 <code class="tok">#2F4B7C</code>（稳重、和 SOOP 黄互补、8.68:1）。备选 <code class="tok">#3B4C6B</code> 与「品牌粉加深到 <code class="tok">#D8306A</code>」都不采用 —— 后者会让 SOOP 工作区仍穿着 Panda 的颜色。</td></tr>

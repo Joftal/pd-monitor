@@ -101,10 +101,9 @@ src/
 └─ renderer/src/              # Vue3
    ├─ router.ts               #   /:plat/live · /:plat/recordings · /player/:plat/:id · /account · /settings(旧深链全部重定向)
    ├─ workspace.ts            #   一级平台落点: 记住最后所在工作区
-   ├─ views/WorkspaceView.vue #   直播: 在播关注 / 站内发现 / 离线关注三视图 + 常驻在播坞
+   ├─ views/WorkspaceView.vue #   直播: 在播关注 / 站内发现 / 离线关注三视图(关注在播只在第一档, 不另挂坞)
    ├─ views/RecordingsView.vue#   录制: 概览条 + 监控总览 + 进行中 + 库
    ├─ components/LibrarySection.vue # 库(录制页内一段, 非独立页): 卡墙 + 分组 + 索引条 + 筛选搜索
-   ├─ components/LiveDock.vue #   在播坞: 关注在播常驻条, 切视图不丢
    ├─ views/PlayerView.vue    #   观看页(清晰度/线路按平台真实能力呈现)
    ├─ views/AccountView.vue   #   账号: 双平台独立会话 + 登录态四态 + 校验轨迹
    ├─ views/SettingsView.vue  #   设置: 外观/监控/录制/网络/通知与行为/数据与日志/关于
