@@ -324,12 +324,23 @@ function switchLine(i: number) {
   message.success(i === 0 ? t('player.switchMain') : t('player.switchedLine', { n: i }))
 }
 
-/** 源地址是否来自主进程的本地 HLS 代理(SOOP): 请求头由代理注入, 复制到外部播放器必失效 */
+/** 源地址是否来自主进程的本地 HLS 代理(SOOP): 请求头与 Cookie 都由代理注入, 播放器与 ffmpeg 只认这一串 */
 const isProxySource = computed(() => {
   try {
     return new URL(m3u8.value).hostname === '127.0.0.1'
   } catch {
     return false
+  }
+})
+
+/** 真实源: 代理地址把官方清单原样塞在 url= 参数里(hlsProxy.ts 的 playlistUrl), 解出来零请求零 IPC ——
+ *  问主进程再要一个字段等于给同一件事养第二套真值。Panda 不走代理, 它看到的就是真地址, 不必另给出口。 */
+const realSource = computed(() => {
+  if (!isProxySource.value) return m3u8.value
+  try {
+    return new URL(m3u8.value).searchParams.get('url') || ''
+  } catch {
+    return ''
   }
 })
 
@@ -345,24 +356,34 @@ function shortUrl(u: string): string {
   }
 }
 
-/** 复制当前播放源链接 */
-async function copyUrl() {
-  if (!m3u8.value) {
+/** 复制一条链接: clipboard 优先, 拿不到权限就退回 textarea+execCommand —— 两枚按钮共用这一条链路, 复制第二份回退代码等于给下次改漏一半留坑 */
+async function copyText(text: string, okMsg: string) {
+  if (!text) {
     message.warning(t('player.copyEmpty'))
     return
   }
   try {
-    await navigator.clipboard.writeText(m3u8.value)
-    message.success(t('player.copied'))
+    await navigator.clipboard.writeText(text)
+    message.success(okMsg)
   } catch {
     const ta = document.createElement('textarea')
-    ta.value = m3u8.value
+    ta.value = text
     document.body.appendChild(ta)
     ta.select()
     document.execCommand('copy')
     document.body.removeChild(ta)
-    message.success(t('player.copied'))
+    message.success(okMsg)
   }
+}
+
+/** 复制屏上那串正在用的源(代理地址) */
+function copyUrl() {
+  return copyText(m3u8.value, t('player.copied'))
+}
+
+/** 复制官方清单原址(SOOP 从代理地址里解出, Panda 即当前源) */
+function copyReal() {
+  return copyText(realSource.value, t('player.copiedReal'))
 }
 
 /** 播放源失效(403/404): 不自动换源, 提示用户手动获取 */
@@ -572,7 +593,11 @@ async function manualRefresh() {
         <div class="panel shrink-0">
           <div class="panel-h">
             <span class="panel-t">{{ t('player.curSource') }}</span>
-            <button class="text-[11px] text-ink3 hover:text-brand hover:bg-brand/[0.10] rounded-md px-1.5 py-0.5 transition-colors" @click="copyUrl">{{ t('player.copy') }}</button>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <button class="text-[11px] text-ink3 hover:text-brand hover:bg-brand/[0.10] rounded-md px-1.5 py-0.5 transition-colors" @click="copyUrl">{{ t('player.copy') }}</button>
+              <!-- 真实源: 屏上那串是本机才认的代理地址, 官方清单的原址藏在它的 url= 参数里 —— 只在这一串确实是代理地址时才给这个出口 -->
+              <button v-if="isProxySource" class="text-[11px] text-ink3 hover:text-brand hover:bg-brand/[0.10] rounded-md px-1.5 py-0.5 transition-colors" @click="copyReal">{{ t('player.copyReal') }}</button>
+            </div>
           </div>
           <div class="panel-b">
             <div class="flex items-center gap-2 bg-fill rounded-ctl px-2.5 py-[7px]">
