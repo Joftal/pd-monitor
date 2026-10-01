@@ -58,6 +58,7 @@
 //   D47 模板结构当场编译: 每个 .vue 的 <template> 单独过 vue/compiler-sfc, 断链的 v-else-if 不许等 build 才炸
 //   D48 store 的 getter 普查: 零消费者的死 getter 一律撤(㊀「无消费方即删」), 不留"以后可能用"
 //   D49 时长单位: 轮次耗时恒按秒且只在一处格式化(胶囊与设置页不许各读各的), 中文格子不混拉丁 s; 节流/分段/熔断/长时长各自的单位是语境, 不许被顺手统一
+//   D50 在播关注与站内发现的头两档排序同序(人气最高在前), 而默认值不跟排面走(在播关注仍默认最新开播, 由数据质量决定)
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -1536,6 +1537,29 @@ checkWithAllowlist(
   const stillZh = exceptions.filter(([k, want]) => lzh[k] !== want)
   assert(stillZh.length === 0, 'D49k 该留毫秒/分钟/钟面的格子原样在位: 节流 300 毫秒、分段按分钟、旧读数按钟面 —— 秒不是万能单位', stillZh.map(([k]) => `${k}=${lzh[k]}`).join(', '))
   assert(/export function fmtDurHMS\(sec: number\)/.test(media) && /const s = Math\.max\(0, Math\.round\(\(kaNow\.value - k\.lastAt\) \/ 1000\)\)/.test(pv), 'D49l 长时长仍走 h:mm:ss, 心跳那格本来就是整秒计数(它们不在本轮改动面内)')
+}
+
+// ============================================================================
+// D50 排序档的排面与默认是两件事 (2026-10-01 用户指令「直播界面筛选顺序，最新开播和人气最高这2个位置进行交换」)
+//   两视图的 base 两档自此同序(人气最高在前); 默认仍由数据质量决定(在播关注 = 最新开播, SOOP 人气恒 0 会把新房钉在墙尾),
+//   所以这一条锁的是"排面顺序一致", 同时锁住"默认没有跟着排面一起改"。
+// ============================================================================
+{
+  const wv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'WorkspaceView.vue'), 'utf8')
+  const appSrc = fs.readFileSync(R('src', 'renderer', 'src', 'stores', 'app.ts'), 'utf8')
+  const baseOf = (name) => {
+    const i = wv.indexOf(`const ${name} = computed`)
+    if (i < 0) return null
+    // 必须在这一段 computed 内取到 base: 不设边界时前一段找不到会顺手读到后一段的 base, 假绿
+    const end = wv.indexOf('\n})', i)
+    const m = /const base: \{ key: SortKey; label: string \}\[\] = \[([\s\S]*?)\]/.exec(wv.slice(i, end))
+    return m ? [...m[1].matchAll(/key: '(\w+)'/g)].map((x) => x[1]) : null
+  }
+  const live = baseOf('liveSorters')
+  const disc = baseOf('discSorters')
+  assert(live && disc, 'D50a 两视图的 base 档位块都解析得到(解析器瞎了不许冒充"顺序一致")', `live=${JSON.stringify(live)} disc=${JSON.stringify(disc)}`)
+  assert(!!live && !!disc && live.join(',') === 'viewers,recent' && disc.join(',') === live.join(','), 'D50b 在播关注与站内发现的头两档同序: 人气最高在前、最新开播在后(交换的是排面, 不是各自的排序实现)', `live=${JSON.stringify(live)} disc=${JSON.stringify(disc)}`)
+  assert(/views: \{ live: newFilter\('recent'/.test(appSrc), 'D50c 在播关注的默认仍是 最新开播 —— 首位换了不等于默认该换(SOOP 人气恒 0 时纯人气排序会把刚开播的房间钉在墙尾)')
 }
 
 // ============================================================================
