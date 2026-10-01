@@ -13,9 +13,14 @@ interface DbShape {
 const FILE = () => path.join(dataDir(), 'db.json')
 
 /** 旧版本库缺字段的补默认(幂等): platform 缺 → 默认平台; lastLiveAt 缺 → 从未见过开播。
- *  判据走 isPlatform 而非信任类型 —— 磁盘 JSON 里的值实际可能是 undefined。 */
+ *  判据走 isPlatform 而非信任类型 —— 磁盘 JSON 里的值实际可能是 undefined。
+ *  SOOP 的 tags.isAdult 在读库时清成 false: 这一格自 ㊌ 起整条不取, 在播房每轮由列表回写覆盖,
+ *  而**已经离线**的房再也没有写点(offPatch 保的是房间属性, 对 SOOP 这一格已不成立),
+ *  旧轮次留下的 true 会永久挂在播放页页头(实机拍到 papcon0206 下播后仍带 19+ 徽标)。 */
 function migrateAnchor(x: Anchor): Anchor {
-  return { ...(isPlatform(x.platform) ? x : { ...x, platform: DEFAULT_PLATFORM }), lastLiveAt: x.lastLiveAt || '' }
+  const a: Anchor = { ...(isPlatform(x.platform) ? x : { ...x, platform: DEFAULT_PLATFORM }), lastLiveAt: x.lastLiveAt || '' }
+  if (a.platform === 'soop' && a.tags?.isAdult) a.tags = { ...a.tags, isAdult: false }
+  return a
 }
 
 function migrateHistory(x: RecHistoryItem): RecHistoryItem {
