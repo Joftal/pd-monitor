@@ -421,8 +421,16 @@ assert(a.isLive && a.nick === '主播甲' && a.title === '在播标题', '昵称
 assert(a.startTime === '2026-09-29 22:01:00', '开播时刻取列表原值(播放页根本没有这个字段)')
 assert(a.viewerCount === 75 && a.thumbUrl.startsWith('https://liveimg'), '人数/截图一并落卡')
 assert(a.tags && a.tags.isAdult === true && a.tags.liveType === 'live', '标签落卡(19+ 标记)')
+assert(a.userImg === 'https://stimg.sooplive.com/LOGO/aa/aaa111/aaa111.jpg', '空头像由这一轮补齐: SOOP 的列表行没有任何图片字段, 地址就是频道 ID 的函数(零请求)')
 assert(world.toasts.filter((t) => t.t.type === 'live').length === 1, '离线→在播发一次开播通知')
 assert(world.invalidate.length === 1, '开播即作废旧源')
+
+console.log('B1b 头像补齐只认空槽, 已有的一概不覆写')
+reset()
+world.anchors = [anchor({ userId: 'bbb222', nick: '乙', userImg: 'https://stimg.sooplive.com/LOGO/bb/bbb222/old.jpg' })]
+world.favBody = bodyOf([OFF_ROW])
+await runRound()
+assert(findAnchor('bbb222').userImg === 'https://stimg.sooplive.com/LOGO/bb/bbb222/old.jpg', '已有头像保持原值(每轮无谓覆写=每轮一次整库落盘)')
 
 console.log('B2 兜底范围: 只探列表覆盖不到的房')
 reset()
@@ -536,6 +544,7 @@ assert(findAnchor('bbb222').nick === '已在库' && findAnchor('bbb222').isLive 
 const na = findAnchor('aaa111')
 assert(na && na.isLive && na.nick === '主播甲' && na.title === '在播标题', '在播行按列表原值建卡')
 assert(na.viewerCount === 75 && na.startTime === '2026-09-29 22:01:00' && na.tags.isAdult === true, '人数/开播时刻/标签一次到位')
+assert(na.userImg === 'https://stimg.sooplive.com/LOGO/aa/aaa111/aaa111.jpg' && findAnchor('ccc333').userImg === 'https://stimg.sooplive.com/LOGO/cc/ccc333/ccc333.jpg', '导入的卡在落库那刻就带头像(在播与离线一样, 不必等一轮轮询)')
 assert(na.autoRecord === false, '批量导入不开自录(几十路并发录制=磁盘与风控灾难)')
 assert(world.anchors.filter((x) => x.platform === 'soop').length === 3, '离线房同样入墙(全量导入)')
 reset()

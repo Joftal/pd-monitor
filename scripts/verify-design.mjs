@@ -47,6 +47,7 @@
 //   D36 「关注主播」按平台拆成两个专属入口: 无「自动识别」档, 平台由工作区决定, 粘错平台给出口, SOOP 纯数字场次号单独归因
 //   D37 分段时长填 0 = 不分段: 整场一个不带段号的 TS, 合并档/管线第四棒随之收起, 库里与手动合并产物同归「整文件」一类
 //   D38 「关注在播」一屏只留一个现场: 头像坞退役, 读数只剩分段第一档 + 顶栏徽标, 组件/样式/文案/store getter 不留残骸
+//   D39 SOOP 头像按频道 ID 派生并落卡(404 回落兜底, 不画破图); 面板点赞/粉丝只在有数时摆行, 「不适用」那句连死键一起删
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -967,7 +968,7 @@ checkWithAllowlist(
   assert(/const room = computed\(\(\) => \{[\s\S]{0,60}const a = anchor\.value[\s\S]{0,60}const d = discoveryItem\.value/.test(pv), 'D33a 房间读数一处收敛(room 快照 = 关注列表 > 站内发现)')
   const chained = (pv.match(/\|\| room\.value\./g) || []).length
   assert(chained >= 5, `D33b 展示值都走「回包 > 快照」这条链(≥5 处: title/nick/userImg/thumb/tags)`, `${chained} 处`)
-  assert(!/numOrNa\(anchor\?\./.test(pv) && /numOrNa\(room\.(likes|fans)\)/.test(pv), 'D33c 点赞/粉丝不得只读 anchor(未关注房必然画成「—」, 而快照里有真值)')
+  assert(!/numOrNa/.test(pv) && /v-if="room\.likes"[\s\S]{0,140}\{\{ room\.likes \}\}/.test(pv) && /v-if="room\.fans"[\s\S]{0,140}\{\{ room\.fans \}\}/.test(pv), 'D33c 点赞/粉丝仍从 room 取值, 且只在给得出数时摆这一行(未关注房读快照; 没有数就整行缺席, 不再画「—」或「不适用」)')
   assert(!/const viewers = computed\(\(\) => anchor\.value\?\.viewerCount \|\| discoveryItem/.test(pv), 'D33d 观众数不再自带一套取值链(与 room 同判据, 免得两处口径分叉)')
   const playWrites = ['playTitle.value = r.title', 'playNick.value = r.nick', 'playUserImg.value = r.userImg', 'playThumb.value = r.thumbUrl', 'playTags.value = r.tags']
   const writes = playWrites.filter((w) => pv.includes(w)).length
@@ -1091,6 +1092,36 @@ checkWithAllowlist(
 
   assert(/看「在播关注」那一档和顶栏的在播计数/.test(zh) && /segment and the top-bar live count/.test(en), 'D38g SOOP 发现段空态的指引句改口指向分段与顶栏, 不再把人引向一条已经不存在的坞')
   assert(!/\.livedock/.test(css), 'D38h 渲染层样式表不留 .livedock 死规则')
+}
+
+// ============================================================================
+// D39 SOOP 拿得到头像, 拿不到的读数就不许占位 (2026-10-01 用户指令「soop能不能拿到主播的头像? 点赞和粉丝数量拿不到的话, 不要在面板展示出来」)
+//   头像: SOOP 关注列表整行没有一个图片字段(实测 718 行的键集), 但 logo 地址就是频道 ID 的函数 ——
+//         播放页 <div id="bjThumbnail"> 的 <img src> 正是这一串, 而官方自己给它挂了 onerror:
+//         "这一房没传过 logo"是预期内的一档(实测 14 个关注里 1 个 404), 所以 404 必须回落成"没有头像", 不许画破图。
+//   占位: 一行永远填不上数的读数不是信息。写「不适用 · SOOP 接口不返回」是把我们的采集边界当成读数交给用户读。
+// ============================================================================
+{
+  const so = fs.readFileSync(R('src', 'main', 'services', 'soop.ts'), 'utf8')
+  const wt = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
+  const ip = fs.readFileSync(R('src', 'main', 'ipc.ts'), 'utf8')
+  const av = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'AvatarImg.vue'), 'utf8')
+  const pv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'PlayerView.vue'), 'utf8')
+  const zh = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'zh-CN.ts'), 'utf8')
+  const en = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'en-US.ts'), 'utf8')
+
+  const sh = fs.readFileSync(R('src', 'shared', 'types.ts'), 'utf8')
+  assert(/export function soopAvatarUrl\(userId: string\): string \{/.test(sh) && /stimg\.sooplive\.com\/LOGO\/\$\{userId\.slice\(0, 2\)\}\/\$\{userId\}\/\$\{userId\}\.jpg/.test(sh), 'D39a 头像地址由频道 ID 派生(与播放页 #bjThumbnail 同一串, 零请求), 与 roomUrl 同族放共享层')
+  assert(/userImg: soopAvatarUrl\(userId\)/.test(so) && /userImg: string/.test(so), 'D39b 关注行落库就带头像, 并且注释老实写明这是我们派生的而非接口给的')
+  assert(/if \(!a\.userImg\) store\.updateAnchor\(a\.platform, a\.userId, \{ userImg: soopAvatarUrl\(a\.userId\) \}\)/.test(wt), 'D39c 轮询只补空着的那批: 一轮收敛, 之后每轮这里零写入(库里既有的整墙空头像靠这一步补上)')
+  assert(/userImg = soopAvatarUrl\(userId\)/.test(ip), 'D39d 手动新增的 SOOP 关注当场有头像, 不等下一轮')
+
+  assert(/@error="failed = true"/.test(av) && /<slot v-else \/>/.test(av) && /watch\(\s*\(\) => props\.src/.test(av), 'D39e 头像只有一种画法: 取不到就把槽位交回调用方的兜底(首字母/剪影), 换房时判据复位')
+  const bare = RENDERER.filter((f) => /<img[^>]*v-if="[^"]*userImg/.test(fs.readFileSync(f, 'utf8')))
+  assert(bare.length === 0, 'D39f 裸 img 版头像全部换到 AvatarImg(裸写没有 onerror, 404 就画成破图)', bare.map(rel).join(', '))
+
+  assert(!/naSoop/.test(pv) && !/naSoop/.test(zh) && !/naSoop/.test(en), 'D39g「不适用 · SOOP 接口不返回」连同两语言键一起绝迹: 撤掉的是一行占位, 不是给它换一句解释')
+  assert(!/isSoop \? 'text-ink3'/.test(pv) && /const isSoop = platform === 'soop'/.test(pv), 'D39h 侧栏不再按平台分色(有数才摆行, 摆出来的行本来就都是真值), isSoop 仍服务于线路/保活那两处真实能力差异')
 }
 
 // ============================================================================
