@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAppStore, type SortKey, type ViewFilter, type WSView } from '@/stores/app'
 import { api } from '@/api'
 import AnchorCard from '@/components/AnchorCard.vue'
+import AvatarImg from '@/components/AvatarImg.vue'
 import AddFollowDialog from '@/components/AddFollowDialog.vue'
 import ExploreCard from '@/components/ExploreCard.vue'
 import SpinIcon from '@/components/SpinIcon.vue'
@@ -506,8 +507,9 @@ watch(
           :key="roomKey(a.platform, a.userId)"
           class="flex items-center gap-3 px-3.5 py-2.5 rounded-ctl bg-card border border-line hover:shadow-card transition-shadow"
         >
-          <img v-if="a.userImg" :src="a.userImg" class="w-8 h-8 rounded-full object-cover grayscale-[0.4] shrink-0" referrerpolicy="no-referrer" />
-          <div v-else class="w-8 h-8 rounded-full bg-fill grid place-items-center text-[12px] font-bold text-deco shrink-0">{{ a.nick.slice(0, 1) }}</div>
+          <AvatarImg :src="a.userImg" lazy class="w-8 h-8 rounded-full object-cover grayscale-[0.4] shrink-0">
+            <div class="w-8 h-8 rounded-full bg-fill grid place-items-center text-[12px] font-bold text-deco shrink-0">{{ a.nick.slice(0, 1) }}</div>
+          </AvatarImg>
           <div class="min-w-0 flex-1">
             <div class="text-[13px] font-semibold text-ink1 truncate">{{ a.nick }}</div>
             <div class="text-[11.5px] text-ink3 truncate">

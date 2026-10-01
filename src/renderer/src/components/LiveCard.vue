@@ -7,6 +7,7 @@ import { useI18n } from 'vue-i18n'
 import { type Platform } from '@shared/types'
 import { fmtLiveDuration, fmtNum } from '@/utils/media'
 import PlatTag from '@/components/PlatTag.vue'
+import AvatarImg from '@/components/AvatarImg.vue'
 
 // ============ 统一直播间卡片(大厅/已关注共用) ============
 // AnchorCard 与 ExploreCard 历史两套近乎逐行重复的模板收敛至此:
@@ -90,8 +91,9 @@ async function toggleRecord(): Promise<void> {
         referrerpolicy="no-referrer"
       />
       <div v-else class="w-full h-full grid place-items-center bg-gradient-to-br from-fill to-fillh">
-        <img v-if="m.userImg" :src="m.userImg" class="w-16 h-16 rounded-full object-cover opacity-70" referrerpolicy="no-referrer" />
-        <div v-else class="w-16 h-16 rounded-full bg-card grid place-items-center text-2xl text-ink3 shadow-sm">{{ m.nick.slice(0, 1) }}</div>
+        <AvatarImg :src="m.userImg" lazy class="w-16 h-16 rounded-full object-cover opacity-70">
+          <div class="w-16 h-16 rounded-full bg-card grid place-items-center text-2xl text-ink3 shadow-sm">{{ m.nick.slice(0, 1) }}</div>
+        </AvatarImg>
       </div>
 
       <!-- 左上: 状态徽标恒 ≤2 枚(设计稿 3.1 ②, 优先级 录制中 > 直播中 > 已缓存 > 离线)。
@@ -149,8 +151,9 @@ async function toggleRecord(): Promise<void> {
 
       <!-- 第二行: 头像 + 昵称 + ID + 扩展区 -->
       <div class="flex items-center gap-1.5 mt-2">
-        <img v-if="m.userImg" :src="m.userImg" class="w-[20px] h-[20px] rounded-full object-cover shrink-0" referrerpolicy="no-referrer" />
-        <svg v-else class="w-[20px] h-[20px] shrink-0" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 5-5.5 8-5.5s6.5 1.5 8 5.5"/></svg>
+        <AvatarImg :src="m.userImg" lazy class="w-[20px] h-[20px] rounded-full object-cover shrink-0">
+          <svg class="w-[20px] h-[20px] shrink-0" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 5-5.5 8-5.5s6.5 1.5 8 5.5"/></svg>
+        </AvatarImg>
         <span v-if="m.isLive" class="text-[12px] text-ink1 font-medium truncate">{{ m.nick }}</span>
         <svg v-if="m.following" class="w-3.5 h-3.5 text-live shrink-0" viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 21s-7-4.6-9.3-9A5.4 5.4 0 0112 6.3 5.4 5.4 0 0121.3 12C19 16.4 12 21 12 21z"/>

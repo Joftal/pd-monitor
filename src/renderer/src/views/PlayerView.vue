@@ -7,6 +7,7 @@ import { useAppStore } from '@/stores/app'
 import HlsPlayer from '@/components/HlsPlayer.vue'
 import SpinIcon from '@/components/SpinIcon.vue'
 import PlatTag from '@/components/PlatTag.vue'
+import AvatarImg from '@/components/AvatarImg.vue'
 import { useI18n } from 'vue-i18n'
 import { fmtLiveDuration } from '@/utils/media'
 import { DEFAULT_PLATFORM, isPlatform, platformName, REC_RETRY_MAX, sanitizePathPart, type AnchorTag, type KeepaliveStatus, type Platform } from '@shared/types'
@@ -96,12 +97,6 @@ const labelList = computed(() => {
   if (g.liveType === 'rec') out.push(t('account.tagRec'))
   return out.join(' · ')
 })
-/** 点赞/粉丝: 关注列表与站内发现快照都回传(Panda), 两处都没有才写「—」;
- *  SOOP 侧官方不给 → 写「不适用 + 原因」, 不许填 0(3.2) */
-function numOrNa(v: number | undefined): string {
-  if (isSoop) return t('player.naSoop')
-  return v ? String(v) : '—'
-}
 /** 自动续录: 上限来自共享常量 REC_RETRY_MAX(与主进程同一个数, 不是抄的); 回放下载不续 —— 进度无法无损接回 */
 const retryText = computed(() => {
   if (isVod.value) return t('player.retryNaVod')
@@ -555,8 +550,9 @@ async function manualRefresh() {
         <div class="panel shrink-0">
           <img v-if="thumb" :src="thumb" class="w-full aspect-video object-cover" referrerpolicy="no-referrer" />
           <div class="flex items-center gap-2.5 px-3.5 pt-3 pb-2.5">
-            <img v-if="userImg" :src="userImg" class="w-[42px] h-[42px] rounded-full object-cover shrink-0" referrerpolicy="no-referrer" />
-            <div v-else class="w-[42px] h-[42px] rounded-full bg-fill grid place-items-center text-lg text-ink3 font-bold shrink-0">{{ nick.slice(0, 1) }}</div>
+            <AvatarImg :src="userImg" class="w-[42px] h-[42px] rounded-full object-cover shrink-0">
+              <div class="w-[42px] h-[42px] rounded-full bg-fill grid place-items-center text-lg text-ink3 font-bold shrink-0">{{ nick.slice(0, 1) }}</div>
+            </AvatarImg>
             <div class="min-w-0 flex-1">
               <div class="text-[14px] font-bold text-ink1 truncate">{{ nick }}</div>
               <div class="text-[11px] text-ink3 truncate">@{{ userId }}</div>
@@ -572,13 +568,15 @@ async function manualRefresh() {
               <span class="kv-k">{{ t('player.liveDur') }}</span>
               <span class="kv-v">{{ liveDuration || '—' }}</span>
             </div>
-            <div class="kv">
+            <!-- 点赞/粉丝只在"这一房确实给得出数"时摆行: Panda 的列表带这两个字段, SOOP 整张表一个都没有 ——
+                 给一个永远空着的槽位写「不适用」, 是把我们的采集边界当成读数给用户读(设计稿 ㊇) -->
+            <div v-if="room.likes" class="kv">
               <span class="kv-k">{{ t('player.likes') }}</span>
-              <span class="kv-v" :class="isSoop ? 'text-ink3' : 'text-ink1'">{{ numOrNa(room.likes) }}</span>
+              <span class="kv-v">{{ room.likes }}</span>
             </div>
-            <div class="kv">
+            <div v-if="room.fans" class="kv">
               <span class="kv-k">{{ t('player.fans') }}</span>
-              <span class="kv-v" :class="isSoop ? 'text-ink3' : 'text-ink1'">{{ numOrNa(room.fans) }}</span>
+              <span class="kv-v">{{ room.fans }}</span>
             </div>
             <!-- 刷新节奏写在卡尾: 这一栏是轮询读数不是实时推流, 不说清楚就会被当秒级数据读 -->
             <p class="text-[10.5px] text-ink3 mt-1.5">{{ t('player.roomPollNote', { sec: pollSec }) }}</p>

@@ -9,7 +9,7 @@ import {
   registerSrcCacheProvider,
   broadcastSrcCache
 } from './pandalive'
-import { isRoomId, roomKey } from '../../shared/types'
+import { isRoomId, roomKey, soopAvatarUrl } from '../../shared/types'
 import { UA } from '../util'
 import { logger } from './logger'
 import { mt } from '../i18n'
@@ -152,6 +152,8 @@ export interface SoopFavoriteLive {
 export interface SoopFavoriteRow {
   userId: string
   nick: string
+  /** 关注行自己不带任何图片字段(实测 718 行的键集里没有一个 img/url), 头像是按频道 ID 派生出来的 */
+  userImg: string
   isLive: boolean
   /** 上次开播的钟面串(离线项也有, 可显示"多久没播") */
   lastStartTime: string
@@ -191,6 +193,8 @@ function parseFavoriteRow(raw: unknown): SoopFavoriteRow | null {
   const row: SoopFavoriteRow = {
     userId,
     nick: String(r.user_nick ?? ''),
+    // 关注列表那一行没有头像字段(实测 718 行的键集里一个 image/url 都没有), 只能按频道 ID 派生
+    userImg: soopAvatarUrl(userId),
     isLive: r.is_live === true,
     lastStartTime: favClock(r.last_broad_start),
     live: null

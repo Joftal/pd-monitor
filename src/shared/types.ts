@@ -38,6 +38,14 @@ export function roomUrl(platform: Platform, userId: string): string {
     : `https://www.pandalive.co.kr/play/${userId}`
 }
 
+/** SOOP 主播头像: 频道 ID 就写在路径里, 所以零请求。这不是猜出来的规律 —— 播放页
+ *  <div id="bjThumbnail"> 的 <img src> 正是这一串(2026-10-01 实测 @apple1004l / @eunsun1944),
+ *  而官方自己给它挂了 onerror: 没传过 logo 的房在这儿就是 404, 渲染层必须按「没有头像」处理。
+ *  与 roomUrl 同族放共享层: 它是纯地址函数(不发请求), 轮询侧与落库侧都要拼同一个地址。 */
+export function soopAvatarUrl(userId: string): string {
+  return `https://stimg.sooplive.com/LOGO/${userId.slice(0, 2)}/${userId}/${userId}.jpg`
+}
+
 /** 房间 ID 的合法形态(主进程 IPC 入参校验与用户输入解析共用同一把尺):
  *  它参与 roomKey 主键, 并被**裸拼进落盘目录名**(`<根>/<平台>/<主播名>(<userId>)`), 所以
  *  路径分隔符、Windows 保留字符、控制字符、`..` 一律拒绝; 上限 80 给整条路径留余量(Windows 260 截断)。

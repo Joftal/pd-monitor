@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import {
-  CH, EV, AccountState, AccountStates, Anchor, AppInfo, DEFAULT_PLATFORM, FollowImportResult, isPlatform, isRoomId, parseRoomInput, Platform, PlayInfo, Settings, SoopAccountState, UpdateCheckResult
+  CH, EV, AccountState, AccountStates, Anchor, AppInfo, DEFAULT_PLATFORM, FollowImportResult, isPlatform, isRoomId, parseRoomInput, Platform, PlayInfo, Settings, SoopAccountState, soopAvatarUrl, UpdateCheckResult
 } from '../shared/types'
 import { APP_META, cmpSemver } from '../shared/appmeta'
 import { api, SESSION_PARTITION, applyProxy, cachedSourceIdsAll } from './services/pandalive'
@@ -351,6 +351,7 @@ export function registerIpc(): void {
       }
     } else {
       // SOOP 无大厅: 播放页一发就有主播名/标题/在播态, 关注当场点亮卡片
+      userImg = soopAvatarUrl(userId) // 列表与页面都不回头像字段, 地址由频道 ID 派生
       try {
         const m = await soopApi.fetchPageMeta(userId)
         nick = m.hostName || userId

@@ -224,7 +224,6 @@ export default {
     labels: '标签',
     likes: '点赞',
     fans: '粉丝',
-    naSoop: '不适用 · SOOP 接口不返回',
     roomPollNote: '随轮询刷新(每 {sec} 秒), 不是实时推流读数',
     recParams: '本房间录制参数',
     recParamsNote: '跟随全局设置',

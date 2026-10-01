@@ -3,7 +3,7 @@ import { api, RiskError, BjNotFoundError, LiveItem } from './pandalive'
 import { soopApi, SoopFavoriteRow } from './soop'
 import { sourceFor, applyPlayMeta } from './source'
 import { store } from './store'
-import { EV, Platform, roomKey, WatcherStatus, Anchor, DiscoveryItem } from '../../shared/types'
+import { EV, Platform, roomKey, soopAvatarUrl, WatcherStatus, Anchor, DiscoveryItem } from '../../shared/types'
 import { recorder } from './recorder'
 import { sendToast } from './notify'
 import { sleep } from '../util'
@@ -464,6 +464,10 @@ class Watcher {
     // 抖动计数只服务当前关注集: 已取关的房间即时清账, 防这张表无界增长
     const monitored = new Set(anchors.map((a) => roomKey(a.platform, a.userId)))
     for (const key of [...this.soopOfflineStreak.keys()]) if (!monitored.has(key)) this.soopOfflineStreak.delete(key)
+
+    // 头像补齐: SOOP 的关注列表整行没有一个图片字段, 但 logo 的地址就是频道 ID 的函数(零请求, 见 shared 的 soopAvatarUrl)。
+    // 只补空的那批 —— 一轮跑完就收敛, 之后每轮这里都是零写入; 老库里 718 行头像全空, 靠这一步补上
+    for (const a of anchors) if (!a.userImg) store.updateAnchor(a.platform, a.userId, { userImg: soopAvatarUrl(a.userId) })
 
     let found = 0
     // 这一发绝不能把异常抛出去: roundSoop 的契约是"永不抛错"(防 Panda 连坐熔断), 列表挂了就等于没列表

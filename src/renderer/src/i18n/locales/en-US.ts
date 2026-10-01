@@ -221,7 +221,6 @@ export default {
     labels: 'Tags',
     likes: 'Likes',
     fans: 'Followers',
-    naSoop: 'N/A · not returned by SOOP',
     roomPollNote: 'Refreshed with polling (every {sec}s), not a live stream readout',
     recParams: 'Recording settings',
     recParamsNote: 'Follows global settings',
