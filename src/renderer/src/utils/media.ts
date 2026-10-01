@@ -35,6 +35,13 @@ export function fmtClock(ms: number): string {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
+/** 轮次耗时: 毫秒 → 秒(一位小数, 不带单位词, 单位词归文案).
+ *  收在一处是因为同一个 roundMs 曾经有两套读法 —— 顶栏胶囊 8.6 秒 / 设置页 8600 ms,
+ *  单位词进 locale 而不是进代码, 中文才不用再混一个拉丁 s */
+export function fmtRoundCost(ms: number): string {
+  return (Math.max(0, ms) / 1000).toFixed(1)
+}
+
 /** 错误串清洗: 去掉前缀 "xxx Error: " */
 export function errText(e: unknown): string {
   return String((e as Error)?.message || e).replace(/^.*Error: /, '')

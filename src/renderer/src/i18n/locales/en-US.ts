@@ -2,8 +2,6 @@
 export default {
   common: {
     loading: 'Loading…',
-    ms: 'ms',
-    sec: 's',
     min: 'min',
     or: 'or',
     unnamed: 'Unnamed',
@@ -27,11 +25,11 @@ export default {
     wStoppedTip: 'Polling stopped',
     wIdle: 'Idle',
     wIdleTip: 'No streamers followed on this platform yet',
-    wHeart: '{sec}s · {cost}',
+    wHeart: '{sec}s · {cost}s',
     // Until the first round lands only the interval is a fact; the cost half is dropped (the initial 0 is not "what the last round took")
     wHeartFirst: '{sec}s',
     wFailed: 'Round failed',
-    wTip: 'Pulls site data every {sec}s · last round took {cost}',
+    wTip: 'Pulls site data every {sec}s · last round took {cost}s',
     wTipFirst: 'Pulls site data every {sec}s · first round not finished yet'
   },
   ws: {
@@ -443,7 +441,7 @@ export default {
     soopChain: 'Capture chain',
     soopChainD: 'One request to the official follow list returns every follow plus live state; on failure it degrades to per-room play-page probes (popularity is unavailable then)',
     soopChainFixed: 'Fixed · follow-list round',
-    soopRound: 'Last round {at} · {ms} ms · {n} streamer(s) watched',
+    soopRound: 'Last round {at} · {cost}s · {n} streamer(s) watched',
     soopLogin: 'Login dependency',
     soopLoginD: 'Anonymous covers public rooms only; 19+ and region-locked rooms need a login, and detection failures are shown in the live view header',
     soopLoginOn: 'Now signed in · {id}',

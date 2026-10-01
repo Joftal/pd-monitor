@@ -4,8 +4,6 @@
 export default {
   common: {
     loading: '加载中…',
-    ms: '毫秒',
-    sec: '秒',
     min: '分钟',
     or: '或',
     unnamed: '未命名',
@@ -30,11 +28,11 @@ export default {
     wIdle: '未监控',
     wIdleTip: '这一方还没有关注的主播, 轮询无事可做',
     // 顶栏胶囊只报"状态", 数值与原因进 tooltip: 完整错误码(净::ERR_...)会把胶囊撑到 230px 还读不完
-    wHeart: '{sec}s · {cost}',
+    wHeart: '{sec} 秒 · {cost} 秒',
     // 首轮还没落地: 那一格里只有间隔是真值, 耗时那半截省略(把初值 0 报成「上次耗时」就是撒谎)
-    wHeartFirst: '{sec}s',
+    wHeartFirst: '{sec} 秒',
     wFailed: '本轮失败',
-    wTip: '每 {sec} 秒向平台拉取一次数据 · 上次拉取耗时 {cost}',
+    wTip: '每 {sec} 秒向平台拉取一次数据 · 上次拉取耗时 {cost} 秒',
     wTipFirst: '每 {sec} 秒向平台拉取一次数据 · 首轮尚未完成'
   },
   ws: {
@@ -56,7 +54,7 @@ export default {
     segOffline: '{n} 位离线',
     segDiscovery: '站内发现 {n} 个房间',
     segRoundAt: '上轮拉取 {time}',
-    segInterval: '检测间隔 {sec}s',
+    segInterval: '检测间隔 {sec} 秒',
     sortRecent: '最新开播',
     sortLastLive: '最近开播',
     sortViewers: '人气最高',
@@ -202,7 +200,7 @@ export default {
     retryOn: '开启 · 连续上限 {n} 次',
     retryOff: '已关闭(设置)',
     retryNaVod: '不适用 · 回放断点无法无损接回',
-    kaOn: '运行中 · {n}档齐养 · 心跳 {s}s前',
+    kaOn: '运行中 · {n}档齐养 · 心跳 {s} 秒前',
     kaOff: '已关闭(设置)',
     kaVod: '回放无需保活',
     kaNa: '不适用(SOOP 源按需重铸)',
@@ -446,7 +444,7 @@ export default {
     soopChain: '采集方式',
     soopChainD: '官方站内关注列表单个请求返回全部关注 + 实时在播; 失败时降级为逐房播放页探针(此时人气不可得)',
     soopChainFixed: '固定 · 关注列表整轮',
-    soopRound: '上轮 {at} · {ms} ms · 监控 {n} 位',
+    soopRound: '上轮 {at} · {cost} 秒 · 监控 {n} 位',
     soopLogin: '登录态依赖',
     soopLoginD: '匿名只可看公开房间; 19+ 与限区房间需登录, 检测失败会摆在直播页页头',
     soopLoginOn: '当前 已登录 · {id}',

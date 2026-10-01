@@ -7,6 +7,7 @@ import { NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { isPlatform, platformName, type Platform } from '@shared/types'
 import { resolveWorkspace } from '@/workspace'
+import { fmtRoundCost } from '@/utils/media'
 
 const { t } = useI18n()
 
@@ -72,7 +73,9 @@ const watcherState = computed(() => {
   // 首轮还没落地: lastRoundAt 为 null 而 roundMs 还是初值 0 —— 把 0 报成「上次拉取耗时」是读数撒谎,
   // 这一档只报间隔(设计稿 ㊍⑤f; 判据同 ㊇「没数的那一格不摆行」)
   const first = w.lastRoundAt === null
-  const cost = w.roundMs < 1000 ? `${w.roundMs} ${t('common.ms')}` : `${(w.roundMs / 1000).toFixed(1)} ${t('common.sec')}`
+  // 耗时恒按秒报(设计稿 ㊏): 按数量级换单位会让同屏两枚胶囊各说各话(一个「666 毫秒」一个「8.6 秒」),
+  // 读的人第一眼比的是单位而不是快慢; 一位小数保住亚秒档的分辨率
+  const cost = fmtRoundCost(w.roundMs)
   const heartbeat = first ? t('nav.wTipFirst', { sec: interval }) : t('nav.wTip', { sec: interval, cost })
   if (w.circuitOpen) return { tone: 'bad', text: t('nav.wCooling'), tip: `${w.message} · ${heartbeat}` }
   if (!w.running) return { tone: 'idle', text: t('nav.wStopped'), tip: t('nav.wStoppedTip') }

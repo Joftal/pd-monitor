@@ -8,6 +8,7 @@ import type { AppInfo, MonitorRules, NotifyEvent, NotifyRow, Platform, Settings,
 import { platformName, REC_RETRY_MAX } from '@shared/types'
 import SpinIcon from '@/components/SpinIcon.vue'
 import Seg from '@/components/Seg.vue'
+import { fmtRoundCost } from '@/utils/media'
 import { useI18n } from 'vue-i18n'
 
 const { t, locale } = useI18n()
@@ -900,7 +901,7 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
               <div class="text-right shrink-0">
                 <div class="text-[12px] font-semibold text-ink1">{{ t('settings.soopChainFixed') }}</div>
                 <div v-if="soopStatus" class="text-[11px] text-ink3 mt-0.5 tabular-nums">
-                  {{ t('settings.soopRound', { ms: soopStatus.roundMs, n: soopStatus.monitored, at: soopStatus.lastRoundAt ? roundTime(soopStatus.lastRoundAt) : '—' }) }}
+                  {{ t('settings.soopRound', { cost: fmtRoundCost(soopStatus.roundMs), n: soopStatus.monitored, at: soopStatus.lastRoundAt ? roundTime(soopStatus.lastRoundAt) : '—' }) }}
                 </div>
               </div>
             </div>
