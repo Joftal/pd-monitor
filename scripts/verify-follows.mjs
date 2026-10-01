@@ -12,9 +12,10 @@
 //   A5  "is_live=true 却没给 broad_no" 判为状态未知(live=null), 交调用方回落探针
 //   B1  roundSoop 列表模式: 命中行零探针落状态(nick/标题/截图/人数/开播时刻/标签) + 开播通知一次
 //   B2  列表覆盖不到的房才发探针; 整表拿不到时全部回落探针(旧行为)
-//   B3  下播要连续两轮才翻转: 单轮"列表说离线"只记 streak, 不动状态也不发通知
+//   B3  下播要连续两轮才翻转: 单轮"列表说离线"只记 streak, 不动状态也不发通知; 翻离线时房态属性(19+/粉丝团)保留、场次属性(密码房/回放)清空
 //   B4  在播房不重复发开播通知; 离线房昵称照常跟进
 //   B5  失明计数只看"全部关注都读不到": 列表覆盖到的房不计失败, 兜底房全灭不累计成平台失明
+//   B6  列表房态三态: is_adult 键缺席沿用上一轮真值(不塌成 false), 明确 false 才翻转; 盲读只按数值变化打一行
 //   C1  storeCookies 落罐必带 expirationDate(不带期限=会话 Cookie, 重启即登出)
 //   C2  persistSessionCookies 只转 sooplive.com 的无期限条目, 已带期限与外域一律不动
 //   C3  网页登录成功链路确实接上了转持久(authWin probe)
@@ -325,6 +326,7 @@ function reset() {
   world.anchors = []
   watcher.soopFailStreak = 0
   watcher.soopOfflineStreak.clear()
+  watcher.soopBlindAdult = -1
   soopApi.invalidateCookieCache()
 }
 
@@ -447,9 +449,9 @@ found = await runRound()
 assert(pageProbes() === 2, '整表拿不到 → 全部回落逐房探针(旧行为)', `实际=${pageProbes()}`)
 assert(found === 2, '探针模式照常统计在播')
 
-console.log('B3 下播要连续两轮确认')
+console.log('B3 下播要连续两轮确认; 房态与场次属性分家')
 reset()
-world.anchors = [anchor({ isLive: true, title: '在播标题', startTime: '2026-09-29 22:01:00' })]
+world.anchors = [anchor({ isLive: true, title: '在播标题', startTime: '2026-09-29 22:01:00', tags: { isAdult: true, isPw: true, type: 'fan', liveType: 'live' } })]
 world.favBody = bodyOf([{ ...LIVE_ROW, is_live: false, broad_info: [] }])
 await runRound()
 assert(findAnchor('aaa111').isLive === true, '第一轮说离线: 状态不动')
@@ -457,7 +459,10 @@ assert(world.toasts.filter((t) => t.t.type === 'offline').length === 0, '第一�
 await runRound()
 assert(findAnchor('aaa111').isLive === false, '第二轮才判下播')
 assert(world.toasts.filter((t) => t.t.type === 'offline').length === 1, '第二轮发一次下播通知')
-assert(findAnchor('aaa111').title === '' && findAnchor('aaa111').tags === null && findAnchor('aaa111').viewerCount === 0, '下播后卡面字段清空')
+const offCard = findAnchor("aaa111")
+assert(offCard.title === '' && offCard.viewerCount === 0 && offCard.thumbUrl === '' && offCard.startTime === '', '下播后场次字段清空')
+assert(offCard.tags?.isAdult === true && offCard.tags?.type === 'fan', '房态属性(19+/粉丝团)下播后保留: 它是房间的属性, 不是这一场的')
+assert(offCard.tags?.isPw === false && offCard.tags?.liveType === '', '场次属性(密码房/回放)随场次结束清掉')
 
 console.log('B4 已在播不重复通知; 离线房昵称跟进; 状态未知的房回落探针')
 reset()
@@ -497,6 +502,29 @@ world.pageFail = true
 await runRound()
 await runRound()
 assert(watcher.soopFailStreak === 0, '列表覆盖到一部分关注时, 兜底房全灭不累计成"平台失明"')
+
+console.log('B6 列表房态三态: 键缺席沿用上一轮, 明确 false 才翻转')
+const NO_ADULT = { ...LIVE_ROW, broad_info: [{ ...LIVE_ROW.broad_info[0], is_adult: undefined }] } // JSON 里就是"没这个键"
+reset()
+world.anchors = [anchor()]
+world.favBody = bodyOf([LIVE_ROW])
+await runRound()
+assert(findAnchor('aaa111').tags.isAdult === true, '第一轮带 is_adult=true: 落 19+')
+assert(watcher.soopBlindAdult === 0, '本轮没有盲读房态的房')
+reset()
+world.anchors = [anchor({ isLive: true, tags: { isAdult: true, isPw: false, type: '', liveType: 'live' }, startTime: '2026-09-29 22:01:00' })]
+world.favBody = bodyOf([NO_ADULT])
+await runRound()
+assert(findAnchor('aaa111').isLive === true && findAnchor('aaa111').tags.isAdult === true, '单轮没带 is_adult: 19+ 沿用上一轮而不是塌成 false')
+assert(watcher.soopBlindAdult === 1, '盲读计数=1')
+assert(world.logInfo.some((m) => m.includes('is_adult')), '盲读只在计数变化时出声一次')
+await runRound()
+assert(world.logInfo.filter((m) => m.includes('is_adult')).length === 1, '同一盲读数值的后续轮不再重复打')
+reset()
+world.anchors = [anchor({ isLive: true, tags: { isAdult: true, isPw: false, type: '', liveType: 'live' }, startTime: '2026-09-29 22:01:00' })]
+world.favBody = bodyOf([{ ...LIVE_ROW, broad_info: [{ ...LIVE_ROW.broad_info[0], is_adult: false }] }])
+await runRound()
+assert(findAnchor('aaa111').tags.isAdult === false, '平台明确回 false: 当轮就改口(三态不是"只进不退")')
 
 // ============ C: 登录态持久化 ============
 console.log('C1 storeCookies 必带期限')

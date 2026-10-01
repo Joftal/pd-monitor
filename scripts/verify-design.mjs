@@ -51,6 +51,8 @@
 //   D40 SOOP 的 ID 槽只放裸频道名: 「房间」前缀连 ws.roomNo 双语死键一起撤(Panda 的 @ 是可粘贴地址的一部分, 留着)
 //   D41 播放页侧栏「标签」整行撤掉: 同一批房态在页头已有徽标, 普通房只剩「—」占位; 撤行不撤信号(四枚徽标 + isVod 必须在位)
 //   D42 取源回写按字段合并: 这一路看不到的 isAdult 不许写 false(19+ 旗不被抹掉), 看得到的 isPw 照写; Panda 不回收
+//   D43 播放源卡的两个出口各复制各的: 「复制」给屏上那串(本机正在用的), 「复制真实源」从代理地址的 url= 解出官方清单(零请求), 只在真是代理地址时出现; 提示语只归因不警告
+//   D44 列表层房态三态: 解析留 undefined → applySoopRow 用 ?? 保住上轮真值 → 下播只清场次属性(19+/粉丝团留着) → 离线卡照画 19+; 盲读按数值变化落一行
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -1178,6 +1180,76 @@ checkWithAllowlist(
   assert(mediaLine !== '' && !/isAdult/.test(mediaLine), 'D42a SOOP 取源回包不再携带 isAdult(看不到 = 不给这一格, 给 false 就是替列表下结论)', mediaLine.slice(0, 90))
   assert(/: AnchorTag \| null/.test(sc) && /typeof m\.isAdult === 'boolean' \? m\.isAdult : !!prev\?\.isAdult/.test(sc), 'D42b applyPlayMeta 按字段合并并把合并结果交回去(整包覆写的老写法不得复活)')
   assert(/const merged = applyPlayMeta\(platform, userId, r\)/.test(ip) && /tags: merged \?\?/.test(ip), 'D42c 渲染层拿到的房态 = 库里那一份(SOOP 走合并, Panda 仍走回包整包)')
+}
+
+// ============================================================================
+// D43 播放源卡的两个出口各复制各的 (2026-10-01 用户指令「搞成能一键复制真地址的吧」)
+//   屏上那串是本机才认的代理地址, 官方清单原址就压在它的 url= 参数里 —— 解出来零请求, 不必回主进程再要一个字段。
+//   两枚按钮不是重复读数: 一个是"现在正在用的", 一个是"平台那张清单的原样", 各自与自己的标签相符。
+//   出口只在地址真是代理地址时才出现(Panda 看到的就是真地址, 给它第二枚等于造一个恒等的假选项)。
+// ============================================================================
+{
+  const pv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'PlayerView.vue'), 'utf8')
+  const zh = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'zh-CN.ts'), 'utf8')
+  const en = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'en-US.ts'), 'utf8')
+
+  assert(
+    /const realSource = computed\(\(\) => \{\s*if \(!isProxySource\.value\) return m3u8\.value/.test(pv) &&
+      /searchParams\.get\('url'\)/.test(pv),
+    'D43a 真实源由本地代理地址的 url= 参数解出(Panda 直接原样返回) —— 这条出口不许变成第二次网络请求或主进程新字段'
+  )
+  const realBtn = (pv.match(/<button[^>]*@click="copyReal"[^>]*>\s*\{\{\s*t\('player\.copyReal'\)\s*\}\}/) || [''])[0]
+  assert(/v-if="isProxySource"/.test(realBtn) && realBtn !== '', 'D43b 「复制真实源」只在源真是本地代理地址时出现, 且标签与动作一致', realBtn.slice(0, 90))
+  assert(/@click="copyUrl"/.test(pv) && /return copyText\(m3u8\.value,/.test(pv), 'D43c 「复制」仍复制屏上那串正在用的源 —— 复制的必须等于看到的')
+  const fallbacks = (pv.match(/document\.execCommand/g) || []).length
+  assert(fallbacks === 1, 'D43d 剪贴板回退只有一份(两枚按钮共用 copyText): 复制第二份就是下次只改漏一半', `命中 ${fallbacks} 处`)
+  // 只约束 srcProxyTip 这一个 key 的值: 「无法播放」在别处是正当文案(player.noPlay / 文件失效那句), 整文件否定会拦下正常文案
+  const tipOf = (src) => (src.match(/srcProxyTip: '([^']*)'/) || [''])[1]
+  const tipZh = tipOf(zh)
+  const tipEn = tipOf(en)
+  assert(
+    tipZh !== '' && tipEn !== '' &&
+      /copyReal: |copiedReal: /.test(zh) && /copyReal: |copiedReal: /.test(en) &&
+      !/无法播放|will not work/.test(tipZh) && !/无法播放|will not work/.test(tipEn),
+    'D43e copyReal / copiedReal 双语齐, 且 srcProxyTip 不再警告"复制出去放不了"(出口已给出, 留着就是自相矛盾的说明书)',
+    `zh=${tipZh} / en=${tipEn}`
+  )
+}
+
+// ============================================================================
+// D44 列表层房态三态: 「这一轮没读到」不是「它不是」 (2026-10-01 实机: 19+ 房隔轮闪断, 见台账)
+//   D42 修的是取源那一路, 列表这一路是同一种病: broad_info 偶发不带 is_adult/is_password,
+//   旧写法 `=== true` 把它读成 false 并整包覆写 → 真值每轮被抹一次再由下一轮写回。
+//   规定落在四处: 解析留 undefined(不知道), 合并用 ??, 下播只清场次属性(房态属性留着), 消费方(离线卡)照画。
+//   动态面由 verify-follows 的 B3/B6 覆盖。
+// ============================================================================
+{
+  const so = fs.readFileSync(R('src', 'main', 'services', 'soop.ts'), 'utf8')
+  const wa = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
+  const lc = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'LiveCard.vue'), 'utf8')
+
+  assert(
+    /isAdult\?: boolean/.test(so) && /isPw\?: boolean/.test(so) &&
+      /isAdult: typeof live\.is_adult === 'boolean' \? live\.is_adult : undefined/.test(so) &&
+      /isPw: typeof live\.is_password === 'boolean' \? live\.is_password : undefined/.test(so),
+    'D44a 关注列表解析: 房态旗声明为可缺省, 键不在就是 undefined(不许在解析层替平台下结论)'
+  )
+  assert(
+    /isAdult: live\.isAdult \?\? a\.tags\?\.isAdult \?\? false/.test(wa) && /isPw: live\.isPw \?\? a\.tags\?\.isPw \?\? false/.test(wa),
+    'D44b applySoopRow 按字段合并: 上一轮的真值在单帧缺席时必须保住'
+  )
+  const offPatch = (wa.match(/private offPatch[\s\S]*?\n  \}/) || [''])[0]
+  assert(
+    /tags: a\.tags \? \{ isAdult: a\.tags\.isAdult, isPw: false, type: a\.tags\.type, liveType: '' \} : null/.test(offPatch),
+    'D44c 下播补丁分家: 房态属性(19+/粉丝团)保留, 只清这一场的属性(密码房/回放) —— 整对象写 null 就是把房间读成普通房',
+    offPatch.slice(0, 80)
+  )
+  assert(
+    /let blindAdult = 0/.test(wa) && /if \(blindAdult !== this\.soopBlindAdult\)/.test(wa),
+    'D44d 盲读有沿袭计数: 只在数值变化时落一行(用来分清"平台没带"与"我们读错键", 不做逐房刷屏)'
+  )
+  const adultBadge = (lc.match(/<span[^>]*v-if="m\.isAdult"[^>]*>/) || [''])[0]
+  assert(adultBadge !== '' && !/isLive/.test(adultBadge), 'D44e 离线卡照画 19+: 徽标不许被在播状态门禁(旗存续的意义就在离线行)', adultBadge)
 }
 
 // ============================================================================
