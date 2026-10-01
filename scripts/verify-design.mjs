@@ -57,6 +57,7 @@
 //   D46 首轮未落地时顶栏胶囊只报间隔: roundMs 的初值 0 不得当成「上次拉取耗时」报出, 耗时那一截连同 tooltip 一起省略
 //   D47 模板结构当场编译: 每个 .vue 的 <template> 单独过 vue/compiler-sfc, 断链的 v-else-if 不许等 build 才炸
 //   D48 store 的 getter 普查: 零消费者的死 getter 一律撤(㊀「无消费方即删」), 不留"以后可能用"
+//   D49 时长单位: 轮次耗时恒按秒且只在一处格式化(胶囊与设置页不许各读各的), 中文格子不混拉丁 s; 节流/分段/熔断/长时长各自的单位是语境, 不许被顺手统一
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -1492,6 +1493,49 @@ checkWithAllowlist(
   assert(dead.length === 0, 'D48b 每个 getter 都真有消费者(零消费者的死 getter 一律撤, 不留"以后可能用")', dead.join(', '))
   const remnants = SRC_ALL.filter((f) => /offlineAnchors/.test(fs.readFileSync(f, 'utf8')))
   assert(remnants.length === 0, 'D48c offlineAnchors 整体绝迹(定义与调用一处不留)', remnants.map(rel).join(', '))
+}
+
+// ============================================================================
+// D49 时长单位: 同一个量只有一套读法 (2026-10-01 复核, 台账 ㊏)
+//   两枚胶囊一个报「666 毫秒」一个报「8.6 秒」不是精度差异, 是 TopNav 里按数量级换单位 + 设置页另写一套 ms 的结果:
+//   同一屏两枚同族胶囊先比单位再比快慢, 读的人第一眼看错了对象。耗时恒按秒(一位小数), 格式化收在 fmtRoundCost 一处。
+//   另一头是语境: 节流 300 毫秒、分段 15 分钟、熔断 3 分钟、开播 2:14:07 —— 换秒只会把数字变长变碎, 那些格子不许被顺手统一。
+// ============================================================================
+{
+  const media = fs.readFileSync(R('src', 'renderer', 'src', 'utils', 'media.ts'), 'utf8')
+  const nav = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'TopNav.vue'), 'utf8')
+  const sv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'SettingsView.vue'), 'utf8')
+  const pv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'PlayerView.vue'), 'utf8')
+  const wv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'WorkspaceView.vue'), 'utf8')
+  const zhSrc = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'zh-CN.ts'), 'utf8')
+  const enSrc = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'en-US.ts'), 'utf8')
+  const lzh = flatten(evalDefault(R('src', 'renderer', 'src', 'i18n', 'locales', 'zh-CN.ts')))
+  const len = flatten(evalDefault(R('src', 'renderer', 'src', 'i18n', 'locales', 'en-US.ts')))
+  // ① 格式化只有一个出处
+  assert(/export function fmtRoundCost\(ms: number\): string \{\s*return \(Math\.max\(0, ms\) \/ 1000\)\.toFixed\(1\)/.test(media), 'D49a fmtRoundCost 是唯一的"毫秒→秒"出处: 除以 1000 且固定一位小数(亚秒档的分辨率靠小数保住, 不靠换单位)')
+  assert(/const cost = fmtRoundCost\(w\.roundMs\)/.test(nav) && /from '@\/utils\/media'/.test(nav), 'D49b 胶囊的耗时取 fmtRoundCost, 不再就地分档')
+  assert(!/roundMs\s*<\s*1000/.test(nav) && !/\$\{w\.roundMs\}/.test(nav) && !/ms: soopStatus\.roundMs/.test(sv), 'D49c 两处消费点都没有第二套换算: 曾经分家的写法(按数量级换单位 / 裸 ms 直出)不得回来')
+  assert(/t\('settings\.soopRound', \{ cost: fmtRoundCost\(soopStatus\.roundMs\)/.test(sv), 'D49d 设置页那行与胶囊同出处: 同一个 roundMs 在两屏上必须是同一个单位的同一个数')
+  // ② 中文那一格不再混拉丁单位
+  assert(/wHeart: '\{sec\} 秒 · \{cost\} 秒'/.test(zhSrc) && /wHeartFirst: '\{sec\} 秒'/.test(zhSrc), 'D49e 中文胶囊两处单位都是「秒」: 一枚胶囊里不再 {sec}s 与 毫秒/秒 并存')
+  assert(/wHeart: '\{sec\}s · \{cost\}s'/.test(enSrc) && /last round took \{cost\}s/.test(enSrc), 'D49f 英文那一格保持拉丁 s 且耗时自带单位(fmtRoundCost 交的是裸数, 单位词归文案)')
+  assert(ph(lzh['nav.wHeart']) === 'cost,sec' && ph(len['nav.wHeart']) === 'cost,sec', 'D49g {cost} 双语都仍在胶囊那句里(单位进文案不能顺手把字段挤掉)')
+  assert(/segInterval: '检测间隔 \{sec\} 秒'/.test(zhSrc) && /kaOn: '[^']*心跳 \{s\} 秒前'/.test(zhSrc), 'D49h 同族的两处中文读数一起改口: 工作区「检测间隔」与播放页「心跳 …前」不再各挂一个拉丁 s')
+  assert(/t\('ws\.segInterval', \{ sec:/.test(wv) && /t\('player\.kaOn', \{ s,/.test(pv), 'D49i 改的是单位词不是数据源: 两处的占位符与调用方给的值原样不动')
+  // ③ 死键跟着死
+  assert(!('common.ms' in lzh) && !('common.sec' in lzh) && !('common.ms' in len) && !('common.sec' in len) && !/common\.ms|common\.sec/.test(nav + sv + pv + wv), 'D49j common.ms / common.sec 双语键与调用四处一起绝迹(唯一消费方已改口, 无消费方即删)')
+  // ④ 语境例外不许被下一次"统一"顺手抹平
+  const exceptions = [
+    ['settings.gapMs', '单请求节流(毫秒)'],
+    ['settings.splitSec', '分段时长(秒)'],
+    ['player.segN', '{n} 分钟'],
+    ['rec.segInfo', '分段 {min} 分钟/段'],
+    ['player.fetchedAgoMin', '{n} 分前'],
+    ['ws.segRoundAt', '上轮拉取 {time}']
+  ]
+  const stillZh = exceptions.filter(([k, want]) => lzh[k] !== want)
+  assert(stillZh.length === 0, 'D49k 该留毫秒/分钟/钟面的格子原样在位: 节流 300 毫秒、分段按分钟、旧读数按钟面 —— 秒不是万能单位', stillZh.map(([k]) => `${k}=${lzh[k]}`).join(', '))
+  assert(/export function fmtDurHMS\(sec: number\)/.test(media) && /const s = Math\.max\(0, Math\.round\(\(kaNow\.value - k\.lastAt\) \/ 1000\)\)/.test(pv), 'D49l 长时长仍走 h:mm:ss, 心跳那格本来就是整秒计数(它们不在本轮改动面内)')
 }
 
 // ============================================================================
