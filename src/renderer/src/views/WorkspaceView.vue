@@ -55,12 +55,14 @@ function hit(a: { nick: string; userId: string; title?: string }): boolean {
 const platAnchors = computed(() => store.anchors.filter((a) => a.platform === plat.value))
 
 // ---- 视图 1 · 在播关注 ----
-// 默认「最新开播」而非「人气最高」: 人气只有部分采集路径给得出(SOOP 的兜底探针恒为 0),
-// 纯人气排序会把刚开播的房间永久钉在墙尾。点赞/粉丝只有 Panda 列表接口给, 所以 SOOP 只留两档。
+// 档位顺序与「站内发现」那排同序(人气最高在前, 2026-10-01 用户指令交换两格位置)。
+// 默认仍「最新开播」而不是「人气最高」: 人气只有部分采集路径给得出(SOOP 的兜底探针恒为 0),
+// 纯人气排序会把刚开播的房间永久钉在墙尾 —— 首位是排面, 默认是数据质量决定的另一件事。
+// 点赞/粉丝只有 Panda 列表接口给, 所以 SOOP 只留两档。
 const liveSorters = computed<{ key: SortKey; label: string }[]>(() => {
   const base: { key: SortKey; label: string }[] = [
-    { key: 'recent', label: t('ws.sortRecent') },
-    { key: 'viewers', label: t('ws.sortViewers') }
+    { key: 'viewers', label: t('ws.sortViewers') },
+    { key: 'recent', label: t('ws.sortRecent') }
   ]
   return isSoop.value ? base : [...base, { key: 'likes', label: t('ws.sortLikes') }, { key: 'fans', label: t('ws.sortFans') }]
 })
