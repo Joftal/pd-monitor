@@ -145,9 +145,8 @@ export interface SoopFavoriteLive {
   startTime: string
   thumbUrl: string
   viewers: number
-  /** 房态旗: 平台这一行说了才算数 —— 键缺席/非布尔一律留 undefined(= 不知道),
+  /** 密码房标记: 平台这一行说了才算数 —— 键缺席/非布尔一律留 undefined(= 不知道),
    *  塌成 false 就等于替上一轮的真值下结论(watcher 的列表回写按这一格合并) */
-  isAdult?: boolean
   isPw?: boolean
 }
 
@@ -213,9 +212,10 @@ function parseFavoriteRow(raw: unknown): SoopFavoriteRow | null {
     startTime: favClock(live.broad_start),
     thumbUrl: favThumb(live.broad_img),
     viewers: favViewers(live),
-    // 只有平台真说了才落值: 键缺席/非布尔一律留 undefined(= 不知道)。
-    // 塌成 false 就是"知道它不是 19+"，而列表这一路的消费方(watcher.applySoopRow)会拿它覆盖上一轮的真值
-    isAdult: typeof live.is_adult === 'boolean' ? live.is_adult : undefined,
+    // is_adult 一律不读(2026-10-01 用户定: SOOP 的房间级 19+ 标记不重要, 可以不展示):
+    // 平台自己会在同一场直播里改口(真机 7 轮同一 broad_start 读到 true→false×3→true), 而这一旗的消费面只有展示。
+    // 能不能取到 19+ 的源与它无关 —— 靠的是 SOOP 登录态(代理上游走 persist:soop)和账号的成人认证(verifyLogin 回包的 isAdult)。
+    // 密码房这一旗留着: 它决定要不要弹密码框、录制带不带密码, 是功能不是装饰。
     isPw: typeof live.is_password === 'boolean' ? live.is_password : undefined
   }
   return row
@@ -825,7 +825,7 @@ class SoopApi {
       nick: info.hostName || meta.hostName,
       startTime,
       // GRADE 的分级语义未实测(要 19+ 房样本才敢映射), 不臆断为成人房 —— 也就不写这一格:
-      // 这里补一个 isAdult: false 不是"不知道", 是"知道它没有", 会把列表 is_adult 的真值抹掉(source.ts applyPlayMeta 按字段合并)
+      // 补一个 isAdult: false 是"知道它没有", 而这一路从没看到过这一格; SOOP 自此全链路不带房间级 19+(见 parseFavoriteRow)
       media: { title: info.roomName || meta.roomName, userNick: info.hostName || meta.hostName, liveType: 'live', isPw: info.needPwd, startTime }
     }
   }

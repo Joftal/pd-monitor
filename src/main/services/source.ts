@@ -25,8 +25,8 @@ export function sourceFor(platform: Platform): RoomSource {
  *  SOOP 的开播时刻(BTIME 反推)和密码房标记只有 CHANNEL 接口给, 轮询侧只读播放页, 拿不到;
  *  Panda 这两个值每轮都由列表/bj 的平台原值维护, 再回写一份等于两套真值打架, 故不碰。
  *  仅在值确有变化时写(每次写都会触发落盘)。
- *  按字段合并而不是整包覆写: 这一路只观察得到 isPw/liveType —— 19+ 与粉丝团是列表的字段,
- *  拿一个"这一路没看到的字段"去写 false, 等于每次开播/取源都把真值擦一次(实机抓到过)。
+ *  按字段合并而不是整包覆写: 这一路只观察得到 isPw/liveType —— 看不到的字段写 false 等于替它下结论,
+ *  每次开播都擦一次真值(实机抓到过)。SOOP 侧的 19+ 自 ㊌ 起整条不取, 这里保住的 prev.isAdult 恒为 false。
  *  返回合并后的房态, 让渲染层拿到与库里同一份。 */
 export function applyPlayMeta(platform: Platform, userId: string, r: PlayResult): AnchorTag | null {
   if (platform !== 'soop' || !r.ok) return null
