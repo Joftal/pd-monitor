@@ -23,7 +23,7 @@
 //   D12 可点必有为: 设置页 switch 瓷片(tileCls)必须挂 @click(tileCls 自带 cursor-pointer+hover)
 //   D13 平台维度: PlatFilter counts 三档齐; 库恒为录制页内的一段(顶栏两条 tab, 旧深链仍重定向)
 //   D14 白屏与最小窗宽: structuredClone 先 toRaw; 顶栏不换行不塌搜索框; 库 0 条不摆筛选
-//   D15 首屏与空态: 不等官方登录校验; 未取到态说「校验中」; 空态有界且下一步可点; 页头按钮同档; 坞不重复渲染在播
+//   D15 首屏与空态: 不等官方登录校验; 未取到态说「校验中」; 空态有界且下一步可点; 页头按钮同档; 工作区不引头像坞
 //   D16 承载矩阵: 关注/取关四个现场各按其形态承载; 进度条全应用一条且只给有真分母的对象; 管线文案与码率差分按任务类型/字节实长走
 //   D17 仓库卫生: tailwind 不留死令牌; 历史设计稿必带覆盖横幅; docs/ 不放二进制; README 双平台口径与 verify 链在案
 //   D18 圆角档位: 模板只用 rounded-card|ctl|md|full, 禁任意值; CSS 里的 border-radius 只允许 5/6/10/14/999/50%
@@ -46,6 +46,7 @@
 //   D35 工作区筛选条右端只在真有搜索词时出声: 「排序与页码在本视图内记忆」常驻说明撤掉(记忆本体不动), 无词时不留空转 flex-1
 //   D36 「关注主播」按平台拆成两个专属入口: 无「自动识别」档, 平台由工作区决定, 粘错平台给出口, SOOP 纯数字场次号单独归因
 //   D37 分段时长填 0 = 不分段: 整场一个不带段号的 TS, 合并档/管线第四棒随之收起, 库里与手动合并产物同归「整文件」一类
+//   D38 「关注在播」一屏只留一个现场: 头像坞退役, 读数只剩分段第一档 + 顶栏徽标, 组件/样式/文案/store getter 不留残骸
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -197,7 +198,6 @@ checkWithAllowlist(
   [
     { file: 'src/renderer/src/components/LiveCard.vue', re: /rounded-full bg-live animate-breathe/, why: '在播/录制色点' },
     { file: 'src/renderer/src/components/LiveCard.vue', re: /'bg-live text-white'/, why: '停止录制按钮(仅图标, 白字压 live 是刻意与在播态同色)' },
-    { file: 'src/renderer/src/components/LiveDock.vue', re: /rounded-full bg-live animate-breathe/, why: '在播坞色点' },
     { file: 'src/renderer/src/components/TopNav.vue', re: /watcherState\.tone === 'bad' \? 'bg-live'/, why: '监控心跳状态点(文字在点外, 用 ink)' },
     { file: 'src/renderer/src/components/TopNav.vue', re: /account\.live \? 'bg-okink' : 'bg-warn'/, why: '账号登录态点' },
     { file: 'src/renderer/src/views/AccountView.vue', re: /dot: 'bg-(ok|warn)( animate-breathe)?'/, why: '登录态色点字段' },
@@ -476,10 +476,10 @@ const ph = (s) => [...String(s).matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().
   const rec = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'RecordingsView.vue'), 'utf8')
   assert(!/size="tiny"/.test(rec), 'D15l 录制页页头快捷入口不用 tiny(tiny 只留给设置页行内控件)')
 
-  // ㉖ 在播坞: 站在「在播关注」视图时下方整屏卡片墙就是同一批房间, 坞在这里只是第二份呈现
-  assert(/v-if="view !== 'live'"[\s\S]{0,90}<LiveDock/.test(ws), 'D15m 在播坞只在非在播视图出现(不重复渲染同一批在播房间)')
-  const dock = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'LiveDock.vue'), 'utf8')
-  assert(!/onLiveView/.test(dock) && !/onLiveView/.test(ws), 'D15m2 onLiveView 已删: 收起后「全部在播」永远往别处跳, 无需自我指向开关')
+  // ㉖′(2026-10-01 订正) 在播坞整体退役: 视图分段的第一档已经给了「关注在播」的计数与出口,
+  //    别视图再挂一条头像带就是同一批房间的第二份呈现(判据见 D38)
+  assert(!/LiveDock|livedock/.test(ws), 'D15m 工作区不引不挂头像坞(补回视图不该自带第二条读数带)')
+  assert(!/onLiveView/.test(ws), 'D15m2 自我指向开关 onLiveView 随坞一起退役')
 
   // ㉗′(2026-09-30 订正) 同一屏的同类入口只留一处: 录制页的快捷入口是页头右上角那一排
   //    (去直播页 / 打开保存目录 / 录制设置)。空态里再挂一枚同去向的按钮, 让人先判断该点哪个。
@@ -505,7 +505,7 @@ const ph = (s) => [...String(s).matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().
   const anchor = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'AnchorCard.vue'), 'utf8')
   const explore = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'ExploreCard.vue'), 'utf8')
   const player = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'PlayerView.vue'), 'utf8')
-  const dock = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'LiveDock.vue'), 'utf8')
+  const nav = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'TopNav.vue'), 'utf8')
   const ws = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'WorkspaceView.vue'), 'utf8')
 
   // ① 卡片形态的取关在「…」菜单里, 且菜单项是 button 不是 div+cursor-pointer(div 键盘到不了)
@@ -519,8 +519,8 @@ const ph = (s) => [...String(s).matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().
   assert(hearts.length === 2, 'D16c2 全应用只有两枚心形(发现卡 + 卡片「已关注」标记), 取关不再新增第三种心形入口', hearts.map(rel).join(', '))
   // ④ 播放页是第四种承载: 取关态必须与其余三处同为红, 不能穿中性灰
   assert(/:type="following \? 'error' : 'primary'"/.test(player), 'D16d 播放页取关按钮用 error 档(卡片菜单/离线行/发现卡三处的取关都是红)')
-  // ⑤ 在播坞不承载取关: 它是「一眼看全谁在播」的读数条, 不是管理现场
-  assert(!/unfollow|anchorsRemove|removeAnchor/.test(dock), 'D16e 在播坞无取关承载(管理动作只在卡片菜单/离线行/播放页)')
+  // ⑤ 在播读数不承载管理动作: 坞退役后「谁在播」只剩顶栏徽标与分段计数两处读数, 二者只管跳
+  assert(!/unfollow|anchorsRemove|removeAnchor/.test(nav), 'D16e 顶栏在播徽标无取关承载(管理动作只在卡片菜单/离线行/播放页)')
 
   // ⑥ 进度承载面: 全应用一条 .meter, 且只给有真实分母的对象(VOD 下载全长来自 m3u8 清单)
   const css = fs.readFileSync(R('src', 'renderer', 'src', 'styles.css'), 'utf8')
@@ -1065,6 +1065,32 @@ checkWithAllowlist(
   assert(/'rec\.fileOne': '1 个文件'/.test(mainI18n) && /'rec\.fileOne': '1 file'/.test(mainI18n) && /this\.files\.length === 1 \? mt\('rec\.fileOne'\)/.test(rec), 'D37l 收尾提示在单文件时说「1 个文件」而不是「共 1 段」(主进程双语齐备)')
   // 实机抓到的(2026-10-01 第五轮): 录制页进行中的读数写着「已写入 · 1 段」—— 那一档压根没有段
   assert(/isSingleFileTask\(task\.currentFile\) \? t\('rec\.writtenOne'\)/.test(rv) && !/writtenVod/.test(rv + i18n), 'D37m 进行中卡片的写入数在单文件那一档说「单文件」而不是「1 段」(判据读当前文件名的形状, 旧 vod 键随改名绝迹)')
+}
+
+// ============================================================================
+// D38 「关注在播」一屏只留一个现场 (2026-10-01: 头像坞从站内发现 / 离线关注两视图退役)
+//   判据: 一条读数只允许一个现场 —— 分段第一档自带呼吸点与计数, 顶栏徽标给跨页计数,
+//         别视图再复制一条头像带就是同一批房间的第二份呈现, 而它连一个管理动作都不承载
+// ============================================================================
+{
+  const ws = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'WorkspaceView.vue'), 'utf8')
+  const nav = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'TopNav.vue'), 'utf8')
+  const css = fs.readFileSync(R('src', 'renderer', 'src', 'styles.css'), 'utf8')
+  const zh = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'zh-CN.ts'), 'utf8')
+  const en = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'en-US.ts'), 'utf8')
+
+  assert(!fs.existsSync(R('src', 'renderer', 'src', 'components', 'LiveDock.vue')), 'D38a 在播坞组件是删掉而不是藏起来(留着文件就等着被人再挂回别视图)')
+  const leftovers = RENDERER.filter((f) => /LiveDock|livedock|dock\./.test(fs.readFileSync(f, 'utf8')))
+  assert(leftovers.length === 0, 'D38b 渲染层再无第二处坞的痕迹(引名、样式类、取词全清)', leftovers.map(rel).join(', '))
+  assert(!/dock: \{/.test(zh) && !/dock: \{/.test(en), 'D38c dock.* 四键两语言绝迹(界面撤了, 文案不许留在字典里当孤儿)')
+  assert(!/liveAnchors/.test(SRC_ALL.map((f) => fs.readFileSync(f, 'utf8')).join('')), 'D38d 只喂坞的那个 store getter 随唯一消费方下线(没有读者的库存字段不留)')
+
+  // 撤的是重复呈现, 不是「该去看」这条信号: 两个读数面必须各自还在
+  assert(/viewCounts\.live \? 'bg-live animate-breathe'/.test(ws) && /class="sec-n">\{\{ viewCounts\[v\] \}\}/.test(ws), 'D38e 「关注在播」的屏上现场只剩分段第一档: 有呼吸点、有计数, 点下去就是整屏卡片墙')
+  assert(/liveCount\(p\.key\)/.test(nav) && /store\.newLiveCount\(p\.key\) \? 'is-new'/.test(nav), 'D38f 顶栏徽标照旧报本平台在播数, 新开播仍把徽标转红(旧坞的 2px 竖条由它接回, 不劫持阅读)')
+
+  assert(/看「在播关注」那一档和顶栏的在播计数/.test(zh) && /segment and the top-bar live count/.test(en), 'D38g SOOP 发现段空态的指引句改口指向分段与顶栏, 不再把人引向一条已经不存在的坞')
+  assert(!/\.livedock/.test(css), 'D38h 渲染层样式表不留 .livedock 死规则')
 }
 
 // ============================================================================
