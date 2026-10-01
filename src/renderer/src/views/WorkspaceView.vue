@@ -6,15 +6,15 @@ import { api } from '@/api'
 import AnchorCard from '@/components/AnchorCard.vue'
 import AddFollowDialog from '@/components/AddFollowDialog.vue'
 import ExploreCard from '@/components/ExploreCard.vue'
-import LiveDock from '@/components/LiveDock.vue'
 import SpinIcon from '@/components/SpinIcon.vue'
 import { useI18n } from 'vue-i18n'
 import { isPlatform, platformName, roomKey, DEFAULT_PLATFORM, type Anchor, type Platform } from '@shared/types'
 import { NButton, NEmpty, NPagination, NPopconfirm, NPopselect, NSwitch, useMessage } from 'naive-ui'
 
-// ============ 工作区「直播」页(设计稿方案 A: 视图分段 + 常驻在播坞) ============
+// ============ 工作区「直播」页(设计稿方案 A: 视图分段) ============
 // 一个平台一套内容, 三视图横切而不是纵向堆叠: 在播关注 / 站内发现 / 离线关注。
-// 一次只看一视图 → 内容量最大的两块各自拿到整屏与各自的分页; 关注在播由在播坞带过去, 随时可见。
+// 一次只看一视图 → 内容量最大的两块各自拿到整屏与各自的分页;
+// 「关注在播」由分段第一档的计数与顶栏徽标带着, 不再在别视图里复制一条头像坞。
 // 视图号写在地址里(?view=), 可收藏可分享; 排序/筛选/页码/滚动位在各视图内记忆(见 store.views)。
 // ==================================================================================
 
@@ -397,12 +397,6 @@ watch(
       </div>
     </div>
 
-    <!-- 在播坞: 只在「逛发现 / 管离线」时出现, 补回分段切视图藏起来的关注在播(㉖)。
-         在播关注视图本身整屏就是这批房间, 再挂一条头像墙是同一批数据的第二份呈现 -->
-    <div v-if="view !== 'live'" class="px-7 shrink-0">
-      <LiveDock :platform="plat" />
-    </div>
-
     <!-- 视图分段 -->
     <div class="px-7 pt-3 pb-2 shrink-0 flex items-center gap-1 border-b border-line">
       <button
@@ -480,7 +474,7 @@ watch(
       </template>
     </div>
 
-    <!-- 正文区(只换这一块: 顶栏 / 在播坞 / 分段完全不动) -->
+    <!-- 正文区(只换这一块: 顶栏 / 分段完全不动) -->
     <div ref="scrollRef" class="flex-1 min-h-0 overflow-y-auto px-7 py-4" @scroll.passive="onListScroll">
       <!-- SOOP 的发现段: 有段头、有引导, 不留空墙(设计稿 D2 方案 1) -->
       <div v-if="view === 'discover' && isSoop" class="max-w-[560px] mx-auto mt-8 rounded-card border border-line bg-card shadow-card p-6">

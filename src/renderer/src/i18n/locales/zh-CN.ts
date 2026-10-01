@@ -40,7 +40,7 @@ export default {
     viewOffline: '离线关注',
     soon: '未开放',
     soonTitle: 'SOOP 暂未开放「站内发现」',
-    soonBody: 'SOOP 没有公开的全站在播列表接口, 所以这一格暂时没有房间墙。单个「站内关注列表」接口已经用在整轮在播检测上 —— 你关注的人在不在播, 看「在播关注」和顶部的在播坞就够了。',
+    soonBody: 'SOOP 没有公开的全站在播列表接口, 所以这一格暂时没有房间墙。单个「站内关注列表」接口已经用在整轮在播检测上 —— 你关注的人在不在播, 看「在播关注」那一档和顶栏的在播计数就够了。',
     gotoLiveView: '回到在播关注',
     gotoOtherDiscover: '去 Panda 逛发现',
     syncFollows: '同步站内关注',
@@ -94,12 +94,6 @@ export default {
     pageInfo: '{label} {n} 位 · 每页 {size} 个',
     perPage: '每页 {n}',
     gotoDiscoverView: '去站内发现看看'
-  },
-  dock: {
-    title: '关注在播',
-    recording: '正在录制',
-    collapse: '收起',
-    gotoAll: '全部在播 {n}'
   },
   card: {
     live: '直播中',

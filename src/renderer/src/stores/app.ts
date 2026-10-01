@@ -72,7 +72,7 @@ interface State {
   /** 三视图各自的排序/筛选/分页/滚动状态 */
   views: Record<WSView, ViewFilter>
   /** 本次运行期间「新开播」的房间主键: 取代旧关注页的"开播就自动跳 tab"——
-   *  跳 tab 会打断正在浏览的人, 这里只把它做成在播坞的竖条与顶栏徽标的红点, 由用户自己决定看不看。 */
+   *  跳 tab 会打断正在浏览的人, 这里只把它做成顶栏分段徽标的红点, 由用户自己决定看不看。 */
   newLive: string[]
   /** 首包 anchors 只做基线不标新: 冷启动把全墙都点亮等于没点亮 */
   anchorsSeeded: boolean
@@ -98,7 +98,6 @@ export const useAppStore = defineStore('app', {
     srcCache: []
   }),
   getters: {
-    liveAnchors: (s) => s.anchors.filter((a) => a.isLive),
     offlineAnchors: (s) => s.anchors.filter((a) => !a.isLive),
     activeRecs: (s) => s.recordings.filter((r) => r.status === 'recording' || r.status === 'remuxing'),
     isRecording: (s) => (platform: Platform, userId: string) =>
@@ -153,7 +152,7 @@ export const useAppStore = defineStore('app', {
     },
     /** anchors 的唯一写入口: 顺带算出「本次运行内新开播」的房间。
      *  它取代旧关注页的「开播就自动切 tab」—— 自动切换会打断正在浏览的用户(设计稿 L.2「默认视图」),
-     *  改为在播坞挂 2px 竖条 + 顶栏分段徽标转红, 用户回来时看得见, 但不被劫持当前阅读。 */
+     *  改为顶栏分段徽标转红 + 「在播关注」那一档的计数, 用户回来时看得见, 但不被劫持当前阅读。 */
     setAnchors(list: Anchor[]) {
       const wasLive = new Set(this.anchors.filter((a) => a.isLive).map((a) => roomKey(a.platform, a.userId)))
       this.anchors = list

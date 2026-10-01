@@ -37,7 +37,7 @@ export default {
     viewOffline: 'Offline following',
     soon: 'Not open',
     soonTitle: 'SOOP has no public "Discover" feed',
-    soonBody: 'SOOP exposes no public site-wide live list, so this view has no room wall for now. The single "favorites" endpoint is already spent on every live check — whether the people you follow are on air is what "Live following" and the dock above are for.',
+    soonBody: 'SOOP exposes no public site-wide live list, so this view has no room wall for now. The single "favorites" endpoint is already spent on every live check — whether the people you follow are on air is what the "Live following" segment and the top-bar live count are for.',
     gotoLiveView: 'Back to Live following',
     gotoOtherDiscover: 'Browse Panda discover',
     syncFollows: 'Sync site follows',
@@ -91,12 +91,6 @@ export default {
     pageInfo: '{label} {n} · {size} per page',
     perPage: '{n} per page',
     gotoDiscoverView: 'Browse the discover view'
-  },
-  dock: {
-    title: 'Following live',
-    recording: 'Recording',
-    collapse: 'Collapse',
-    gotoAll: 'All live {n}'
   },
   card: {
     live: 'LIVE',
