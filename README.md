@@ -106,7 +106,7 @@ src/
    ├─ components/LibrarySection.vue # 库(录制页内一段, 非独立页): 卡墙 + 分组 + 索引条 + 筛选搜索
    ├─ views/PlayerView.vue    #   观看页(清晰度/线路按平台真实能力呈现)
    ├─ views/AccountView.vue   #   账号: 双平台独立会话 + 登录态四态 + 校验轨迹
-   ├─ views/SettingsView.vue  #   设置: 外观/监控/录制/网络/通知与行为/数据与日志/关于
+   ├─ views/SettingsView.vue  #   设置: 外观/录制/网络/通知与行为/数据与日志 + Panda/SOOP 两平台节 + 关于(轮询节奏三格各归各的)
    └─ components/CinemaOverlay.vue # 磨砂影院浮层: 播放 + 合并 + 删除
 scripts/                      # verify-*.mjs 行为回归链(10 个) · icon-build/tray-icon-build 图标派生 · sim-keepalive-scale 保活规模仿真(手动)
 docs/design/                  # sodalive-ia-v1.html 现行设计稿; 其余为过程记录(页首标注被哪一节覆盖)
