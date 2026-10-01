@@ -52,7 +52,7 @@
 //   D41 播放页侧栏「标签」整行撤掉: 同一批房态在页头已有徽标, 普通房只剩「—」占位; 撤行不撤信号(四枚徽标 + isVod 必须在位)
 //   D42 取源回写按字段合并: 这一路看不到的 isAdult 不许写 false(19+ 旗不被抹掉), 看得到的 isPw 照写; Panda 不回收
 //   D43 播放源卡的两个出口各复制各的: 「复制」给屏上那串(本机正在用的), 「复制真实源」从代理地址的 url= 解出官方清单(零请求), 只在真是代理地址时出现; 提示语只归因不警告
-//   D44 列表层房态三态: 解析留 undefined → applySoopRow 用 ?? 保住上轮真值 → 下播只清场次属性(19+/粉丝团留着) → 离线卡照画 19+; 盲读按数值变化落一行
+//   D44 SOOP 不带房间级 19+ 标记(㊌): is_adult 全链路不读、applySoopRow 不继承它; 密码房旗仍是三态 + ?? 合并; 下播只清场次属性; Panda 的 19+ 徽标两处消费端都还在
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -1170,6 +1170,7 @@ checkWithAllowlist(
 //   SOOP 的 getPlay 看不到 19+(GRADE 语义未实测), 过去它交一份 isAdult: false, applyPlayMeta 又整包覆写,
 //   于是"取一次源 = 擦一次真值", 下一轮列表才写回来 —— 卡与页头之间的闪断就是这么来的(库里那一晚就是 false)。
 //   修法在两处: 回包不带看不见的字段; 合并只认回包真给的值。动态面由 verify-playcache 的 T25 覆盖。
+//   ㊌ 之后列表那一路也不再取房间级 19+(所以"下一轮列表写回来"已不成立), 但这一路的规定一字未改: 看不见的字段依然不许写成 false。
 // ============================================================================
 {
   const so = fs.readFileSync(R('src', 'main', 'services', 'soop.ts'), 'utf8')
@@ -1217,39 +1218,53 @@ checkWithAllowlist(
 }
 
 // ============================================================================
-// D44 列表层房态三态: 「这一轮没读到」不是「它不是」 (2026-10-01 实机: 19+ 房隔轮闪断, 见台账)
-//   D42 修的是取源那一路, 列表这一路是同一种病: broad_info 偶发不带 is_adult/is_password,
-//   旧写法 `=== true` 把它读成 false 并整包覆写 → 真值每轮被抹一次再由下一轮写回。
-//   规定落在四处: 解析留 undefined(不知道), 合并用 ??, 下播只清场次属性(房态属性留着), 消费方(离线卡)照画。
+// D44 SOOP 的房间级 19+ 标记整条不取 (2026-10-01 真机 7 轮 + 用户定「标记不重要, 可以不展示」)
+//   平台自己会在同一场直播里改口(同一 broad_start: true→false×3→true), 所以"保住上一轮真值"救不了闪断;
+//   而这一旗的消费面只有展示(卡片徽标 / 页头徽标 / TG 的 [19+]) —— 能不能取到 19+ 的源靠 SOOP 登录态与账号的成人认证。
+//   规定落在四处: 解析层不读 is_adult → 列表回写不继承它(顺带清掉旧轮次残留) → 密码房旗照旧三态+?? → 下播仍只清场次属性(Panda 受益)。
 //   动态面由 verify-follows 的 B3/B6 覆盖。
 // ============================================================================
 {
   const so = fs.readFileSync(R('src', 'main', 'services', 'soop.ts'), 'utf8')
   const wa = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
   const lc = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'LiveCard.vue'), 'utf8')
+  const pv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'PlayerView.vue'), 'utf8')
+  const tg = fs.readFileSync(R('src', 'main', 'services', 'tgFormat.ts'), 'utf8')
 
+  const liveIface = (so.match(/export interface SoopFavoriteLive \{[\s\S]*?\n\}/) || [''])[0]
+  const parsedLiteral = (so.match(/row\.live = \{[\s\S]*?\n  \}/) || [''])[0]
   assert(
-    /isAdult\?: boolean/.test(so) && /isPw\?: boolean/.test(so) &&
-      /isAdult: typeof live\.is_adult === 'boolean' \? live\.is_adult : undefined/.test(so) &&
-      /isPw: typeof live\.is_password === 'boolean' \? live\.is_password : undefined/.test(so),
-    'D44a 关注列表解析: 房态旗声明为可缺省, 键不在就是 undefined(不许在解析层替平台下结论)'
+    liveIface !== '' &&
+      !/isAdult/.test(liveIface) &&
+      parsedLiteral !== '' &&
+      !/is_adult|isAdult/.test(parsedLiteral.replace(/\/\/[^\n]*/g, '')),
+    'D44a SOOP 关注行不再解析 is_adult: 接口与 row.live 字面量里都不许有这一格(注释里提到它是为了说明为什么没有)',
+    parsedLiteral.slice(0, 80)
+  )
+  const asr = (wa.match(/private applySoopRow[\s\S]*?\n  \}/) || [''])[0]
+  assert(
+    asr !== '' && /isAdult: false,/.test(asr) && !/live\.isAdult/.test(asr) && !/a\.tags\?\.isAdult/.test(asr),
+    'D44b 列表回写不继承房间级 19+(恒 false, 顺带把旧轮次残留的 true 清掉): 上一轮的 isAdult 不得再进这一路',
+    asr.slice(0, 60)
   )
   assert(
-    /isAdult: live\.isAdult \?\? a\.tags\?\.isAdult \?\? false/.test(wa) && /isPw: live\.isPw \?\? a\.tags\?\.isPw \?\? false/.test(wa),
-    'D44b applySoopRow 按字段合并: 上一轮的真值在单帧缺席时必须保住'
+    /isPw: typeof live\.is_password === 'boolean' \? live\.is_password : undefined/.test(so) &&
+      /isPw: live\.isPw \?\? a\.tags\?\.isPw \?\? false/.test(asr),
+    'D44c 密码房旗不受这一刀影响: 解析仍留 undefined(不知道), 合并仍保住上一轮真值 —— 它决定弹不弹密码框、录制带不带密码'
   )
   const offPatch = (wa.match(/private offPatch[\s\S]*?\n  \}/) || [''])[0]
   assert(
     /tags: a\.tags \? \{ isAdult: a\.tags\.isAdult, isPw: false, type: a\.tags\.type, liveType: '' \} : null/.test(offPatch),
-    'D44c 下播补丁分家: 房态属性(19+/粉丝团)保留, 只清这一场的属性(密码房/回放) —— 整对象写 null 就是把房间读成普通房',
+    'D44d 下播补丁分家照旧(㊌ 之后为 Panda 的 19+/粉丝团服务): 场次属性清, 房态属性留 —— 整对象写 null 就是把房间读成普通房',
     offPatch.slice(0, 80)
   )
   assert(
-    /let blindAdult = 0/.test(wa) && /if \(blindAdult !== this\.soopBlindAdult\)/.test(wa),
-    'D44d 盲读有沿袭计数: 只在数值变化时落一行(用来分清"平台没带"与"我们读错键", 不做逐房刷屏)'
+    !/soopBlindAdult/.test(wa) &&
+      /v-if="m\.isAdult"/.test(lc) &&
+      /v-if="tags\?\.isAdult"/.test(pv) &&
+      /tags\?\.isAdult/.test(tg),
+    'D44e 随这一路一起绝迹的只有那个盲读计数; Panda 的 19+ 三处消费端(卡片徽标 / 页头徽标 / TG [19+])一处都不许被顺手删掉'
   )
-  const adultBadge = (lc.match(/<span[^>]*v-if="m\.isAdult"[^>]*>/) || [''])[0]
-  assert(adultBadge !== '' && !/isLive/.test(adultBadge), 'D44e 离线卡照画 19+: 徽标不许被在播状态门禁(旗存续的意义就在离线行)', adultBadge)
 }
 
 // ============================================================================

@@ -12,10 +12,10 @@
 //   A5  "is_live=true 却没给 broad_no" 判为状态未知(live=null), 交调用方回落探针
 //   B1  roundSoop 列表模式: 命中行零探针落状态(nick/标题/截图/人数/开播时刻/标签) + 开播通知一次
 //   B2  列表覆盖不到的房才发探针; 整表拿不到时全部回落探针(旧行为)
-//   B3  下播要连续两轮才翻转: 单轮"列表说离线"只记 streak, 不动状态也不发通知; 翻离线时房态属性(19+/粉丝团)保留、场次属性(密码房/回放)清空
+//   B3  下播要连续两轮才翻转: 单轮"列表说离线"只记 streak, 不动状态也不发通知; 翻离线时只清这一场的属性(密码房/回放), 房间属性留(SOOP 侧由 offPatch 直调证形状, Panda 侧的 19+/粉丝团同一规定)
 //   B4  在播房不重复发开播通知; 离线房昵称照常跟进
 //   B5  失明计数只看"全部关注都读不到": 列表覆盖到的房不计失败, 兜底房全灭不累计成平台失明
-//   B6  列表房态三态: is_adult 键缺席沿用上一轮真值(不塌成 false), 明确 false 才翻转; 盲读只按数值变化打一行
+//   B6  SOOP 不带房间级 19+(is_adult 一律不读, 行里写着 true 也不落卡、并把旧残留清掉); 密码房旗仍是三态: 键缺席沿用上一轮, 明确 false 才翻转
 //   C1  storeCookies 落罐必带 expirationDate(不带期限=会话 Cookie, 重启即登出)
 //   C2  persistSessionCookies 只转 sooplive.com 的无期限条目, 已带期限与外域一律不动
 //   C3  网页登录成功链路确实接上了转持久(authWin probe)
@@ -297,7 +297,7 @@ const LIVE_ROW = {
       broad_start: '2026-09-29 22:01',
       broad_img: '//liveimg.sooplive.com/h/12345678.jpg',
       url: 'play.sooplive.com/aaa111/12345678',
-      is_adult: true,
+      is_adult: true, // 平台写着 true —— 解析层也不读它(见 B6), 留着这一格正是为了证明"读了也不取"
       is_password: false,
       pc_view_cnt: 30,
       mobile_view_cnt: 45,
@@ -326,7 +326,6 @@ function reset() {
   world.anchors = []
   watcher.soopFailStreak = 0
   watcher.soopOfflineStreak.clear()
-  watcher.soopBlindAdult = -1
   soopApi.invalidateCookieCache()
 }
 
@@ -374,7 +373,7 @@ assert(live && live.isLive && live.live && live.live.broadNo === '12345678', '�
 assert(live.live.startTime === '2026-09-29 22:01:00', '分钟精度开播时刻补齐到秒', `实际=${live.live.startTime}`)
 assert(live.live.thumbUrl === 'https://liveimg.sooplive.com/h/12345678.jpg', '截图补 https: 协议')
 assert(live.live.viewers === 75, '人数=pc+mobile', `实际=${live.live.viewers}`)
-assert(live.live.isAdult === true && live.live.isPw === false, '19+/密码房标记按原值')
+assert(live.live.isAdult === undefined && live.live.isPw === false, '行里写着 is_adult=true 也不进内部行(SOOP 不取房间级 19+), 密码房旗按原值')
 const off = rows && rows.find((r) => r.userId === 'bbb222')
 assert(off && !off.isLive && off.live === null && off.lastStartTime === '2026-09-27 10:00:00', '离线行不编造场次, 保留上次开播')
 
@@ -422,7 +421,7 @@ const a = findAnchor('aaa111')
 assert(a.isLive && a.nick === '主播甲' && a.title === '在播标题', '昵称/标题来自列表')
 assert(a.startTime === '2026-09-29 22:01:00', '开播时刻取列表原值(播放页根本没有这个字段)')
 assert(a.viewerCount === 75 && a.thumbUrl.startsWith('https://liveimg'), '人数/截图一并落卡')
-assert(a.tags && a.tags.isAdult === true && a.tags.liveType === 'live', '标签落卡(19+ 标记)')
+assert(a.tags && a.tags.isAdult === false && a.tags.liveType === 'live', '标签落卡: 场次属性按原值, 而房间级 19+ 恒不取(行里写着 true 也不落)')
 assert(a.userImg === 'https://stimg.sooplive.com/LOGO/aa/aaa111/aaa111.jpg', '空头像由这一轮补齐: SOOP 的列表行没有任何图片字段, 地址就是频道 ID 的函数(零请求)')
 assert(world.toasts.filter((t) => t.t.type === 'live').length === 1, '离线→在播发一次开播通知')
 assert(world.invalidate.length === 1, '开播即作废旧源')
@@ -449,9 +448,9 @@ found = await runRound()
 assert(pageProbes() === 2, '整表拿不到 → 全部回落逐房探针(旧行为)', `实际=${pageProbes()}`)
 assert(found === 2, '探针模式照常统计在播')
 
-console.log('B3 下播要连续两轮确认; 房态与场次属性分家')
+console.log('B3 下播要连续两轮确认; 房间属性与场次属性分家')
 reset()
-world.anchors = [anchor({ isLive: true, title: '在播标题', startTime: '2026-09-29 22:01:00', tags: { isAdult: true, isPw: true, type: 'fan', liveType: 'live' } })]
+world.anchors = [anchor({ isLive: true, title: '在播标题', startTime: '2026-09-29 22:01:00', tags: { isAdult: false, isPw: true, type: '', liveType: 'live' } })]
 world.favBody = bodyOf([{ ...LIVE_ROW, is_live: false, broad_info: [] }])
 await runRound()
 assert(findAnchor('aaa111').isLive === true, '第一轮说离线: 状态不动')
@@ -461,8 +460,11 @@ assert(findAnchor('aaa111').isLive === false, '第二轮才判下播')
 assert(world.toasts.filter((t) => t.t.type === 'offline').length === 1, '第二轮发一次下播通知')
 const offCard = findAnchor("aaa111")
 assert(offCard.title === '' && offCard.viewerCount === 0 && offCard.thumbUrl === '' && offCard.startTime === '', '下播后场次字段清空')
-assert(offCard.tags?.isAdult === true && offCard.tags?.type === 'fan', '房态属性(19+/粉丝团)下播后保留: 它是房间的属性, 不是这一场的')
-assert(offCard.tags?.isPw === false && offCard.tags?.liveType === '', '场次属性(密码房/回放)随场次结束清掉')
+assert(offCard.tags !== null && offCard.tags?.isPw === false && offCard.tags?.liveType === '', 'SOOP 的离线卡: 这一场的属性(密码房/回放)清掉, 而对象不写成 null —— 清的是场次, 不是房间')
+// offPatch 两平台共用, "房间属性留、场次属性清"真正为 Panda 服务(自 ㊌ 起 SOOP 不带房间级 19+/粉丝团), 故按 Panda 那一档形状直调一次
+const pandaOff = watcher.offPatch({ tags: { isAdult: true, isPw: true, type: 'fan', liveType: 'live' } })
+assert(pandaOff.tags?.isAdult === true && pandaOff.tags?.type === 'fan', 'Panda 形状: 房间属性(19+/粉丝团)下播后保留, 它是房间的属性不是这一场的')
+assert(pandaOff.tags?.isPw === false && pandaOff.tags?.liveType === '', 'Panda 形状: 场次属性(密码房/回放)随场次结束清掉')
 
 console.log('B4 已在播不重复通知; 离线房昵称跟进; 状态未知的房回落探针')
 reset()
@@ -503,28 +505,25 @@ await runRound()
 await runRound()
 assert(watcher.soopFailStreak === 0, '列表覆盖到一部分关注时, 兜底房全灭不累计成"平台失明"')
 
-console.log('B6 列表房态三态: 键缺席沿用上一轮, 明确 false 才翻转')
-const NO_ADULT = { ...LIVE_ROW, broad_info: [{ ...LIVE_ROW.broad_info[0], is_adult: undefined }] } // JSON 里就是"没这个键"
-reset()
-world.anchors = [anchor()]
-world.favBody = bodyOf([LIVE_ROW])
-await runRound()
-assert(findAnchor('aaa111').tags.isAdult === true, '第一轮带 is_adult=true: 落 19+')
-assert(watcher.soopBlindAdult === 0, '本轮没有盲读房态的房')
+console.log('B6 SOOP 全链路不取房间级 19+; 密码房旗仍是三态')
+const NO_PW = { ...LIVE_ROW, broad_info: [{ ...LIVE_ROW.broad_info[0], is_password: undefined }] } // JSON 里就是"没这个键"
 reset()
 world.anchors = [anchor({ isLive: true, tags: { isAdult: true, isPw: false, type: '', liveType: 'live' }, startTime: '2026-09-29 22:01:00' })]
-world.favBody = bodyOf([NO_ADULT])
+world.favBody = bodyOf([LIVE_ROW]) // 行里 is_adult: true / is_password: false
 await runRound()
-assert(findAnchor('aaa111').isLive === true && findAnchor('aaa111').tags.isAdult === true, '单轮没带 is_adult: 19+ 沿用上一轮而不是塌成 false')
-assert(watcher.soopBlindAdult === 1, '盲读计数=1')
-assert(world.logInfo.some((m) => m.includes('is_adult')), '盲读只在计数变化时出声一次')
-await runRound()
-assert(world.logInfo.filter((m) => m.includes('is_adult')).length === 1, '同一盲读数值的后续轮不再重复打')
+assert(findAnchor('aaa111').tags.isAdult === false, '列表写着 is_adult=true 也不落卡: 这一路根本不读这一格')
+assert(findAnchor('aaa111').tags.isAdult === false && findAnchor('aaa111').tags.isPw === false, '旧轮次残留的 19+ 被这一轮清掉: 卡片、页头与 TG 自此不画 19+')
+assert(!('soopBlindAdult' in watcher), '盲读诊断随这一格一起绝迹(它当年就是为了分清"平台没带"与"我们读错键", 现已无对象可诊断)')
 reset()
-world.anchors = [anchor({ isLive: true, tags: { isAdult: true, isPw: false, type: '', liveType: 'live' }, startTime: '2026-09-29 22:01:00' })]
-world.favBody = bodyOf([{ ...LIVE_ROW, broad_info: [{ ...LIVE_ROW.broad_info[0], is_adult: false }] }])
+world.anchors = [anchor({ isLive: true, tags: { isAdult: false, isPw: true, type: '', liveType: 'live' }, startTime: '2026-09-29 22:01:00' })]
+world.favBody = bodyOf([NO_PW])
 await runRound()
-assert(findAnchor('aaa111').tags.isAdult === false, '平台明确回 false: 当轮就改口(三态不是"只进不退")')
+assert(findAnchor('aaa111').isLive === true && findAnchor('aaa111').tags.isPw === true, '单轮没带 is_password: 密码房沿用上一轮而不是塌成 false')
+reset()
+world.anchors = [anchor({ isLive: true, tags: { isAdult: false, isPw: true, type: '', liveType: 'live' }, startTime: '2026-09-29 22:01:00' })]
+world.favBody = bodyOf([{ ...LIVE_ROW, broad_info: [{ ...LIVE_ROW.broad_info[0], is_password: false }] }])
+await runRound()
+assert(findAnchor('aaa111').tags.isPw === false, '平台明确回 false: 当轮就改口(三态不是"只进不退")')
 
 // ============ C: 登录态持久化 ============
 console.log('C1 storeCookies 必带期限')
@@ -571,7 +570,7 @@ assert(world.anchors.filter((x) => x.userId === 'ccc333').length === 1, '列表�
 assert(findAnchor('bbb222').nick === '已在库' && findAnchor('bbb222').isLive === false, '已在库的记录不被列表值覆盖(只增不改)')
 const na = findAnchor('aaa111')
 assert(na && na.isLive && na.nick === '主播甲' && na.title === '在播标题', '在播行按列表原值建卡')
-assert(na.viewerCount === 75 && na.startTime === '2026-09-29 22:01:00' && na.tags.isAdult === true, '人数/开播时刻/标签一次到位')
+assert(na.viewerCount === 75 && na.startTime === '2026-09-29 22:01:00' && na.tags.isAdult === false && na.tags.liveType === 'live', '人数/开播时刻一次到位; 导入的出生行也不带房间级 19+(SOOP 全链路不取)')
 assert(na.userImg === 'https://stimg.sooplive.com/LOGO/aa/aaa111/aaa111.jpg' && findAnchor('ccc333').userImg === 'https://stimg.sooplive.com/LOGO/cc/ccc333/ccc333.jpg', '导入的卡在落库那刻就带头像(在播与离线一样, 不必等一轮轮询)')
 assert(na.autoRecord === false, '批量导入不开自录(几十路并发录制=磁盘与风控灾难)')
 assert(world.anchors.filter((x) => x.platform === 'soop').length === 3, '离线房同样入墙(全量导入)')
