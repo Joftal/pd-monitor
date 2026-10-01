@@ -48,12 +48,15 @@
 //   D37 分段时长填 0 = 不分段: 整场一个不带段号的 TS, 合并档/管线第四棒随之收起, 库里与手动合并产物同归「整文件」一类
 //   D38 「关注在播」一屏只留一个现场: 头像坞退役, 读数只剩分段第一档 + 顶栏徽标, 组件/样式/文案/store getter 不留残骸
 //   D39 SOOP 头像按频道 ID 派生并落卡(404 回落兜底, 不画破图); 面板点赞/粉丝只在有数时摆行, 「不适用」那句连死键一起删
-//   D40 SOOP 的 ID 槽只放裸频道名: 「房间」前缀连 ws.roomNo 双语死键一起撤(Panda 的 @ 是可粘贴地址的一部分, 留着)
+//   D40 SOOP 的 ID 槽只放裸频道名: 「房间」前缀连 ws.roomNo 双语死键一起撤(Panda 的 @ 是可粘贴地址的一部分, 留着); 播放页那一格同判据
 //   D41 播放页侧栏「标签」整行撤掉: 同一批房态在页头已有徽标, 普通房只剩「—」占位; 撤行不撤信号(四枚徽标 + isVod 必须在位)
 //   D42 取源回写按字段合并: 这一路看不到的 isAdult 不许写 false(19+ 旗不被抹掉), 看得到的 isPw 照写; Panda 不回收
 //   D43 播放源卡的两个出口各复制各的: 「复制」给屏上那串(本机正在用的), 「复制真实源」从代理地址的 url= 解出官方清单(零请求), 只在真是代理地址时出现; 提示语只归因不警告
 //   D44 SOOP 不带房间级 19+ 标记(㊌): is_adult 全链路不读、applySoopRow 不继承它、已离线房的旧 true 在读库时收敛; 密码房旗仍是三态 + ?? 合并; 下播只清场次属性; Panda 的 19+ 三处消费端都还在
 //   D45 监控节奏三格按平台分家(㊍): 契约只有 Settings.monitor 一份, 老库那三格展开成两格后顶层删净, 闸门逐平台逐格夹, 引擎两条独立定时器(Panda 熔断只压自己那条), 三格住在各自平台节且全局「监控」节连死键一起撤
+//   D46 首轮未落地时顶栏胶囊只报间隔: roundMs 的初值 0 不得当成「上次拉取耗时」报出, 耗时那一截连同 tooltip 一起省略
+//   D47 模板结构当场编译: 每个 .vue 的 <template> 单独过 vue/compiler-sfc, 断链的 v-else-if 不许等 build 才炸
+//   D48 store 的 getter 普查: 零消费者的死 getter 一律撤(㊀「无消费方即删」), 不留"以后可能用"
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -1148,6 +1151,10 @@ checkWithAllowlist(
   assert(!/roomNo/.test(zh) && !/roomNo/.test(en) && !/房间 \{id\}|Room \{id\}/.test(zh + en), 'D40b「房间 {id}」这个带前缀的写法连两语言键一起绝迹(唯一消费方已改口, 死键不留)')
   const prefixed = RENDERER.filter((f) => /t\(['"][\w.]*roomNo['"]/.test(fs.readFileSync(f, 'utf8')))
   assert(prefixed.length === 0, 'D40c 全仓不再有任何一处给 ID 加「房间」前缀', prefixed.map(rel).join(', '))
+  // 同一判据的下一次出现: 播放页侧栏那一格长期无条件替两平台加 @, 而 SOOP 的 @tnwl9630 粘出去不是任何地址
+  const pv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'PlayerView.vue'), 'utf8')
+  assert(/\{\{ isSoop \? userId : '@' \+ userId \}\}/.test(pv), 'D40d 播放页 ID 槽按平台各写各的: SOOP 裸频道名, Panda 留 @')
+  assert(!/>@\{\{\s*userId\s*\}\}/.test(pv), 'D40e 播放页不再有无条件的 @ 前缀(那等于替 SOOP 编一个粘不出去的形状)')
 }
 
 // ============================================================================
@@ -1410,6 +1417,81 @@ checkWithAllowlist(
     /soopNa:/.test(zh) && /soopNa:/.test(en) && /t\('settings\.soopNa'\)/.test(sv),
     'D45zb 决策④的口径原样保留: SOOP 那一节仍只报不改(官方无对应机制), 分家这一刀没顺手把它做成假开关'
   )
+}
+
+// ============================================================================
+// D46 首轮未落地时顶栏胶囊只报间隔 (2026-10-01 第十五轮真机复验查出, 台账 ㊍⑤f)
+//   SOOP 关注列表 TLS 断连后降级逐房扫 718 位(约 20 分钟一轮), 那 20 分钟里胶囊一直读「60s · 0 毫秒」——
+//   roundMs 的初值 0 不是"上一轮花了多久", 它是"还没量过"; 把它报出去等于替一件没发生的事签字。
+//   判据同 ㊇: 结构性没有的那一格不摆行 —— 没量过就只报间隔, tooltip 里那句「上次拉取耗时」一起省略。
+// ============================================================================
+{
+  const nav = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'TopNav.vue'), 'utf8')
+  const lzh = flatten(evalDefault(R('src', 'renderer', 'src', 'i18n', 'locales', 'zh-CN.ts')))
+  const len = flatten(evalDefault(R('src', 'renderer', 'src', 'i18n', 'locales', 'en-US.ts')))
+  assert(/const first = w\.lastRoundAt === null/.test(nav), 'D46a 胶囊先问"首轮落地没有"再决定报不报耗时(判据是 lastRoundAt, 不是 roundMs 的真假)')
+  assert(/first \? t\('nav\.wHeartFirst', \{ sec: interval \}\) : t\('nav\.wHeart', \{ sec: interval, cost \}\)/.test(nav), 'D46b 首轮那一档的胶囊文本只带 {sec}, 耗时那一截整块省略')
+  assert(/first \? t\('nav\.wTipFirst', \{ sec: interval \}\) : t\('nav\.wTip', \{ sec: interval, cost \}\)/.test(nav), 'D46c tooltip 走同一道闸门: 冷却与失败两档共用这一个 heartbeat, 首轮都不许说"上次耗时"')
+  assert('nav.wHeartFirst' in lzh && 'nav.wHeartFirst' in len && ph(lzh['nav.wHeartFirst']) === 'sec' && ph(len['nav.wHeartFirst']) === 'sec', 'D46d wHeartFirst 双语齐且占位符只有 {sec}(这一格里再没有第二个字段可以撒谎)')
+  assert('nav.wTipFirst' in lzh && 'nav.wTipFirst' in len && !/\{cost\}/.test(lzh['nav.wTipFirst'] + len['nav.wTipFirst']), 'D46e wTipFirst 双语齐且不含 {cost}')
+  assert(/nav\.wHeart', \{ sec: interval, cost \}/.test(nav) && /nav\.wTip', \{ sec: interval, cost \}/.test(nav), 'D46f 首轮之后的读数没被牵连(带耗时的两句话照旧在位)')
+}
+
+// ============================================================================
+// D47 模板结构必须当场编译得通过 (2026-10-01 台账 ㊍⑤a)
+//   撤「监控」导航档时连带删掉了 svg 分支链的头一枚, v-else-if 失去相邻 v-if —— 十套脚本与两路 tsc 全绿, 直到 npm run build 才炸,
+//   而 build 既不在 typecheck 链也不在 verify 链, CI 也只跑那两条。这一条把"模板还编译得过吗"变成日常断言, 不再等打包。
+// ============================================================================
+{
+  const { parse, compileTemplate } = createRequire(import.meta.url)('vue/compiler-sfc')
+  const vues = walk(R('src', 'renderer', 'src'), /\.vue$/)
+  const broken = []
+  for (const f of vues) {
+    const src = fs.readFileSync(f, 'utf8')
+    const { descriptor, errors } = parse(src, { filename: f })
+    if (errors.length) {
+      broken.push(`${rel(f)}: 解析失败 ${errors[0].message}`)
+      continue
+    }
+    if (!descriptor.template) continue
+    const res = compileTemplate({
+      source: descriptor.template.content,
+      filename: f,
+      id: path.basename(f),
+      scoped: descriptor.styles.some((s) => s.scoped)
+    })
+    if (res.errors.length) broken.push(`${rel(f)}: ${res.errors.map((e) => e.message || String(e)).join(' | ')}`)
+  }
+  // 探测器本身必须先证明会咬人: 否则"零错误"可能只是"什么都没检查"
+  const probe = compileTemplate({ source: '<div><i v-if="a">x</i><b v-else-if="b">y</b></div><i v-else>z</i>', filename: 'probe.vue', id: 'probe' })
+  assert(probe.errors.length > 0 && /v-else|v-if/.test(probe.errors.map((e) => e.message).join(' ')), 'D47a 变异自检: 断链的 v-else 必须被这套探测判为错误')
+  assert(vues.length >= 20, 'D47b 普查覆盖渲染层每个 .vue', `命中 ${vues.length} 个`)
+  assert(broken.length === 0, 'D47c 现存模板零编译错误(结构错误不再只有 build 才炸)', broken.join('\n         '))
+}
+
+// ============================================================================
+// D48 store 的 getter 普查 (2026-10-01 复核: store.offlineAnchors 全仓零消费者, 按 ㊀「无消费方即删」撤除)
+//   它和 ㊆ 那次撤坞是同一条规则的两种尺寸。getter 是四处残骸里最安静的一种: 没人调用也就不出错, 只在 store 里替一个已经不存在的界面占着名额。
+// ============================================================================
+{
+  const appFile = R('src', 'renderer', 'src', 'stores', 'app.ts')
+  const appSrc = fs.readFileSync(appFile, 'utf8')
+  const strip = (s) => s.replace(/\/\*\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+  const gi = appSrc.indexOf('getters: {')
+  const body = appSrc.slice(gi, appSrc.indexOf('actions:', gi))
+  const names = [...body.matchAll(/^ {4}([A-Za-z_]\w*):/gm)].map((m) => m[1])
+  const others = RENDERER.filter((f) => path.resolve(f) !== path.resolve(appFile)).map((f) => strip(fs.readFileSync(f, 'utf8')))
+  const dead = []
+  for (const n of names) {
+    // store 内部自引用也算消费者, 但要先抹掉它自己的定义那一行
+    const selfRefs = strip(appSrc).replace(new RegExp(`^ {4}${n}:`, 'm'), '       :')
+    const used = others.some((t) => new RegExp(`\\b${n}\\b`).test(t)) || new RegExp(`\\b${n}\\b`).test(selfRefs)
+    if (!used) dead.push(n)
+  }
+  assert(names.length >= 5, 'D48a 普查解析到合理数量的 getter(少于 5 个说明解析器瞎了, 而不是真没有死键)', `names=${names.length}`)
+  assert(dead.length === 0, 'D48b 每个 getter 都真有消费者(零消费者的死 getter 一律撤, 不留"以后可能用")', dead.join(', '))
+  const remnants = SRC_ALL.filter((f) => /offlineAnchors/.test(fs.readFileSync(f, 'utf8')))
+  assert(remnants.length === 0, 'D48c offlineAnchors 整体绝迹(定义与调用一处不留)', remnants.map(rel).join(', '))
 }
 
 // ============================================================================
