@@ -31,8 +31,11 @@ export default {
     wIdleTip: '这一方还没有关注的主播, 轮询无事可做',
     // 顶栏胶囊只报"状态", 数值与原因进 tooltip: 完整错误码(净::ERR_...)会把胶囊撑到 230px 还读不完
     wHeart: '{sec}s · {cost}',
+    // 首轮还没落地: 那一格里只有间隔是真值, 耗时那半截省略(把初值 0 报成「上次耗时」就是撒谎)
+    wHeartFirst: '{sec}s',
     wFailed: '本轮失败',
-    wTip: '每 {sec} 秒向平台拉取一次数据 · 上次拉取耗时 {cost}'
+    wTip: '每 {sec} 秒向平台拉取一次数据 · 上次拉取耗时 {cost}',
+    wTipFirst: '每 {sec} 秒向平台拉取一次数据 · 首轮尚未完成'
   },
   ws: {
     viewLive: '在播关注',

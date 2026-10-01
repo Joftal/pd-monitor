@@ -28,8 +28,11 @@ export default {
     wIdle: 'Idle',
     wIdleTip: 'No streamers followed on this platform yet',
     wHeart: '{sec}s · {cost}',
+    // Until the first round lands only the interval is a fact; the cost half is dropped (the initial 0 is not "what the last round took")
+    wHeartFirst: '{sec}s',
     wFailed: 'Round failed',
-    wTip: 'Pulls site data every {sec}s · last round took {cost}'
+    wTip: 'Pulls site data every {sec}s · last round took {cost}',
+    wTipFirst: 'Pulls site data every {sec}s · first round not finished yet'
   },
   ws: {
     viewLive: 'Live following',

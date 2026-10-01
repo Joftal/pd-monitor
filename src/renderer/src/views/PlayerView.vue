@@ -565,7 +565,7 @@ async function manualRefresh() {
             </AvatarImg>
             <div class="min-w-0 flex-1">
               <div class="text-[14px] font-bold text-ink1 truncate">{{ nick }}</div>
-              <div class="text-[11px] text-ink3 truncate">@{{ userId }}</div>
+              <div class="text-[11px] text-ink3 truncate">{{ isSoop ? userId : '@' + userId }}</div>
             </div>
             <PlatTag :platform="platform" size="sm" surface="onsurf" class="shrink-0" />
           </div>

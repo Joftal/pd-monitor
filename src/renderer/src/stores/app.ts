@@ -98,7 +98,6 @@ export const useAppStore = defineStore('app', {
     srcCache: []
   }),
   getters: {
-    offlineAnchors: (s) => s.anchors.filter((a) => !a.isLive),
     activeRecs: (s) => s.recordings.filter((r) => r.status === 'recording' || r.status === 'remuxing'),
     isRecording: (s) => (platform: Platform, userId: string) =>
       s.recordings.some((r) => r.platform === platform && r.userId === userId && (r.status === 'recording' || r.status === 'remuxing')),

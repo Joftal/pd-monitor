@@ -69,15 +69,22 @@ const watcherState = computed(() => {
   const w = store.watcher?.byPlatform?.[plat.value]
   if (!w) return { tone: 'idle', text: '—', tip: t('nav.wUnknown') }
   const interval = store.settings?.monitor?.[plat.value]?.pollIntervalSec ?? '?'
+  // 首轮还没落地: lastRoundAt 为 null 而 roundMs 还是初值 0 —— 把 0 报成「上次拉取耗时」是读数撒谎,
+  // 这一档只报间隔(设计稿 ㊍⑤f; 判据同 ㊇「没数的那一格不摆行」)
+  const first = w.lastRoundAt === null
   const cost = w.roundMs < 1000 ? `${w.roundMs} ${t('common.ms')}` : `${(w.roundMs / 1000).toFixed(1)} ${t('common.sec')}`
-  const heartbeat = t('nav.wTip', { sec: interval, cost })
+  const heartbeat = first ? t('nav.wTipFirst', { sec: interval }) : t('nav.wTip', { sec: interval, cost })
   if (w.circuitOpen) return { tone: 'bad', text: t('nav.wCooling'), tip: `${w.message} · ${heartbeat}` }
   if (!w.running) return { tone: 'idle', text: t('nav.wStopped'), tip: t('nav.wStoppedTip') }
   if (!w.monitored) return { tone: 'idle', text: t('nav.wIdle'), tip: t('nav.wIdleTip') }
   // message 非空但没熔断 = 这一站在跑但整轮看不见(拉取连续失败): 绿点继续呼吸就是骗人。
   // 胶囊只写「本轮失败」四字: 完整错误码既读不完也会把顶栏撑破最小窗宽
   if (w.message) return { tone: 'warn', text: t('nav.wFailed'), tip: `${w.message} · ${heartbeat}` }
-  return { tone: 'ok', text: t('nav.wHeart', { sec: interval, cost }), tip: heartbeat }
+  return {
+    tone: 'ok',
+    text: first ? t('nav.wHeartFirst', { sec: interval }) : t('nav.wHeart', { sec: interval, cost }),
+    tip: heartbeat
+  }
 })
 
 const keyword = computed({
