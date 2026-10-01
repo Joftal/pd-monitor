@@ -14,7 +14,8 @@ import { logger } from './logger'
 import { mt } from '../i18n'
 
 // ============ 录制引擎 ============
-// - ffmpeg -c copy 分段录制; 直接使用长效 IVS 变体地址(master 一次性: 源缓存复用)
+// - ffmpeg -c copy 拉流; 直播按 splitSeconds 切 TS 分段, 填 0 则整场一个 TS(与回放同一支单文件直出)
+// - 直接使用长效 IVS 变体地址(master 一次性: 源缓存复用)
 // - 意外退出过"直播探针": 真下播=done; 仍在播=error(按策略不自动换源, 提示手动)
 // - 停滞检测(60s 零字节) + 磁盘监控(30s) + 停止: stdin 写 'q' 优雅退出; 可选 remux
 // ==================================
@@ -191,6 +192,12 @@ class Task implements RecTask {
     return path.join(this.dirPath, `${this.baseName}_vod.ts`)
   }
 
+  /** 不分段(splitSeconds=0)的直播产出: 整场一个 TS, 名字不带 _004d 后缀 ——
+   *  SEG_RE 据此把它认成"整文件"而不是"某一段", 手动合并那侧也就不会把它喂进 concat */
+  get liveSingleFile(): string {
+    return path.join(this.dirPath, `${this.baseName}.ts`)
+  }
+
   private push(): void {
     recorder.emitUpdate()
   }
@@ -228,6 +235,9 @@ class Task implements RecTask {
 
   private spawnFfmpeg(m3u8: string): void {
     const cfg = store.getSettings()
+    // 0 是「不分段」这一档, 不能按旧写法 `cfg.splitSeconds || 900` 一并兜成 900;
+    // 只有缺键/非数值(老库没这个字段)才回默认 900
+    const segSec = Number.isFinite(cfg.splitSeconds) ? cfg.splitSeconds : 900
     const args = [
       '-y',
       '-loglevel', 'error',
@@ -250,13 +260,17 @@ class Task implements RecTask {
       // 回放(VOD)下载: 单 TS 文件直出, 不走直播分段; -progress 管道回报已下载媒体时长
       args.push('-nostats', '-progress', 'pipe:1')
       args.push('-i', m3u8, '-map', '0', '-c', 'copy', this.vodOutFile)
+    } else if (segSec === 0) {
+      // 不分段: 直播整场一个 TS 直出。仍然不直写 MP4 —— MP4 的 moov 在收尾才落,
+      // 中途被强杀(崩溃/断电/杀进程)就是一个开不了的废文件; TS 是追加式封装, 尾巴坏了前面照样能放
+      args.push('-i', m3u8, '-map', '0', '-c', 'copy', this.liveSingleFile)
     } else {
       args.push(
         '-i', m3u8,
         '-map', '0',
         '-c', 'copy',
         '-f', 'segment',
-        '-segment_time', String(Math.max(60, cfg.splitSeconds || 900)),
+        '-segment_time', String(Math.max(60, segSec)),
         '-segment_format', 'mpegts',
         '-segment_start_number', String(this.segIndex || 1),
         '-reset_timestamps', '1',
@@ -504,7 +518,13 @@ class Task implements RecTask {
 
     if (status === 'done')
       sendToast(
-        { type: 'rec', platform: this.platform, title: mt('rec.toastDone', { nick: this.nick }), body: mt('rec.segs', { n: this.files.length }) },
+        {
+          type: 'rec',
+          platform: this.platform,
+          title: mt('rec.toastDone', { nick: this.nick }),
+          // 单文件那一档说「1 个分段」是谎话: 只有一个产物时按文件计
+          body: this.files.length === 1 ? mt('rec.fileOne') : mt('rec.segs', { n: this.files.length })
+        },
         { ev: 'recDone', ctx: { anchor: tgAnchorOf(this), recSec: Math.round(((this.endedAt ?? Date.now()) - this.startedAt) / 1000), recMb: this.bytes / 1024 ** 2, files: this.files } }
       )
     if (status === 'error')

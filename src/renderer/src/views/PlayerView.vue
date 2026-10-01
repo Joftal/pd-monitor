@@ -112,9 +112,15 @@ const outText = computed(() => {
   const s = st.value
   if (!s) return '—'
   if (!s.autoMp4) return t('player.outTs')
-  return s.mergeMp4 ? t('player.outMerge') : t('player.outMp4')
+  // 不分段就没有分段可合: 合并那枚设置即使开着也不参与收尾, 读数不能替它说话
+  return s.mergeMp4 && s.splitSeconds !== 0 ? t('player.outMerge') : t('player.outMp4')
 })
-const segText = computed(() => (st.value?.splitSeconds ? t('player.segN', { n: Math.round(st.value.splitSeconds / 60) }) : '—'))
+// 0 是「不分段」这一档, 不能和"设置还没拉到"一起糊成「—」
+const segText = computed(() => {
+  const s = st.value?.splitSeconds
+  if (s === undefined || s === null) return '—'
+  return s === 0 ? t('player.segOff') : t('player.segN', { n: Math.round(s / 60) })
+})
 /** 落盘目录 = 录制根/平台/主播名(房间 ID), 与主进程 recorder.start 同一把尺(sanitizePathPart);
  *  这里只是"将要写到哪"的预告, 根目录未设置时显示默认根 */
 const dirText = computed(() => `…/${platform}/${sanitizePathPart(nick.value) || t('common.unnamed')}(${userId})/`)

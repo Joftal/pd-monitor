@@ -20,6 +20,10 @@ const NUM_RANGE: Partial<Record<keyof Settings, readonly [number, number]>> = {
   diskLimitGb: [0.5, 100]
 }
 
+/** 允许取 0 的数值项: 0 不是"越界被夹到区间下界", 而是"这一档关掉"的显式取值
+ *  (splitSeconds = 0 → 不分段, 整场录成单文件)。负数仍然走夹取, 非 0 小值仍然抬到 60 */
+const ZERO_OK: readonly (keyof Settings)[] = ['splitSeconds']
+
 /** 联合类型设置项的合法取值 */
 const ENUMS: Partial<Record<keyof Settings, readonly string[]>> = {
   theme: ['light', 'dark'],
@@ -78,7 +82,7 @@ export function sanitizeSettingsPatch(input: unknown): GuardedPatch {
         continue
       }
       const r = NUM_RANGE[key]
-      out[k] = r ? Math.min(r[1], Math.max(r[0], v)) : v
+      out[k] = r ? (v === 0 && ZERO_OK.includes(key) ? 0 : Math.min(r[1], Math.max(r[0], v))) : v
     } else if (want === 'boolean') {
       if (typeof v !== 'boolean') dropped.push(`${k}(应为布尔)`)
       else out[k] = v

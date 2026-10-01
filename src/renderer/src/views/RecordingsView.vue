@@ -5,7 +5,7 @@ import { useRouter } from 'vue-router'
 import { api } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useI18n } from 'vue-i18n'
-import { baseName, fmtBytes, fmtClock, fmtDur, fmtDurHMS } from '@/utils/media'
+import { baseName, fmtBytes, fmtClock, fmtDur, fmtDurHMS, isSingleFileTask } from '@/utils/media'
 import LibrarySection from '@/components/LibrarySection.vue'
 import PlatTag from '@/components/PlatTag.vue'
 import { platformName, roomKey, type Platform, type RecTask } from '@shared/types'
@@ -86,10 +86,15 @@ const diskCaption = computed(() => {
   return diskLow.value ? t('rec.diskWarn') : t('rec.diskFull')
 })
 const splitMin = computed(() => Math.round((store.settings?.splitSeconds ?? 900) / 60))
-// 分段时长只作用于直播管线(VOD 是单 TS 直出, recorder.ts 的 spawn 两条分支写死的),
+// 分段时长只作用于直播管线(VOD 是单 TS 直出, recorder.ts 的 spawn 分支写死的),
 // 全是回放时还挂「分段 N 分钟/段」就是假信息 → 这一栏留空, 由模板收掉分隔线。
+// 不分段(splitSeconds=0)时它同样是一句假话, 改口成"整场单文件"。
 // 磁盘状态不在这里复读: 概览条第三格已经给了 GB 数, 低于阈值另有页头告警枚
-const secCaption = computed(() => (active.value.some((task) => !task.vod) ? t('rec.segInfo', { min: splitMin.value }) : ''))
+const splitOff = computed(() => (store.settings?.splitSeconds ?? 900) === 0)
+const secCaption = computed(() => {
+  if (!active.value.some((task) => !task.vod)) return ''
+  return splitOff.value ? t('rec.segOff') : t('rec.segInfo', { min: splitMin.value })
+})
 
 // ---- VOD 进度 ----
 function vodTotalLabel(task: RecTask): string {
@@ -122,7 +127,9 @@ function pipeStages(task: RecTask): PipeStage[] {
     { key: 'stopping', label: t('rec.pipeStop') }
   ]
   if (st?.autoMp4) out.push({ key: 'remux', label: t('rec.pipeRemux') })
-  if (!task.vod && st?.autoMp4 && st?.mergeMp4) out.push({ key: 'merge', label: t('rec.pipeMerge') })
+  // 合并棒只在真会跑合并时挂出来: 回放没有分段, 而「不分段」那一档整场就一个文件 ——
+  // finalize 的合并分支(multi-segment 门槛)永不进入, 把它画成第四棒 = 承诺一个不会发生的阶段
+  if (!task.vod && st?.autoMp4 && st?.mergeMp4 && st?.splitSeconds !== 0) out.push({ key: 'merge', label: t('rec.pipeMerge') })
   return out
 }
 /** 当前所处阶段下标; stage 缺失(旧推送而在)或清单中找不到(录制中改了设置) → 维持"进行中"位 */
@@ -301,7 +308,7 @@ const savePath = computed(() => store.settings?.savePath || '')
             </div>
             <div class="text-right shrink-0 tabular-nums">
               <div class="text-[22px] font-extrabold leading-none text-ink1">{{ fmtBytes(task.bytes) }}</div>
-              <div class="text-[10.5px] text-ink3 mt-1">{{ task.vod ? t('rec.writtenVod') : t('rec.writtenLive', { n: task.files.length }) }}</div>
+              <div class="text-[10.5px] text-ink3 mt-1">{{ task.vod || isSingleFileTask(task.currentFile) ? t('rec.writtenOne') : t('rec.writtenLive', { n: task.files.length }) }}</div>
             </div>
             <div class="text-right shrink-0 tabular-nums min-w-[76px]">
               <div class="text-[22px] font-extrabold leading-none text-ink1">

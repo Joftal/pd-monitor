@@ -58,12 +58,21 @@ export function fmtLiveDuration(startTime: string | undefined, t: (key: string, 
   return t(h > 0 ? 'card.h' : 'card.m', { h, m })
 }
 
-/** 已合并单文件: 仅一个 MP4 且非回放, 文件名无 _NNNN/_vod 分段后缀 */
-export function isMergedTask(h: RecHistoryItem): boolean {
+/** 整文件: 盘上就一个 MP4、不带 _NNNN/_vod 分段后缀 —— 手动合并的产物与「不分段」录出来的
+ *  成品是同一个形状(合并时本就要合成单文件, 不合并时直接落单文件), 库里归一类 */
+export function isWholeTask(h: RecHistoryItem): boolean {
   const mp4s = (h.files || []).filter((f) => f.toLowerCase().endsWith('.mp4'))
   if (h.vod || mp4s.length !== 1 || (h.files || []).length !== 1) return false
   const name = mp4s[0].split(/[\\/]/).pop() || ''
   return !/_(\d{4}|vod)\.mp4$/i.test(name)
+}
+
+/** 进行中的任务是不是单文件直出: 当前文件名不带 _NNNN 段号。
+ *  读的是盘上形状而不是设置值 —— 中途改「分段时长」不会让已经在写的文件变成两段;
+ *  还没有文件时(开录头两秒 stat 未跑)如实回 false, 交给「N 段」那句, 不猜 */
+export function isSingleFileTask(currentFile: string): boolean {
+  const name = baseName(currentFile || '')
+  return !!name && !/_(\d{4})\.(ts|mp4)$/i.test(name)
 }
 
 /** 可手动合并: 分段(MP4≥2 或 TS≥2) 且不存在已合并整文件 */

@@ -112,6 +112,12 @@ function clampNum(v: unknown, min: number, max: number, fallback: number): numbe
   return Math.min(max, Math.max(min, n))
 }
 
+/** 分段时长的 0 是「不分段」这一档, 不是越界值: 夹取只作用于非 0(清空/NaN 回默认 900, 小数抬到 60) */
+function clampSplit(v: unknown): number {
+  const n = typeof v === 'number' && !Number.isNaN(v) ? v : 900
+  return n === 0 ? 0 : Math.min(7200, Math.max(60, n))
+}
+
 async function pickDir() {
   const d = await api.settingsSelectDir()
   if (d && form.value) form.value.savePath = d
@@ -141,7 +147,7 @@ async function save() {
       tgProxy: (f.tgProxy || '').trim(),
       pollIntervalSec: clampNum(f.pollIntervalSec, 5, 600, 30),
       requestGapMs: clampNum(f.requestGapMs, 300, 10000, 1200),
-      splitSeconds: clampNum(f.splitSeconds, 60, 7200, 900),
+      splitSeconds: clampSplit(f.splitSeconds),
       diskLimitGb: clampNum(f.diskLimitGb, 0.5, 100, 1)
     }
     // 只提交真改过的键(带投影键已由 dirtyKeys 排除): 全量提交等于拿这份快照
@@ -621,7 +627,7 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
                 <div class="text-[13px] font-medium text-ink1">{{ t('settings.splitSec') }}</div>
                 <div class="text-[11.5px] text-ink3 mt-0.5">{{ t('settings.splitSecDesc') }}</div>
               </div>
-              <n-input-number v-model:value="form.splitSeconds" :min="60" :max="7200" :step="60" size="small" class="!w-28" />
+              <n-input-number v-model:value="form.splitSeconds" :min="0" :max="7200" :step="60" size="small" class="!w-28" />
             </div>
             <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-line/40">
               <div>
@@ -647,14 +653,14 @@ const soopAccount = computed(() => store.accounts?.soop ?? null)
                 </div>
                 <n-switch size="small" v-model:value="form.deleteTs" />
               </div>
-              <div :class="tileCls" v-if="form.autoMp4" role="switch" :aria-checked="form.mergeMp4" tabindex="0" @click="tileClick($event, 'mergeMp4')" @keydown.space.prevent="tileKey('mergeMp4')" @keydown.enter="tileKey('mergeMp4')">
+              <div :class="tileCls" v-if="form.autoMp4 && form.splitSeconds !== 0" role="switch" :aria-checked="form.mergeMp4" tabindex="0" @click="tileClick($event, 'mergeMp4')" @keydown.space.prevent="tileKey('mergeMp4')" @keydown.enter="tileKey('mergeMp4')">
                 <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.mergeMp4') }}</div>
                   <div class="text-[10.5px] text-ink3">{{ t('settings.mergeMp4D') }}</div>
                 </div>
                 <n-switch size="small" v-model:value="form.mergeMp4" />
               </div>
-              <div :class="tileCls" v-if="form.autoMp4 && form.mergeMp4" role="switch" :aria-checked="form.mergeDeleteSegments" tabindex="0" @click="tileClick($event, 'mergeDeleteSegments')" @keydown.space.prevent="tileKey('mergeDeleteSegments')" @keydown.enter="tileKey('mergeDeleteSegments')">
+              <div :class="tileCls" v-if="form.autoMp4 && form.mergeMp4 && form.splitSeconds !== 0" role="switch" :aria-checked="form.mergeDeleteSegments" tabindex="0" @click="tileClick($event, 'mergeDeleteSegments')" @keydown.space.prevent="tileKey('mergeDeleteSegments')" @keydown.enter="tileKey('mergeDeleteSegments')">
                 <div class="min-w-0 flex-1">
                   <div class="text-[12.5px] font-semibold text-ink1 leading-snug">{{ t('settings.mergeDel') }}</div>
                   <div class="text-[10.5px] text-ink3">{{ t('settings.mergeDelD') }}</div>

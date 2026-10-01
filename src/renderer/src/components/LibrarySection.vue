@@ -7,7 +7,7 @@ import CinemaOverlay from '@/components/CinemaOverlay.vue'
 import PlatFilter from '@/components/PlatFilter.vue'
 import PlatTag from '@/components/PlatTag.vue'
 import { useI18n } from 'vue-i18n'
-import { fmtBytes, fmtDur, isMergedTask, mergeableTask } from '@/utils/media'
+import { fmtBytes, fmtDur, isWholeTask, mergeableTask } from '@/utils/media'
 import { isPlatform, platformName, roomKey, type Platform, type RecHistoryItem } from '@shared/types'
 
 // ============ 库(录制页第三段) ============
@@ -77,18 +77,18 @@ const platScoped = computed(() =>
 )
 
 // ---- 筛选 + 搜索 + 分组 ----
-type FilterKey = 'all' | 'live' | 'vod' | 'merged' | 'error'
+type FilterKey = 'all' | 'live' | 'vod' | 'whole' | 'error'
 const filterChip = ref<FilterKey>('all')
 const keyword = ref('')
 const chips = computed(() => [
   { key: 'all' as const, label: t('rec.fAll') },
   { key: 'live' as const, label: t('rec.fLive') },
   { key: 'vod' as const, label: t('rec.fVod') },
-  { key: 'merged' as const, label: t('library.fMerged') },
+  { key: 'whole' as const, label: t('library.fWhole') },
   { key: 'error' as const, label: t('rec.fErr') }
 ])
 
-const isMerged = isMergedTask
+const isWhole = isWholeTask
 
 const filtered = computed(() => {
   let rows = platScoped.value
@@ -96,7 +96,7 @@ const filtered = computed(() => {
   if (f === 'live') rows = rows.filter((h) => !h.vod)
   else if (f === 'vod') rows = rows.filter((h) => h.vod)
   else if (f === 'error') rows = rows.filter((h) => h.status === 'error')
-  else if (f === 'merged') rows = rows.filter(isMerged)
+  else if (f === 'whole') rows = rows.filter(isWhole)
   const k = keyword.value.trim().toLowerCase()
   if (k) rows = rows.filter((h) => h.title.toLowerCase().includes(k) || h.nick.toLowerCase().includes(k) || h.userId.toLowerCase().includes(k))
   return rows

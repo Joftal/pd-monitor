@@ -178,6 +178,7 @@ export type NotifyMatrix = Record<Platform, NotifyRules>
 
 export interface Settings {
   savePath: string
+  /** TS 分段时长(秒); 0 = 不分段, 整场录成单个 TS(与回放同一支单文件直出, 仍不直写 MP4) */
   splitSeconds: number
   autoMp4: boolean
   deleteTs: boolean
