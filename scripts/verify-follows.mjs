@@ -34,6 +34,8 @@
 //   F2  页面实读的号同样进缓存: 第二次取流不再读页; 号过期(>90s)才回落到读整页
 //   F4  复用的号没成功 → 只回读一页定性, 代价有上界(离线定性 / 同号原样回报 / 换场用新号重走一次)
 //   F5  播放页微缓存: TTL 内复用 + 并发合流, fresh=true 必穿透(探针那一发要的是新读数)
+//   G1  ㊓① 作废纪元: invalidatePlay 之后在飞的那条链不复活缓存(带密那一格同摘), 换号清表同规则
+//   G4  ㊓② seedPlay: 续录复用中断探针那一发 = 下一次取流零请求; 坏源不种, 种子清判死计数
 // ============================================================================
 import { createRequire } from 'module'
 import * as fs from 'fs'
@@ -372,6 +374,8 @@ function reset() {
   soopApi.bnoCache.clear()
   soopApi.pageCache.clear()
   soopApi.pageInflight.clear()
+  // ㊓① 源缓存/在飞链/判死计数同样是跨场景状态(清缓存即纪元整体前移, 顺带挡住上一场的在飞链)
+  soopApi.clearPlayCache()
 }
 
 const anchor = (over = {}) => ({
@@ -946,6 +950,64 @@ reset()
 {
   const [fA, fB] = await Promise.all([soopApi.fetchPageMeta('hhh888'), soopApi.fetchPageMeta('hhh888')])
   assert(pageHits('hhh888') === 1 && fA.broadNo === fB.broadNo, '并发两问合一次请求(整页是唯一昂贵的一步)', `页=${pageHits('hhh888')}`)
+}
+
+// ============ G: ㊓①② SOOP 的作废纪元与源种子(与 Panda 同策, 这里走真 soop.ts) ============
+// 审计形状(R4): invalidatePlay/clearPlayCache 只删了 playCache, 而一条先于它发出的链回来照旧 set ——
+// 用户那边就是"下播的房还能秒开 / 换号后仍在用旧账号签发的源"。G 段把这三个口都数出来。
+console.log('G1 在飞的取流链遇到 invalidatePlay: 结果照还给调用方, 但不落缓存')
+reset()
+{
+  const gP = soopApi.getPlayCached('ggg1', '', true) // 链已出发(请求在飞)
+  assert(soopApi.playInflight.has('ggg1'), 'G1a 出发时在飞表里有它(否则下一句没有对照)')
+  soopApi.invalidatePlay('ggg1') // 出发之后才被作废
+  assert(!soopApi.playInflight.has('ggg1'), 'G1b 作废顺手把在飞那条摘掉: 新 caller 不许合进一条注定作废的链')
+  const gR = await gP
+  assert(gR.ok === true, 'G1c 调用方仍拿到源(这一发不白跑)')
+  assert(!soopApi.cachedSourceIds().includes('soop:ggg1'), 'G1d 但缓存没有被复活(纪元不合)', soopApi.cachedSourceIds().join(','))
+  world.fetches.length = 0
+  await soopApi.getPlayCached('ggg1')
+  assert(apiHits('live') === 1, 'G1e 下一次取流重走整链(缓存里确实是空的)', `api=${apiHits('live')}`)
+}
+
+console.log('G2 带密码那一条同样在作废时被摘掉(在飞键有两个形状)')
+reset()
+{
+  const gP = soopApi.getPlayCached('hh1', 'pw123', true)
+  assert(soopApi.playInflight.has('hh1#pw'), 'G2a 在飞键 = 频道#密码槽')
+  soopApi.invalidatePlay('hh1')
+  assert(!soopApi.playInflight.has('hh1#pw'), 'G2b 作废把带密那一格一起摘(留一半=复活走了后门)')
+  await gP
+  assert(soopApi.playCache.size === 0, 'G2c 结果不落缓存')
+}
+
+console.log('G3 换号/登出(clearPlayCache): 所有在飞链一律不许把旧会话签发的源写回来')
+reset()
+{
+  const gA = soopApi.getPlayCached('ii1', '', true)
+  const gB = soopApi.getPlayCached('ii2', '', true)
+  soopApi.clearPlayCache()
+  const [rA, rB] = await Promise.all([gA, gB])
+  assert(rA.ok === true && rB.ok === true, 'G3a 两发的结果照还(不吞调用方那一发)')
+  assert(soopApi.cachedSourceIds().length === 0, 'G3b 两枚都不落缓存: 整表纪元前移, 不靠逐房补刀', soopApi.cachedSourceIds().join(','))
+}
+
+console.log('G4 seedPlay: 续录复用中断探针那一发(省掉第二条完整链), 坏源不种')
+reset()
+{
+  const pack = await soopApi.getPlayCached('jj1', '', true)
+  assert(pack.ok === true && soopApi.cachedSourceIds().includes('soop:jj1'), 'G4a 先正常拉一枚进缓存')
+  soopApi.deadStreak.set('jj1', 1) // 上一源被数过一次"上游已死"
+  soopApi.invalidatePlay('jj1')
+  soopApi.seedPlay('jj1', pack)
+  world.fetches.length = 0
+  const hit = await soopApi.getPlayCached('jj1')
+  assert(world.fetches.length === 0 && hit.m3u8 === pack.m3u8 && hit.fetchedAt > 0, 'G4b 种子命中: 下一次取流零请求(整链不再重打), 且带打戳', `req=${world.fetches.length}`)
+  soopApi.deadStreak.set('kk1', 1) // 这一房的上游刚被数过一次"已死"
+  soopApi.seedPlay('kk1', pack)
+  assert(soopApi.cachedSourceIds().includes('soop:kk1') && !soopApi.deadStreak.has('kk1'), 'G4c 种子带打戳并清掉判死计数(新源在手, 旧账作废)')
+  soopApi.seedPlay('jj2', { ...pack, ok: false })
+  assert(!soopApi.cachedSourceIds().includes('soop:jj2'), 'G4d 坏源不许种(种子只认真拿到手的源)')
 }
 
 // ---------- 汇总 ----------

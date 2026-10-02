@@ -15,6 +15,11 @@
 //   T26 ㊍ 监控配置分家: 预取/轮询间隔各按平台那一格 —— 邻居的开关与熔断都带不走本平台
 //   T27 ㊑ Panda 轮询换真值源: 一发站内关注列表判全部关注(下播两轮/列表不可用即回落/会话两道门),
 //       全站榜改按需(进发现页才拉 + 60 秒复用 + 熔断期拒发 + 失败保留旧快照)
+//   T28 ㊒② SOOP 降级探针的每轮预算与环形轮换
+//   T29 ㊓①② 作废纪元门(在飞链不许复活缓存)与 seedPlay 复用(种子命中零请求)
+//   T30 ㊓⑥ 立即刷新的每平台 8 秒下限     T31 ㊓⑤ login_info 探针的判死节流(netFail 不节流)
+//   T32 ㊓④ 全站榜分页单飞锁(兜底轮与大厅共用) + 失败语义的两种吃法
+//   T33 ㊓⑦ 预取补扫改到首轮之后、按真值过滤、跳过已有源的房
 // ============================================================================
 import { createRequire } from 'module'
 import * as fs from 'fs'
@@ -53,6 +58,9 @@ const world = {
   // ㊑ 会话证明: login_info 的替身。null=服务端说没登录; watchLoginInfo=null 时"未证明"的罐会被问一次
   loginInfo: { userInfo: { isLogin: true } },
   liCalls: [],   // /v1/member/login_info 请求记录(冷启动那道门补问的代价: 每 30 秒最多一发)
+  // ㊓⑤ 那一问的两种答案要分开: 服务端明确"没登录"(可节流) vs 请求本身失败(不可节流)
+  liThrow: false,
+  liveLoginInfo: true, // false ⇒ 全站榜响应不再带 loginInfo(会话判死期的列表形态)
   liveFail: false, // true ⇒ /v1/live 直接抛错(大厅按需刷新要证的"拉不到 ≠ 全站没人播")
   playCalls: [],   // /v1/live/play 真实发起记录(判定"是否重新拉源"的唯一依据)
   liveCalls: [],   // /v1/live 分页请求记录(T16 复用性断言 + ㊑"轮询不再搭全站榜的车")
@@ -62,6 +70,7 @@ const world = {
   soopThrow: {},   // channel -> bool: SOOP 取页抛错(T24 平台隔离: 单平台故障不得连坐)
   soopCalls: [],   // 任何落到 SOOP 替身的调用(断言 Panda 场景零越界)
   soopFresh: [],   // 以 fresh=true 发出的取页(㊒④: 探针那一发必须是新页, 微缓存不许拦它)
+  soopCached: [],  // 替身手上"已有有效源"的频道(㊓⑦ 首轮补扫要跳过它们)
   recStarts: [],   // recorder.start 记录
   recStops: [],    // recorder.stop 记录
   recStartThrow: false, // true 时 recorder.start 抛错(T21 自录失败不伤链路)
@@ -92,6 +101,7 @@ const fakeFetch = async (url, init = {}) => {
   if (u.hostname === 'api.pandalive.co.kr' && u.pathname === '/v1/member/login_info') {
     // ㊑ 「罐在但没证明」那一问: 答案是没登录 → 本轮落回全站榜那条链; 是要的 → 预言机立刻上车
     world.liCalls.push({ at: Date.now() })
+    if (world.liThrow) throw new Error('boom(sim)') // 请求失败 = netFail: 读不到 ≠ 判死, 不得被节流
     return fakeRes(200, { loginInfo: world.loginInfo })
   }
   if (u.hostname === 'api.pandalive.co.kr' && u.pathname === '/v1/live') {
@@ -99,7 +109,7 @@ const fakeFetch = async (url, init = {}) => {
     if (world.liveFail) throw new Error('boom') // 普通网络错误: 刷新方必须"沿用旧快照", 不空表
     if (world.latency.liveMs) await new Promise((r) => setTimeout(r, world.latency.liveMs))
     const list = Object.keys(world.inList).filter((id) => world.inList[id]).map((id) => liveItem({ userId: id, userNick: `nick_${id}` }))
-    return fakeRes(200, { result: true, list, loginInfo: { userInfo: { isLogin: true } } })
+    return fakeRes(200, { result: true, list, loginInfo: world.liveLoginInfo ? { userInfo: { isLogin: true } } : undefined })
   }
   if (u.hostname === 'api.pandalive.co.kr' && u.pathname === '/v1/member/bj') {
     const userId = new URLSearchParams(init.body || '').get('userId')
@@ -206,7 +216,10 @@ const mocks = {
         world.soopCalls.push('fetchPlay:' + channel)
         return { ok: false, error: 'soop stub' }
       },
-      invalidatePlay: (channel) => world.soopCalls.push('invalidatePlay:' + channel)
+      invalidatePlay: (channel) => world.soopCalls.push('invalidatePlay:' + channel),
+      // ㊓ 新增的两格: 替身必须同契约, 否则首轮补扫一碰 cachedSourceIds 就 TypeError(静默把场景打歪)
+      seedPlay: (channel) => world.soopCalls.push('seedPlay:' + channel),
+      cachedSourceIds: () => (world.soopCached || []).map((c) => `soop:${c}`)
     }
   },
   './recorder': {
@@ -282,6 +295,9 @@ async function reset() {
   // ㊒ SOOP 自己的退避与轮转游标也属跨场景状态: 不清就会让下一场开头几个断言跑在上一场的冷却期里
   watcher.soopCooldownUntil = 0
   watcher.soopProbeCursor = 0
+  // ㊓⑤ login_info 探针的判死节流与 ㊓④ 分页在飞锁同样跨场景: 不清就会让下一场开头几轮"根本没问"
+  watcher.pandaProbeUntil = 0
+  watcher.pageHarvest = null
   watcher.status.circuitOpen = false
   watcher.status.message = ''
   // ㊑ 大厅是按需的: 上一场刷新留下的快照与它的钟会污染下一场的"这一轮没碰全站榜"断言
@@ -298,6 +314,8 @@ async function reset() {
   db.settings = mkSettings()
   world.inList = {}; world.bjMedia = {}; world.bj403 = {}; world.bjThrow = {}; world.bjNotFound = {}; world.latency = { liveMs: 0, bjMs: {} }
   world.soopMeta = {}; world.soopThrow = {}; world.soopCalls.length = 0; world.soopFresh.length = 0
+  world.soopCached = [] // ㊓⑦ 替身那份"已有源"清单同样一场一份
+  world.liThrow = false; world.liveLoginInfo = true // ㊓⑤ 探针答案复位
   world.soopFavorites = null // ㊒ 默认"列表整条不接待": 想要预言机那场的场景自己摆行; world.soopFresh.length = 0
   // ㊑ 预言机场景隔离: 默认 bm=null(端点不接待) + 无会话罐(匿名) → 每一场都从"走全站榜那条链"起步,
   // 想要预言机的场景自己把三件套凑齐: jar={sessKey} + world.bm=[行] + 会话 Either 已证明(cookieValid=true)
@@ -1160,6 +1178,189 @@ for (const a of db.anchors) world.soopThrow[a.userId] = true // 网络/风控: �
   check('T28-D3 未读数=发出失败的 40 + 被预算挡下的 5 = 整表一个都没读到', watcher.status.byPlatform.soop.roundFailed === 45, `未读=${watcher.status.byPlatform.soop.roundFailed}`)
 }
 
+// ============ T29 ㊓① 作废纪元: 显式作废之后, 先于它发出的那条链不得把源写回来 ============
+// 复现的正是 2026-10-02 审计里的形状: invalidatePlay 只删了 playCache, 在飞的链回来照旧 set ——
+// "缓存复活"在用户那边就是"下播的房还能秒开 / 换号后仍用旧账号签发的源".
+console.log('\n■ T29 纪元门: 在飞取流链遇到 invalidatePlay / clearPlayCache 即不许落缓存')
+await reset()
+{
+  const p = api.getPlayCached('r4', '', true) // 链已出发(请求在飞)
+  api.invalidatePlay('r4') // 出发之后被判作废(下播/源收尸/换号)
+  const r = await p
+  check('T29-1 结果照还给调用方(该给的一发不少)', r.ok === true)
+  check('T29-2 但这条链不许复活缓存', api.cachedSourceIds().length === 0, JSON.stringify(api.cachedSourceIds()))
+  const n0 = playCount('r4')
+  const r2 = await api.getPlayCached('r4')
+  check('T29-3 下一次进房重新一发(缓存里确实是空的)', playCount('r4') === n0 + 1 && r2.ok)
+}
+await reset()
+{
+  const p = api.getPlayCached('r5', '', true)
+  api.clearPlayCache() // 换号/登出: 旧账号签发的源整表作废
+  await p
+  check('T29-4 整表作废同样挡住在飞链(旧会话的源不复活)', api.cachedSourceIds().length === 0)
+  api.clearPlayCache()
+  check('T29-5 二次作废幂等且不补发请求', api.cachedSourceIds().length === 0 && playCount('r5') === 1)
+}
+await reset()
+{
+  const pack = await api.getPlayCached('r6', '', true)
+  check('T29-6 正常拉源照旧落缓存(纪元门不放水好源)', api.cachedSourceIds().includes('pandalive:r6'))
+  api.invalidatePlay('r6')
+  api.seedPlay('r6', pack) // ㊓② 续录复用中断探针刚现拉到的那一发
+  const n0 = playCount('r6')
+  const hit = await api.getPlayCached('r6')
+  check('T29-7 种子命中: 下一次取流零新请求(省掉整条五步链/一次重铸)', playCount('r6') === n0 && hit.m3u8 === pack.m3u8)
+  api.seedPlay('r7', { ...pack, ok: false })
+  check('T29-8 坏源不许种(种子只认真拿到手的源)', !api.cachedSourceIds().includes('pandalive:r7'))
+}
+
+// ============ T30 ㊓⑥ 立即刷新的 8 秒下限: 唯一由人手放大的请求面 ============
+console.log('\n■ T30 立即刷新节流: 刚落地一轮时连点不再整站重扫, 过了下限那一格照发')
+await reset()
+world.inList = { t1: true }
+db.anchors = [mkAnchor('t1')]
+{
+  watcher.loop.pandalive.lastAt = 0 // 冷态: 本场还没跑过轮
+  const n0 = world.liveCalls.length
+  watcher.tick('pandalive')
+  const started = await waitUntil(() => world.liveCalls.length > n0, 2000)
+  check('T30-1 首轮没有被下限挡住(lastAt 未落地 = 不发才怪)', started)
+  await waitUntil(() => !watcher.loop.pandalive.inFlight, 3000)
+  const n1 = world.liveCalls.length
+  watcher.tick('pandalive')
+  watcher.tick('pandalive')
+  await sleep(400)
+  check('T30-2 一轮刚落地: 连点两下零请求(整站列表那一发不被手放大)', world.liveCalls.length === n1, `页数=${world.liveCalls.length - n1}`)
+  check('T30-3 被挡下的那几下有出声(节流不是失灵)', watcher.loop.pandalive.inFlight === false)
+  watcher.loop.pandalive.lastAt = Date.now() - 9000
+  watcher.tick('pandalive')
+  const after = await waitUntil(() => world.liveCalls.length > n1, 2000)
+  check('T30-4 过了下限那一格照发(功能没被换成禁用)', after)
+  await waitUntil(() => !watcher.loop.pandalive.inFlight, 3000)
+  const soopN = world.soopCalls.length
+  watcher.tick('soop') // 另一条时间轴刚跑过(round 里两平台各一轮)→ 同样被挡
+  await sleep(300)
+  check('T30-5 节流按平台各算各的: 点 SOOP 只问 SOOP', world.soopCalls.length === soopN)
+}
+
+// ============ T31 ㊓⑤ 判死期的 login_info 探针: 30 秒缓存短于轮询间隔 = 每轮白付一发 ============
+console.log('\n■ T31 login_info 探针节流: 明确"没登录"后 5 分钟不再问, 请求失败下一轮照问')
+await reset()
+api.jar = { sessKey: 't31' }
+api.cookieValid = false
+world.loginInfo = null // 服务端明确: 没登录
+world.liveLoginInfo = false // 全站榜也不替它说话(否则会自愈点亮, 探针根本不再被需要)
+world.inList = { u1: true }
+db.anchors = [mkAnchor('u1', { isLive: true })]
+{
+  // 一问有 30 秒结果缓存(㊑ 就有的机制): 真机上轮询间隔 ≥ 这一档时它天然不重复。
+  // 这里每轮手动清一次缓存 = 把"轮与轮之间隔了半分钟"这一常态复刻出来, 让 5 分钟节流单独受审
+  const cold = () => { api.loginInfoCache = null; api.loginInfoInflight = null }
+  cold()
+  await roundOne('pandalive')
+  check('T31-1 判死第一轮问一句', world.liCalls.length === 1)
+  cold()
+  await roundOne('pandalive')
+  cold()
+  await roundOne('pandalive')
+  check('T31-2 明确"没登录"之后不再每轮复读', world.liCalls.length === 1, `问数=${world.liCalls.length}`)
+  check('T31-3 节流只省探针: 回落的全站榜那条链一轮都不少', world.liveCalls.length >= 3, `页数=${world.liveCalls.length}`)
+  check('T31-4 预言机仍被挡在外面(读数说 list)', watcher.pandaOracle === 'list')
+  watcher.pandaProbeUntil = 0 // 退避到期
+  cold()
+  await roundOne('pandalive')
+  check('T31-5 到期后重新问一句(节流不等于永久哑)', world.liCalls.length === 2, `问数=${world.liCalls.length}`)
+}
+await reset()
+api.jar = { sessKey: 't31b' }
+api.cookieValid = false
+world.liThrow = true // 请求本身失败(断网/风控)
+world.liveLoginInfo = false
+world.inList = { u2: true }
+db.anchors = [mkAnchor('u2')]
+{
+  await roundOne('pandalive')
+  await roundOne('pandalive')
+  check('T31-6 读不到 ≠ 判死: netFail 不节流, 下一轮照问', world.liCalls.length === 2, `问数=${world.liCalls.length}`)
+  check('T31-7 netFail 那一问不武装退避', watcher.pandaProbeUntil === 0)
+}
+
+// ============ T32 ㊓④ 全站榜分页只有一处实现: 兜底轮与大厅共走一条在飞锁 ============
+console.log('\n■ T32 分页单飞: 轮询兜底与大厅刷新同时启动只翻一趟页; 同一发失败的两种吃法')
+await reset()
+world.inList = { v1: true }
+world.latency.liveMs = 250 // 让两条链真重叠(微任务里各自跑完就等于没测到锁)
+db.anchors = [mkAnchor('v1')]
+{
+  const pr = roundOne('pandalive')
+  const pd = watcher.refreshDiscovery(true)
+  await Promise.all([pd, pr])
+  check('T32-1 两条链合计翻了一趟页, 不是两趟', world.liveCalls.length === 1, `页数=${world.liveCalls.length}`)
+  check('T32-2 大厅与轮次拿到的是同一份快照', watcher.getDiscovery().length === 1 && watcher.status.discoveryAt > 0)
+  check('T32-3 在飞锁用完即撒(下一轮还能真发)', watcher.pageHarvest === null)
+  await roundOne('pandalive')
+  check('T32-4 撒锁后下一轮自己翻页(锁不是缓存)', world.liveCalls.length === 2)
+}
+await reset()
+world.inList = { v2: true }
+db.anchors = [mkAnchor('v2', { isLive: true })]
+{
+  await watcher.refreshDiscovery(true)
+  const snap = watcher.getDiscovery().slice()
+  world.latency.liveMs = 0
+  world.liveFail = true
+  const d = await watcher.refreshDiscovery(true)
+  check('T32-5 大厅: 拉不到不抛错、不空表(沿用上一份快照)', d.length === snap.length && watcher.getDiscovery().length === snap.length)
+  const before = watcher.errorStreak
+  await roundOne('pandalive')
+  check('T32-6 轮次: 同一发失败必须是本轮失败(部分页不许冒充成功)', watcher.errorStreak === before + 1, `streak=${watcher.errorStreak}`)
+  check('T32-7 失败轮不改口(没读到 ≠ 全员下播, 在播读数保持)', db.anchors[0].isLive === true)
+}
+
+// ============ T33 ㊓⑦ 预取补扫挪到首轮之后: 只认刚落地的真值, 且跳过手上已有源的房 ============
+console.log('\n■ T33 首轮后补扫: 排队发生在真值写回之后, 已有源的房不再预取, 且只跑首轮')
+await reset()
+db.settings.monitor.pandalive.requestGapMs = 0
+world.inList = { w1: true, w2: true }
+db.anchors = [mkAnchor('w1', { isLive: true }), mkAnchor('w2', { isLive: true })]
+{
+  await api.getPlayCached('w1') // 手上已有一枚有效源
+  world.playCalls.length = 0
+  await roundOne('pandalive')
+  check('T33-1 补扫排在首轮摘要之后(不在开机那一瞬)', watcher.loop.pandalive.roundCnt === 1)
+  const drained = await waitUntil(() => !watcher.prewarmPumping.pandalive && watcher.prewarmQueue.pandalive.length === 0, 3000)
+  check('T33-2 没源的在播房排队(w2 恰好一发)', drained && playCount('w2') === 1, `w2=${playCount('w2')}`)
+  check('T33-3 已有源的房跳过(w1 零发)', playCount('w1') === 0)
+  world.playCalls.length = 0
+  db.anchors.push(mkAnchor('w3', { isLive: true }))
+  world.inList.w3 = true
+  await roundOne('pandalive')
+  await sleep(400)
+  check('T33-4 补扫只属于首轮: 稳态轮不再群发(新开播自有事件)', playCount('w3') === 0 && watcher.prewarmQueue.pandalive.length === 0)
+}
+await reset()
+db.settings.monitor.pandalive.prefetchStream = false
+world.inList = { w4: true }
+db.anchors = [mkAnchor('w4', { isLive: true })]
+{
+  await roundOne('pandalive')
+  await sleep(400)
+  check('T33-5 那一格关着 = 补扫零排队(开关读的是本平台那一格)', playCount('w4') === 0 && watcher.prewarmQueue.pandalive.length === 0)
+}
+await reset()
+db.settings.monitor.soop.requestGapMs = 0
+world.soopFavorites = null
+world.soopMeta = { y1: { living: true, broadNo: 11 }, y2: { living: true, broadNo: 12 } }
+world.soopCached = ['y2'] // 替身手上已有 y2 的源
+db.anchors = [mkAnchor('y1', { platform: 'soop', isLive: true }), mkAnchor('y2', { platform: 'soop', isLive: true })]
+{
+  await roundOne('soop')
+  const drained = await waitUntil(() => !watcher.prewarmPumping.soop, 3000)
+  check('T33-6 补扫走本平台那份契约: SOOP 没源的房排队', drained && world.soopCalls.includes('getPlayCached:y1'))
+  check('T33-7 跨平台不串台: 缓存清单读的是 SOOP 那一份(y2 跳过)', !world.soopCalls.includes('getPlayCached:y2'))
+}
+
 console.log('解读: T1/T2/T3 PASS ⇒ 「大厅轮询刷新会清源缓存」不成立(真实源码+可计数请求实证);')
 console.log('      T4 PASS ⇒ 列表内开播翻转的作废链路正常工作(对照);')
 console.log('      T17 PASS ⇒ 粉丝房 fanLive 专用通知+自录正常; T18 PASS ⇒ 下播 toast 单发, 重复判离线不重复;')
@@ -1182,4 +1383,12 @@ console.log('      T27 PASS ⇒ ㊑ 预言机: 一轮一发覆盖全部关注(0 
 console.log('      T24-12b/c/d PASS ⇒ ㊒③ SOOP 失明跨阈值即武装自己的退避: 冷却轮整轮零请求、不刷心跳读数、未读数不归零; 到期后第一轮才恢复判定.')
 console.log('      T28 PASS ⇒ ㊒② 降级探针有每轮预算: 45 个关注一轮 40 发, 被挡下的下一轮排到队首(两轮并集覆盖全部), 未读数把挡下的一起数进去;'
   + ' 列表覆盖常态 2 个缺席房就发 2 发, 预算不动刀(与改造前一字不差).')
+console.log('      T29 PASS ⇒ ㊓① 作废纪元: 显式作废/换号之后, 先于它发出的那条链照还给调用方但不落缓存, 种子只认真源(坏源不种),'
+  + ' 种子命中下一次取流零请求(㊓② 续录不再打第二条完整链).')
+console.log('      T30 PASS ⇒ ㊓⑥ 立即刷新有每平台 8 秒下限: 一轮刚落地的连点零请求, 过了下限那一格照发, 两平台各算各的.')
+console.log('      T31 PASS ⇒ ㊓⑤ 判死期的 login_info 探针 5 分钟不再复读(30 秒结果缓存短于轮询间隔这一段由手动清缓存复刻),'
+  + ' 但 netFail(请求失败)不节流也不武装 —— 读不到 ≠ 判死; 到期后重新问一句.')
+console.log('      T32 PASS ⇒ ㊓④ 全站榜分页只有一处实现: 兜底轮与大厅同时启动共走一条在飞锁(一趟页), 锁用完即撒;'
+  + ' 同一发失败的两种吃法 —— 大厅保留旧快照不抛错, 轮次必须记为本轮失败且不把在播读数改口.')
+console.log('      T33 PASS ⇒ ㊓⑦ 预取补扫挪到首轮之后: 排队发生在真值写回之后, 跳过手上已有源的房, 只跑首轮, 开关读本平台那一格, 缓存清单也读本平台那一份.')
 process.exit(failures === 0 ? 0 : 1)

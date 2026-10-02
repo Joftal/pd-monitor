@@ -65,6 +65,10 @@
 //   D54 SOOP 降级探针有每轮预算(㊒): 环形游标轮换不饿死任何房, 未读数与新失明判据同口径改口
 //   D55 SOOP 有自己的退避(㊒): 失明轮零请求零心跳、每个失明轮重新武装, 但绝不推 Panda 熔断位也不新增第二句读数
 //   D56 SOOP 取流不再为拿场次号读整页(㊒): 列表播种的 broad_no 直接进第 2 步, 号过期/失效各有上界定性, 页面微缓存不拦探针
+//   D57 作废纪元门(㊓①②): 显式作废/换号之后, 先于它发出的取流链不许把源写回缓存; 在飞两格(带密/不带密)一起摘; seedPlay 只认真源
+//   D58 续录一次判活 + 退避(㊓③): 意外退出只现拉一发(同一发既判活又当种子), 重录按房挂计时器且指数退避, 手动接管即撤销时续录
+//   D59 分页单飞·探针节流·刷新下限(㊓④⑤⑥⑦): 全站榜翻页只有一处实现且并发合流, 判死期不再每轮复读 login_info, 立即刷新有每平台 8 秒下限, 预取补扫挪到首轮之后
+//   D60 三条老覆盖: 本机代理地址不给 ffmpeg 挂 -http_proxy, 旧全局键的删除清单逐键锁死, 无消费方即删
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -1276,12 +1280,16 @@ checkWithAllowlist(
     'D44d 下播补丁分家照旧(㊌ 之后为 Panda 的 19+/粉丝团服务): 场次属性清, 房态属性留 —— 整对象写 null 就是把房间读成普通房',
     offPatch.slice(0, 80)
   )
+  const ac = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'AnchorCard.vue'), 'utf8')
+  const ec = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'ExploreCard.vue'), 'utf8')
   assert(
     !/soopBlindAdult/.test(wa) &&
       /v-if="m\.isAdult"/.test(lc) &&
       /v-if="tags\?\.isAdult"/.test(pv) &&
-      /tags\?\.isAdult/.test(tg),
-    'D44e 随这一路一起绝迹的只有那个盲读计数; Panda 的 19+ 三处消费端(卡片徽标 / 页头徽标 / TG [19+])一处都不许被顺手删掉'
+      /tags\?\.isAdult/.test(tg) &&
+      /isAdult: a\.tags\?\.isAdult/.test(ac) &&
+      /isAdult: x\.isAdult/.test(ec),
+    'D44e 随这一路一起绝迹的只有那个盲读计数; Panda 的 19+ 消费端一处都不许被顺手删掉(㊏ 补范围: 在播卡 / 播放页页头 / TG [19+] / 关注卡 AnchorCard / 发现卡 ExploreCard —— 后两处读的是同一格, 曾落在断言之外)'
   )
   // f 读库时收敛旧残留(2026-10-01 复验抓到): 在播房每轮被列表回写成 false, 而**已经离线**的房再无写点,
   //   offPatch 保的又是"房间属性"—— 对 SOOP 这一格自 ㊌ 起不再是属性, 于是 papcon0206 下播后页头仍画 19+。
@@ -1380,7 +1388,12 @@ checkWithAllowlist(
   assert(/cfg\.monitor\[a\.platform\]\.prefetchStream/.test(wa), 'D45n 开播是否预取源, 看本平台那一格')
   assert(/this\.loop\.pandalive\.inFlight\) break/.test(wa), 'D45o 间隙泵让路看的是 Panda 自己那条时间轴(SOOP 在飞与它无关)')
 
-  assert(/cfg\.monitor\[a\.platform\]\.prefetchStream\) watcher\.prewarmNow\(a\.platform/.test(mi), 'D45p 启动自热也按平台取格并只喂自己那条队列')
+  assert(
+    /if \(!store\.getSettings\(\)\.monitor\[platform\]\.prefetchStream\) return/.test(wa) &&
+      /if \(L\.roundCnt === 1\) this\.prewarmSweep\(platform\)/.test(wa) &&
+      !/watcher\.prewarmNow\(a\.platform/.test(mi),
+    'D45p 预取补扫按本平台那一格, 且只在首轮落地后跑(㊓⑦: 开机即按库态群发的那段已从 index.ts 撤走)'
+  )
   assert(
     /watcher\.tick\(isPlatform\(platform\) \? platform : undefined\)/.test(ip) && /anchorsRefresh, \(_e, platform: Platform\)/.test(ip),
     'D45q 工作区「立即刷新」只惊动所在平台那一条, 不为另一个平台多发一轮(平台不认识才退回首轮语义)'
@@ -1598,7 +1611,7 @@ checkWithAllowlist(
   const bm = seg('private async roundByBookmark(')
   assert(bm.length > 0 && !/fetchLivePage|roundByList/.test(bm), 'D51b 预言机自己一页全站榜都不发(它只覆盖"我关注的人", 请求面与全站热度无关)', bm.slice(0, 60))
   assert(/if \(!api\.hasSession\(\)\) \{[\s\S]{0,120}return null/.test(bm), 'D51c 匿名(罐里没有会话)不发这一发(实测必回 result:false, 每轮白掷)')
-  assert(/if \(!api\.cookieValid\) \{[\s\S]{0,220}await api\.checkLoginInfo\(\)[\s\S]{0,200}api\.cookieValid = true/.test(bm), 'D51g 「罐在但没证明」先问一句 login_info 再决定(30 秒缓存在飞合并): 冷启动第一轮不该因为一个初值 false 就整轮落回全站榜四页 —— 真机实测过这个坑')
+  assert(/if \(!api\.cookieValid\) \{[\s\S]{0,600}await api\.checkLoginInfo\(\)[\s\S]{0,200}api\.cookieValid = true/.test(bm), 'D51g 「罐在但没证明」先问一句 login_info 再决定(30 秒缓存在飞合并): 冷启动第一轮不该因为一个初值 false 就整轮落回全站榜四页 —— 真机实测过这个坑')
   assert(/this\.pandaOracle = 'list'[\s\S]{0,200}return null/.test(bm) && /this\.pandaOracle = 'bookmark'/.test(bm), 'D51d 两条链各归各的账(轮次日志据此判本轮是"1 发问完 158"还是"真的看过全站")')
   // 边界必须收在这一个方法体内: `if (n < 2)` 在 SOOP 那两轮里各出现一次, 不设界会把它们当本条的证据(变异测试实测)
   const mo = seg('private markPandaOffline(')
@@ -1716,6 +1729,153 @@ checkWithAllowlist(
   assert(/if \(!fresh\) \{[\s\S]{0,120}const hit = this\.pageCache\.get\(channel\)/.test(fm) && /if \(!fresh\) this\.pageInflight\.set\(channel, p\)/.test(fm), 'D56i fresh 同时绕过微缓存与在飞合并: 探针既不该拿旧页, 也不该把自己并进别人那一发的结果里')
   assert(/this\.pageCache\.set\(channel, \{ at: Date\.now\(\), meta \}\)/.test(rp) && /this\.pageCache\.size > 64/.test(rp), 'D56j 页面缓存只在真读到以后写, 且带 64 条上限(先清过期再截断, 不随关注数无界增长)')
   assert(/if \(meta\.living && meta\.broadNo\) this\.bnoCache\.set\(channel, \{ bno: meta\.broadNo, at: Date\.now\(\) \}\)/.test(rp), 'D56k 页面实读到的号同样进缓存(连击型取流第二次就不再读页), 但"在场且给得出号"才进 —— 离线/读数不足的一页不播种')
+}
+
+// ============================================================================
+// D57~D60 第 22 轮(㊓): 结构性重复与扇出护栏
+//   审计里的四条同类病灶都是"同一次意图被两条链各自实现"或"作废与在飞没有先后关系":
+//     R4 作废只删了缓存, 没管在飞的链 → 缓存复活(= 已下播/已换号的房还能秒开)
+//     R5 意外退出先拉一次判活, 续录再拉一次 → 源最抖的时刻打两条完整链, 且零退避
+//     R6 全站榜翻页在轮询兜底与大厅刷新里各写了一遍 → 同时启动即翻两趟四页
+//     R7 会话判死期每轮白问一句 login_info(它的 30 秒缓存短于轮询间隔)
+//     R8 「立即刷新」没有下限: 人手连点即人手放大整站请求面
+//   行为侧由 verify-playcache T29~T33 与 verify-follows G1~G4 用真源码数请求, 这里锁形状与"只有一处"。
+// ============================================================================
+{
+  const so = fs.readFileSync(R('src', 'main', 'services', 'soop.ts'), 'utf8')
+  const pa = fs.readFileSync(R('src', 'main', 'services', 'pandalive.ts'), 'utf8')
+  const src = R('src', 'main', 'services', 'source.ts')
+  const si = fs.readFileSync(src, 'utf8')
+  // 本仓库三个文件是 CRLF: 段尾必须按 \r?\n 找, 否则窗口一路开到文件末尾(锁等于没锁)
+  const seg = (s, decl) => {
+    const i = s.indexOf(decl)
+    if (i < 0) return ''
+    const m = /\r?\n {2}\}\r?\n/.exec(s.slice(i))
+    return s.slice(i, m ? i + m.index + m[0].length : undefined)
+  }
+  const count = (s, re2) => (s.match(re2) || []).length
+  const trio = (s, id) =>
+    count(s, /private playEpoch = new Map<string, number>\(\)/g) === 1 &&
+    count(s, /private playEpochAll = 0/g) === 1 &&
+    new RegExp(`private epochOf\\(${id}: string\\): number \\{[\\s\\S]{0,120}this\\.playEpochAll \\+ \\(this\\.playEpoch\\.get\\(${id}\\)`).test(s) &&
+    new RegExp(`private bumpEpoch\\(${id}: string\\)`).test(s)
+  assert(trio(so, 'channel') && trio(pa, 'userId'), 'D57a 纪元三件套在两平台各只有一套定义(逐房纪元 + 整表纪元): 换号那一档靠整表前移, 不靠逐房补刀')
+  assert(
+    /if \(r\.ok && this\.epochOf\(channel\) === e0\)/.test(so) && /if \(r\.ok && this\.epochOf\(userId\) === e0\)/.test(pa),
+    'D57b 缓存写入受纪元门管: 这条链出发后被作废过, 结果照还给调用方但不许把源写回来'
+  )
+  for (const [name, s, id] of [['soop', so, 'channel'], ['panda', pa, 'userId']]) {
+    const g = seg(s, `async getPlayCached(${id}`)
+    assert(g.includes('const e0 = this.epochOf(') && g.includes('const p = (async') && g.indexOf('const e0 = this.epochOf(') < g.indexOf('const p = (async'), `D57c-${name} 纪元在链出发前取快照: 出发之后再取, 等于承认任何作废都晚于自己`)
+    assert(/=== e0\)[\s\S]{0,240}return r/.test(g), `D57d-${name} 被挡下的那一发仍然 return r(门只管缓存, 不管给调用方答案)`)
+    assert(count(s, /this\.playCache\.set\(/g) === 2, `D57e-${name} 全文件只有两处 playCache.set(纪元门那一处 + seedPlay): 不许有第三个写入口`, `实数=${count(s, /this\.playCache\.set\(/g)}`)
+  }
+  const invSo = seg(so, 'invalidatePlay(channel: string): void {')
+  const invPa = seg(pa, 'invalidatePlay(userId: string): void {')
+  assert(/this\.bumpEpoch\(channel\)/.test(invSo) && /this\.bumpEpoch\(userId\)/.test(invPa), 'D57f 显式作废即纪元 +1(顺序上先抬纪元再删缓存, 免得删与抬之间挤进一条链)')
+  assert(
+    /this\.playInflight\.delete\(channel\)[\s\S]{0,60}this\.playInflight\.delete\(`\$\{channel\}#pw`\)/.test(invSo) &&
+      /this\.playInflight\.delete\(userId\)[\s\S]{0,60}this\.playInflight\.delete\(userId \+ '#pw'\)/.test(invPa),
+    'D57g 在飞键有两个形状(裸房 / 房#密码槽), 作废必须都摘: 留一半 = 让新 caller 合进一条注定作废的链'
+  )
+  assert(
+    /playEpochAll\+\+[\s\S]{0,120}this\.playCache\.clear\(\)[\s\S]{0,160}this\.playInflight\.clear\(\)/.test(seg(so, 'clearPlayCache(): void {')) &&
+      /playEpochAll\+\+[\s\S]{0,120}this\.playCache\.clear\(\)[\s\S]{0,160}this\.keepaliveInfo\.clear\(\)[\s\S]{0,80}this\.playInflight\.clear\(\)/.test(seg(pa, 'clearPlayCache(): void {')),
+    'D57h 换号/登出那一条: 整表纪元前移 + 缓存与在飞一起清(Panda 还带保活台账) —— 旧账号签发的源一枚都不许留下'
+  )
+  assert(
+    /seedPlay\(channel: string, pack: PlayResult\): void \{\s*if \(!pack\.ok\) return/.test(so) &&
+      /seedPlay\(userId: string, pack: PlayResult\): void \{\s*if \(!pack\.ok\) return/.test(pa) &&
+      /seedPlay\(id: string, pack: PlayResult\): void/.test(si),
+    'D57i 种子入口在三处对齐(契约 + 两平台实现), 且只认真源: ok=false 的包不许进缓存'
+  )
+}
+{
+  const rc = fs.readFileSync(R('src', 'main', 'services', 'recorder.ts'), 'utf8')
+  const seg = (declRe) => {
+    const m = declRe.exec(rc)
+    if (!m) return ''
+    const e = /\r?\n {2}\}\r?\n/.exec(rc.slice(m.index))
+    return rc.slice(m.index, e ? m.index + e.index + e[0].length : undefined)
+  }
+  const hx = seg(/private async handleUnexpectedExit\(/)
+  assert(
+    (hx.match(/fetchPlay\(/g) || []).length === 1 && /sourceFor\(this\.platform\)\.fetchPlay/.test(hx) && !/getPlayCached/.test(hx),
+    'D58a 判活只现拉一发(不许顺手改成读缓存: 缓存里就是正在死的那一条), 且这一发同时当续录的种子'
+  )
+  assert(
+    hx.includes('if (stillLive)') && hx.includes('this.freshSeed = play') && hx.indexOf('if (stillLive)') < hx.indexOf('this.freshSeed = play') && (rc.match(/this\.freshSeed = /g) || []).length === 1,
+    'D58b 只有"还在播=中断"这一支留种子: 真下播那一支留给缓存的东西就是一个死源'
+  )
+  assert(/recorder\.maybeRetry\(\s*\{[\s\S]{0,320}?this\.freshSeed\s*\)/.test(rc), 'D58c 种子随失败收尾一起交给续录(finalize 已经作废过旧源, 这一发比它新)')
+  const mr = seg(/\r?\n {2}maybeRetry\(/)
+  assert(/if \(seed\?\.ok\) sourceFor\(prev\.platform\)\.seedPlay\(prev\.userId, seed\)/.test(mr), 'D58d 续录前先把种子种回: 新任务命中缓存即不再打第二条完整链(㊓②)')
+  assert(/private static RETRY_BACKOFF_MS = 10_000/.test(rc) && /const delay = Recorder\.RETRY_BACKOFF_MS \* 2 \*\* \(streak - 1\)/.test(mr), 'D58e 退避按连续失败次数指数增长(上一条链刚死就立刻再打一条, 等于在源最抖的时刻把扇出打满)')
+  assert(/setTimeout\(\(\) => \{[\s\S]{0,420}\}, delay\)/.test(mr), 'D58f 退避真作用在重排上(delay 是唯一的延后来源)')
+  assert(/private retryTimers = new Map<string, NodeJS\.Timeout>\(\)/.test(rc) && /this\.retryTimers\.set\(\s*key,/.test(mr), 'D58g 计时器按房挂键: 两个房先后失效不得互相顶掉退避')
+  assert(!/\.cancel\(\)/.test(rc) && (rc.match(/clearTimeout/g) || []).length >= 4, 'D58h 计时器一律 clearTimeout 撤(本仓库 TS lib 的 NodeJS.Timeout 没有 .cancel), 撤不掉的退避就是幽灵起录')
+  assert(/if \(this\.shuttingDown\) return[\s\S]{0,200}void this\.start\(/.test(mr), 'D58i 到点那一下再问一次"还在关机流程里吗"(stopAll 与在飞退避之间有窗口)')
+  assert(/if \(!opt\.auto\) \{[\s\S]{0,140}clearTimeout\(pend\)/.test(seg(/async start\(opt: StartRecOptions\)/)), 'D58j 用户手动接管 = 这条房不再欠一次自动续录(否则定时器会在手动任务收尾后再自作主张开录)')
+  assert(/for \(const t of this\.retryTimers\.values\(\)\) clearTimeout\(t\)/.test(seg(/async stopAll\(\)/)), 'D58k 退出流程清空所有在等退避的计时器')
+}
+{
+  const wt = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
+  const mi = fs.readFileSync(R('src', 'main', 'index.ts'), 'utf8')
+  const seg = (decl) => {
+    const i = wt.indexOf(decl)
+    if (i < 0) return ''
+    const j = wt.indexOf('\n  }\n', i)
+    return wt.slice(i, j < 0 ? undefined : j)
+  }
+  const hp = seg('private async harvestPages(')
+  const rd = seg('async refreshDiscovery(')
+  const rl = seg('private async roundByList(')
+  assert(
+    (wt.match(/api\.fetchLivePage\(/g) || []).length === 1 && hp.indexOf('api.fetchLivePage(') >= 0,
+    'D59a 全站榜翻页在 watcher 里只有一处实现(㊓④): 轮询兜底与大厅刷新各写一遍是同一条链的两次四页'
+  )
+  assert(/if \(this\.pageHarvest\) return this\.pageHarvest/.test(hp) && /if \(this\.pageHarvest === p\) this\.pageHarvest = null/.test(hp), 'D59b 在飞锁: 先来者翻页, 后来者合流; 撒锁按身份比(不许把下一批也并进上一批的尾巴)')
+  assert(/return \{ liveMap, loginInfo, err: e \}/.test(hp) && /if \(err\) throw err/.test(rl), 'D59c 同一发请求两种吃法: 错不抛而是连着已翻到的部分带回, 由调用方决定"沿用旧快照"(大厅)还是"本轮失败"(轮次 —— 部分页不许冒充成功)')
+  assert(/if \(err\) logger\.warn\('watcher', `大厅刷新失败, 沿用上一份快照/.test(rd) && /if \(liveMap\.size\) this\.publishDiscovery\(liveMap\)/.test(rd), 'D59d 大厅失败不空表也不改钟(读到多少算多少, 一页都没有就原样留着)')
+  assert(/if \(r\.loginInfo\) loginInfo = r\.loginInfo/.test(hp), 'D59e 会话证据取"最后一个非空"的那页(旧写法取最后一页: 末页没带就等于没带)')
+  const bm = seg('private async roundByBookmark(')
+  assert(/private static LOGIN_PROBE_COOL_MS = 5 \* 60_000/.test(wt) && bm.includes('Date.now() < this.pandaProbeUntil') && bm.includes('await api.checkLoginInfo()') && bm.indexOf('Date.now() < this.pandaProbeUntil') < bm.indexOf('await api.checkLoginInfo()'), 'D59f 判死态下那一问有 5 分钟退避, 且门在发问上游(㊓⑤: login_info 自己 30 秒缓存短于轮询间隔 = 每轮白付一发)')
+  assert(/if \(!info\.netFail\) this\.pandaProbeUntil = Date\.now\(\) \+ Watcher\.LOGIN_PROBE_COOL_MS/.test(bm), 'D59g 只有服务端明确"没登录"才武装退避: netFail(断网/风控)是读不到, 不是判死, 下一轮照问')
+  assert(/this\.pandaProbeUntil = 0[\s\S]{0,160}for \(const p of PLATS\) this\.schedule\(p, 300\)/.test(seg('start(): void {')), 'D59h 重启监控即撤退避(冷启动第一轮照旧问一次, ㊑⑤ 那道门不因 ㊓⑤ 而退)')
+  const tk = seg('tick(platform?: Platform)')
+  assert(/private static TICK_MIN_MS = 8_000/.test(wt) && /if \(L\.lastAt && since < Watcher\.TICK_MIN_MS\)/.test(tk), 'D59i 「立即刷新」有每平台 8 秒下限(㊓⑥): 正常态一轮=一发整站列表, 连点即人手放大请求面; 刚落地一轮时再点本来也读不到新东西')
+  assert(
+    /if \(L\.lastAt && since < Watcher\.TICK_MIN_MS\) \{[\s\S]{0,240}?continue\s*\}/.test(tk) && /立即刷新节流/.test(tk),
+    'D59j 被挡下的那一下有出声(节流不能长成"按钮坏了"), 且挡下即从节流那一格里 continue, 不再排程'
+  )
+  const ps = seg('private prewarmSweep(platform: Platform)')
+  assert(/const cached = new Set\(sourceFor\(platform\)\.cachedSourceIds\(\)\)/.test(ps) && /if \(cached\.has\(roomKey\(platform, a\.userId\)\)\) continue/.test(ps), 'D59k 补扫跳过手上已有有效源的房(事实源就是卡片徽标那一枚, 不另立一本账)')
+  assert(/if \(!store\.getSettings\(\)\.monitor\[platform\]\.prefetchStream\) return/.test(ps) && /!a\.isLive \|\| this\.isGone\(a\)/.test(ps), 'D59l 补扫读的是本平台那一格, 且只认真值: 库里 isLive 而本轮已判离线/查无此人的房一枚不排(㊓⑦ 开机群发那一段就是这么废掉的)')
+  assert(!/prewarmNow\(a\.platform/.test(mi), 'D59m index.ts 里那段"按库态逐个 prewarm"已连循环一起撤(改由首轮后的补扫做), 不留第二处开机预取')
+}
+{
+  const rc = fs.readFileSync(R('src', 'main', 'services', 'recorder.ts'), 'utf8')
+  const st = fs.readFileSync(R('src', 'main', 'services', 'store.ts'), 'utf8')
+  assert(
+    /const LOOPBACK_RE = \/\^https\?:\\\/\\\/\(127\\\.0\\\.0\\\.1\|localhost\|\\\[::1\\\]\)\(:\|\\\/\)\/i/.test(rc) &&
+      /if \(cfg\.proxyUrl && !LOOPBACK_RE\.test\(m3u8\)\) args\.push\('-http_proxy', cfg\.proxyUrl\)/.test(rc),
+    'D60a 录制取的是本机 HLS 代理地址时绝不走用户代理: 回环地址若被 -http_proxy 接走, 分片会绕外网再绕回来(轻则断流重则整段坏包)'
+  )
+  {
+    const i = st.indexOf('for (const k of [')
+    const j = st.indexOf('])', i)
+    const keys = st.slice(i, j).split(/[\r\n]+/).map((l) => (l.match(/^\s*'(\w+)'/) || [])[1]).filter(Boolean)
+    assert(
+      keys.join(',') === 'notifySystem,notifySound,tgLive,tgOffline,tgRecord,tgError,pollIntervalSec,requestGapMs,prefetchStream',
+      'D60b 旧全局键的删除清单逐键锁死(㊍ 展开进矩阵后顶层必须删净, 否则 setSettings 浅合并把这些死键永久留在 db.json): 加键要理由, 减键更要',
+      keys.join(',')
+    )
+  }
+  assert(
+    /settings: migrateSettings\(j\.settings\)/.test(st) && (st.match(/migrateSettings\(/g) || []).length === 2,
+    'D60c 旧库形状只在读这一道收敛(load 里逐格迁移 + 删死键, 全库一处调用): 写侧再兜等于同时供着两套形状, 死键也就永远删不净',
+    `调用点数=${(st.match(/migrateSettings\(/g) || []).length}`
+  )
 }
 
 // ============================================================================
