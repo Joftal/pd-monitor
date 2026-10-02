@@ -959,9 +959,9 @@ console.log('G1 在飞的取流链遇到 invalidatePlay: 结果照还给调用�
 reset()
 {
   const gP = soopApi.getPlayCached('ggg1', '', true) // 链已出发(请求在飞)
-  assert(soopApi.playInflight.has('ggg1'), 'G1a 出发时在飞表里有它(否则下一句没有对照)')
+  assert(soopApi.playInflight.has('ggg1#top'), 'G1a 出发时在飞表里有它(否则下一句没有对照)')
   soopApi.invalidatePlay('ggg1') // 出发之后才被作废
-  assert(!soopApi.playInflight.has('ggg1'), 'G1b 作废顺手把在飞那条摘掉: 新 caller 不许合进一条注定作废的链')
+  assert(!soopApi.playInflight.has('ggg1#top'), 'G1b 作废顺手把在飞那条摘掉: 新 caller 不许合进一条注定作废的链')
   const gR = await gP
   assert(gR.ok === true, 'G1c 调用方仍拿到源(这一发不白跑)')
   assert(!soopApi.cachedSourceIds().includes('soop:ggg1'), 'G1d 但缓存没有被复活(纪元不合)', soopApi.cachedSourceIds().join(','))
@@ -970,13 +970,17 @@ reset()
   assert(apiHits('live') === 1, 'G1e 下一次取流重走整链(缓存里确实是空的)', `api=${apiHits('live')}`)
 }
 
-console.log('G2 带密码那一条同样在作废时被摘掉(在飞键有两个形状)')
+console.log('G2 带密码那一条同样在作废时被摘掉(在飞键有四个形状: 密码槽 × 档位扇出)')
 reset()
 {
   const gP = soopApi.getPlayCached('hh1', 'pw123', true)
-  assert(soopApi.playInflight.has('hh1#pw'), 'G2a 在飞键 = 频道#密码槽')
+  assert(soopApi.playInflight.has('hh1#pw#top'), 'G2a 在飞键 = 频道 + 密码槽 + 档位扇出(预取那一发默认只解最高档)')
   soopApi.invalidatePlay('hh1')
-  assert(!soopApi.playInflight.has('hh1#pw'), 'G2b 作废把带密那一格一起摘(留一半=复活走了后门)')
+  assert(
+    ['hh1', 'hh1#pw', 'hh1#top', 'hh1#pw#top'].every((k) => !soopApi.playInflight.has(k)),
+    'G2b 作废把四种形状一起摘(留一半=复活走了后门)',
+    [...soopApi.playInflight.keys()].join(',')
+  )
   await gP
   assert(soopApi.playCache.size === 0, 'G2c 结果不落缓存')
 }
@@ -1008,6 +1012,134 @@ reset()
   assert(soopApi.cachedSourceIds().includes('soop:kk1') && !soopApi.deadStreak.has('kk1'), 'G4c 种子带打戳并清掉判死计数(新源在手, 旧账作废)')
   soopApi.seedPlay('jj2', { ...pack, ok: false })
   assert(!soopApi.cachedSourceIds().includes('soop:jj2'), 'G4d 坏源不许种(种子只认真拿到手的源)')
+}
+
+// ============ H: ㊔ SOOP 取源链的档位扇出(后台只买最高档, 满档由真的进房那一次买) ============
+// 实测形状: 每一档 = 1 发 AID + 1 发调度(broad_stream_assign), 主信息那发与档数无关。
+// 4 档房在预取泵上就是 1+8 发背靠背, 而"用户会不会切清晰度"是一个都没发生过的假设。
+const PRESETS2 = [
+  { label: 'HD', name: 'hd', label_resolution: 720, bps: 3000 },
+  { label: 'SD', name: 'sd', label_resolution: 480, bps: 1000 }
+]
+const assignHits = () => world.fetches.filter((f) => String(f.url).includes('broad_stream_assign')).length
+
+console.log('H1 只解最高档的那一发: 1 发主信息 + 1 发 AID + 1 发调度, 菜单标"残缺"')
+reset()
+world.apiChannel = { VIEWPRESET: PRESETS2 }
+{
+  const top = await soopApi.getPlayCached('q1')
+  assert(top.ok === true && top.variants.length === 1 && top.partial === true, 'H1a 一份菜单只有一档, 且 partial=true(卡片算有源, 菜单等进房补齐)', `档=${top.variants?.length}`)
+  assert(apiHits('aid') === 1 && assignHits() === 1, 'H1b AID 与调度各恰好一发(满档才是 2+2)', `aid=${apiHits('aid')} assign=${assignHits()}`)
+  assert(world.logInfo.some((m) => /档位=1\(只解最高档\)/.test(m)), 'H1c 日志把这一档说清楚(真机据此认形状)')
+  const full0 = top.variants[0]
+  assert(full0.resolution === '720p', 'H1d 省发留下的必须是最高档(秒开要的就是它)', `res=${full0.resolution}`)
+
+  console.log('H2 已有最高档(哪怕是残缺那一份)的房: 再要最高档零请求')
+  world.fetches.length = 0
+  const again = await soopApi.getPlayCached('q1')
+  assert(world.fetches.length === 0 && again.m3u8 === top.m3u8, 'H2a 命中同一条包 —— 最高档就在里面, 重打整链是纯浪费', `req=${world.fetches.length}`)
+
+  console.log('H3 用户真的进房(要满档菜单): 残缺包不许交出去, 重打整链补齐')
+  world.fetches.length = 0
+  const full = await soopApi.getPlayCached('q1', '', false, true)
+  assert(full.variants.length === 2 && full.partial === false, 'H3a 满档请求换回两档菜单且不再标残缺', `档=${full.variants.length} partial=${full.partial}`)
+  assert(apiHits('aid') === 2 && assignHits() === 2, 'H3b 补齐 = 每档两发(这一发只在进房时买)', `aid=${apiHits('aid')} assign=${assignHits()}`)
+  assert(world.logInfo.some((m) => /档位=2 bno=/.test(m)), 'H3c 满档那一发的日志不带"只解最高档"(两种形状在读数面上分得开)')
+
+  console.log('H4 切画质再切回: 满档包之后两种请求都不许再打链')
+  world.fetches.length = 0
+  const backTop = await soopApi.getPlayCached('q1')
+  const backFull = await soopApi.getPlayCached('q1', '', false, true)
+  assert(
+    world.fetches.length === 0 && backTop.variants.length === 2 && backFull.variants.length === 2,
+    'H4a 满档包含最高档 ⇒ 两方都命中(切走再切回不会失效也不会重新取源)',
+    `req=${world.fetches.length}`
+  )
+
+  console.log('H5 用户手动拉源那一条(fetchPlay)默认满档: 省发只发生在后台那一路')
+  world.fetches.length = 0
+  const raw = await soopApi.fetchPlay('q2')
+  assert(raw.ok === true && raw.variants.length === 2 && raw.partial === false, 'H5 fetchPlay 不省发(播放页手动刷新要的本来就是完整菜单)')
+}
+
+// ============ I: ㊔ SOOP 接口风控信号记账(只记账不发火) ============
+console.log('I1 播放页回 HTML 不是风控信号(探针读的就是整页)')
+reset()
+world.pageMode = 'broken'
+await soopApi.fetchPageMeta('p1')
+assert(soopApi.riskCooling() === false, 'I1a 整页 HTML 是这一路的常态, 旧形状会把每一次页读都冷却', `cooling=${soopApi.riskCooling()}`)
+
+console.log('I2 515 = 网关的"没登录"回执, 按登录态处理而不是被 ban')
+reset()
+world.favStatus = 515
+world.favBody = '{"code":-10000}'
+{
+  const rows = await soopApi.fetchFavorites()
+  assert(rows === null, 'I2a 列表不可用照旧降级成 null(绝不把"没拿到"当成"全都下播")')
+  assert(soopApi.riskCooling() === false, 'I2b 515 不武装静默期(把它记成风控=把登出当被 ban)')
+}
+
+console.log('I3 403 / 429 / 非 515 的 5xx / 接口回 HTML: 四种形状各武装一次, 且全程不抛新异常')
+for (const [name, setup] of [
+  ['403', () => { world.favStatus = 403; world.favBody = '{"code":-1}' }],
+  ['429', () => { world.favStatus = 429; world.favBody = 'too fast' }],
+  ['500', () => { world.favStatus = 500; world.favBody = 'boom' }],
+  ['接口回HTML', () => { world.favStatus = 200; world.favBody = '<html>captcha</html>' }]
+]) {
+  reset()
+  setup()
+  const rows = await soopApi.fetchFavorites()
+  assert(rows === null && soopApi.riskCooling() === true, `I3-${name} 记进风控账且降级为 null(调用方契约一字不变)`)
+  assert(world.logWarn.some((m) => /疑似风控/.test(m)), `I3-${name}b 出声一次(日志是唯一可见面)`)
+}
+
+console.log('I4 静默期只由时间到点解除: 一次幸运的 200 不提前解锁, 换号/登出才立即解锁')
+reset()
+world.favStatus = 403
+await soopApi.fetchFavorites()
+world.favStatus = 200
+world.favBody = bodyOf([LIVE_ROW, OFF_ROW])
+await soopApi.fetchFavorites()
+assert(soopApi.riskCooling() === true, 'I4a 冷却期内即使这一发真的 200 了也不解锁(解锁条件只有"时间到点")')
+soopApi.clearPlayCache()
+assert(soopApi.riskCooling() === false, 'I4b 换号/登出清表连带解除静默期(旧账号的账不钉新账号的泵)')
+
+// ============ J: ㊔ 静默期只收手后台泵, 不牵连接用户那一条 ============
+console.log('J1 冷却轮: 降级探针整批收手, 关注列表那一发照旧(1 发/轮不是风控忌讳的形状)')
+reset()
+world.pageMode = 'offline' // 站外那个房本就在官网查无(离线页), 让"沿用上一轮"这一条有对照
+world.anchors = [anchor(), anchor({ userId: 'off-list' })]
+world.favBody = bodyOf([LIVE_ROW]) // 站外的房只有一个 → 常态就是这一发
+await runRound()
+const probesBefore = pageProbes()
+assert(probesBefore === 1, 'J1a 改造前的基线: 列表覆盖不到的那 1 个房发 1 发探针', `页=${probesBefore}`)
+world.favStatus = 403
+await soopApi.fetchFavorites() // 撞一次风控
+world.fetches.length = 0
+world.favStatus = 200
+await runRound()
+assert(pageProbes() === 0, 'J1b 冷却期内探针整批收手(零整页读)', `页=${pageProbes()}`)
+assert(world.fetches.some((f) => String(f.url).includes('myapi')), 'J1c 关注列表那一发照发(停它 = 直接丢开播时效)')
+assert(watcher.status.byPlatform.soop.roundFailed === 1, 'J1d 收手的那 1 个房计一次"本轮未读到"(既算失败又算被挡下=同一批房数两遍)', `未读=${watcher.status.byPlatform.soop.roundFailed}`)
+{
+  const card = findAnchor('off-list')
+  assert(card.isLive === false && card.title === '', 'J1f 三态必分: 收手绝不把"没读到"写成"已下播"(这里本就是离线房, 不许被翻新)')
+}
+reset()
+world.anchors = [anchor({ isLive: true })]
+world.favStatus = 403
+await soopApi.fetchFavorites()
+world.favBody = '{"code":-10000}' // 列表也拿不到: 全部房进 probe
+await runRound()
+assert(watcher.soopFailStreak === 1, 'J2 冷却收手不许把失明判据绕过去(覆盖 0 且有房待读 = 全灭)')
+
+console.log('J3 用户进房那一条不受静默期牵连: 拉源链照打(后台泵收手 ≠ 前台点不动)')
+reset()
+world.favStatus = 403
+await soopApi.fetchFavorites()
+{
+  const r = await soopApi.getPlayCached('u1', '', true)
+  assert(r.ok === true && apiHits('live') === 1, 'J3 冷却期内的手动取流照常成功(riskCooling 不在用户意图路径上)', `ok=${r.ok}`)
 }
 
 // ---------- 汇总 ----------

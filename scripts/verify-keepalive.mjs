@@ -2,7 +2,7 @@
 // 验证脚本: 源保活泵 与 全部拉取通道的交互正确性(do not depend on Electron)
 //
 // 方法: electron/store/notify 等依赖替换为可计数 mock; 真实加载 pandalive.ts(sucrase 现编译);
-//       keepaliveTick 以私有方法直调驱动(等效 15s 定时器, 测试不等待).
+//       keepaliveTick 以私有方法直调驱动(等效 60s 定时器, 测试不等待).
 // 场景:
 //   S1  基线: 缓存源后 tick 只发 CDN 心跳(全档齐养), 零 pandalive API 请求
 //   S2  下播跳过: anchor 离线 → tick 对该源零请求
@@ -13,9 +13,13 @@
 //   S7  副档 404 仅观测: 不收尸不重铸
 //   S8  vod 回放包: tick 跳过(静态分片无活性概念)
 //   S9  开关关闭: keepaliveStream=false → tick 零请求
-//   S10 未关注的缓存源(临时进房): 照常养(回访场景)
+//   S10 未关注的缓存源(临时进房): 10 分钟宽限内照常养(回访场景)
 //   S11 重铸并发去重: 保活重铸与手动拉源同 userId → fetchPlay 实发一次
 //   S12 tick 自重叠: 并发两 tick, 第二个立即返回(心跳不翻倍)
+//   S13 状态投影: kaStatus 给播放页"播放源卡"读的一格(时刻/档位/开关/清档)
+//   S14 重铸风控自闭环: 重铸撞 403 → 全链冷却 5 分钟, 排队中的后续重铸直接丢弃
+//   S15 活性时限(㊔): 收手只认「不在关注表过 10 分钟」与「已下播过 30 分钟」两格,
+//         下播期间本来就零心跳, 而长场次(90 分钟在播)一律照养 —— 时限不许掐活源
 // ============================================================================
 import { createRequire } from 'module'
 import * as fs from 'fs'
@@ -337,6 +341,28 @@ assert(kaStatus('d1').cached === false, 'S14-1 重铸撞风控后保持熄灭')
 assert(world.playCalls.filter((u) => u === 'd1').length === 2, 'S14-2 d1 重铸整好一发(撞风控那发)')
 assert(world.playCalls.filter((u) => u === 'd2').length === 1, 'S14-3 冷却期后续重铸被丢弃: d2 零额外 API 请求')
 
+// S15 活性时限(㊔): 泵只养"还活得有意义的源" —— 未关注的过宽限、已下播的过时限, 都出队且不再发心跳
+resetWorld()
+await api.getPlayCached('guest2') // 临时进房: 不在关注表
+api.playCache.get('guest2').fetchedAt -= 11 * 60_000 // 宽限 10 分钟已过
+let c5 = markCdn()
+await tick()
+assert(kaStatus('guest2').cached === false && world.cdnCalls.length === c5, 'S15-1 未关注源过 10 分钟宽限: 源出队且这一 tick 零心跳(「秒开」徽标随之熄灭)')
+resetWorld()
+db.anchors.push({ platform: 'pandalive', userId: 'off', isLive: true })
+await api.getPlayCached('off')
+db.anchors[0].isLive = false
+api.playCache.get('off').fetchedAt -= 31 * 60_000 // 下播房的时限 30 分钟已过
+c5 = markCdn()
+await tick()
+assert(kaStatus('off').cached === false && world.cdnCalls.length === c5, 'S15-2 已下播源过 30 分钟: 出队, 且下播期间本来就零心跳(老纪律 S2/S13-3 不因时限而松动)')
+resetWorld()
+db.anchors.push({ platform: 'pandalive', userId: 'long', isLive: true })
+await api.getPlayCached('long')
+api.playCache.get('long').fetchedAt -= 90 * 60_000 // 在播三小时的长场次
+await tick()
+assert(kaStatus('long').cached === true && variantCount('long') === 2, 'S15-3 时限不许掐长场次: 仍在播的源挂 90 分钟照养(收手只认"关注表 + 在播"这两格都不满足)')
+
 console.log(`\n==== 结果: ${PASS} 通过 / ${FAIL} 失败 ====`)
 if (FAIL) {
   console.log('失败项:\n - ' + fails.join('\n - '))
@@ -344,4 +370,5 @@ if (FAIL) {
 }
 console.log(`解读: S1/S7 心跳只走 CDN 零 API 占用; S3 网络异常零收尸零重铸(断网不团灭);
       S4/S5 单次不误杀, 连续真死才收尸且重铸仅一发; S6 满员保持熄灭不骚扰;
-      S2/S8 下播与回放不耗请求; S10 回访源同养; S11 并发合并; S12 自重叠防护.`)
+      S2/S8 下播与回放不耗请求; S10/S15 回访源在 10 分钟宽限内同养、过限出队, 下播源 30 分钟出队(下播期间本就零心跳), 长场次一律照养;
+      S11 并发合并; S12 自重叠防护; S14 重铸撞风控即全链冷却, 排队者丢弃(零请求).`)

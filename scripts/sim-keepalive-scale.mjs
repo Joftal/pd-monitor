@@ -78,7 +78,7 @@ function loadTs(rel) {
 }
 const { api } = loadTs('src/main/services/pandalive.ts')
 
-console.log('保活泵规模仿真 (心跳周期间隔常量 15s, CDN 单请求延迟 80ms)\n')
+console.log('保活泵规模仿真 (心跳周期间隔常量 60s, CDN 单请求延迟 80ms)\n')
 console.log('  N(房间) | 每轮耗时 | 有效心跳间隔/源 | 请求速率 | 日流量估算')
 console.log('---------|---------|----------------|---------|----------')
 
@@ -87,7 +87,7 @@ for (const N of [10, 25, 50, 100, 200]) {
   db.anchors.length = 0
   latencyMs = 0 // 播种零延迟
   for (let i = 0; i < N; i++) {
-    db.anchors.push({ userId: `u${i}`, isLive: true })
+    db.anchors.push({ platform: 'pandalive', userId: `u${i}`, isLive: true })
     await api.getPlayCached(`u${i}`)
   }
   latencyMs = 80 // 量测真延迟
@@ -95,7 +95,7 @@ for (const N of [10, 25, 50, 100, 200]) {
   await api.keepaliveTick()
   const ms = Date.now() - t0
   const beats = N * VARIANTS
-  const adaptiveWait = Math.min(120_000, Math.max(15_000, N * 400)) // 与 startKeepalive 自适应一致
+  const adaptiveWait = Math.min(120_000, Math.max(60_000, N * 400)) // 与 startKeepalive 自适应一致
   const effMs = Math.max(ms, adaptiveWait)
   const mbPerBeatKb = beats * 2.5 // 2.5KB/清单
   const mbPerDay = ((mbPerBeatKb * 24 * 3600 * 1000) / effMs / 1024).toFixed(0)
@@ -103,4 +103,4 @@ for (const N of [10, 25, 50, 100, 200]) {
     `  ${String(N).padStart(7)} | ${(ms / 1000).toFixed(1).padStart(7)}s | ${(effMs / 1000).toFixed(1).padStart(14)}s | ${(beats / (ms / 1000)).toFixed(1).padStart(7)}/s | ${mbPerDay} MB`
   )
 }
-console.log('\n注: 有效心跳间隔 = max(每轮实际耗时, 自适应间隔 min(120s, max(15s, N×0.4s))) — 4 泳道并发 + 规模自适应')
+console.log('\n注: 有效心跳间隔 = max(每轮实际耗时, 自适应间隔 min(120s, max(60s, N×0.4s))) — 4 泳道并发 + 规模自适应')

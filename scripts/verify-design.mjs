@@ -106,6 +106,13 @@ const rel = (abs) => path.relative(ROOT, abs).replace(/\\/g, '/')
 const RENDERER = walk(R('src', 'renderer', 'src'), /\.(vue|ts|css)$/)
 const SRC_ALL = walk(R('src'), /\.(vue|ts)$/)
 const linesOf = (abs) => fs.readFileSync(abs, 'utf8').split(/\r?\n/)
+/** 方法体收尾: 缩进两格的 `}` 才是类方法的那一刀。
+ *  必须按 \r?\n 找 —— 工作树是 CRLF(core.autocrlf), 找字面 '\n  }\n' 会一路 slice 到文件末尾,
+ *  于是"这个方法体内不得出现 X"的负向断言全部形同虚设(轮23 实测: 两条老契约因此凭空改判) */
+const bodyEnd = (src, from) => {
+  const m = /\r?\n {2}\}/.exec(src.slice(from))
+  return m ? from + m.index : -1
+}
 /** 逐行回调: (文件, 行号1基, 行内容) */
 function eachLine(files, fn) {
   for (const f of files) {
@@ -1604,7 +1611,7 @@ checkWithAllowlist(
   const seg = (decl) => {
     const i = wt.indexOf(decl)
     if (i < 0) return ''
-    const j = wt.indexOf('\n  }\n', i)
+    const j = bodyEnd(wt, i)
     return wt.slice(i, j < 0 ? undefined : j)
   }
   assert(/const viaBookmark = await this\.roundByBookmark\(anchors\)/.test(wt) && /viaBookmark === null \? await this\.roundByList\(anchors\) : viaBookmark/.test(wt), 'D51a list 模式先问站内关注列表, 只有"读不到(null)"才回落全站榜 —— 绝不把没读到当成就没人播')
@@ -1625,7 +1632,7 @@ checkWithAllowlist(
   const ty = fs.readFileSync(R('src', 'shared', 'types.ts'), 'utf8')
   const seg = () => {
     const i = wt.indexOf('async refreshDiscovery(')
-    return i < 0 ? '' : wt.slice(i, wt.indexOf('\n  }\n', i))
+    return i < 0 ? '' : wt.slice(i, bodyEnd(wt, i))
   }
   const rd = seg()
   assert(rd.length > 0, 'D52a 大厅有独立的按需刷新入口(轮询不再是全站榜的唯一发车人)')
@@ -1637,7 +1644,7 @@ checkWithAllowlist(
   assert(/discoveryRefresh\(force\?: boolean\): Promise<DiscoveryItem\[\]>/.test(ty) && /discoveryRefresh: 'discovery:refresh'/.test(ty), 'D52g ApiBridge 与通道名成对声明')
   assert(/discoveryRefresh: \(force\?: boolean\)[\s\S]{0,80}invoke\(CH\.discoveryRefresh, force\)/.test(pre), 'D52h preload 把 force 传到底(手动刷新不许在桥这一层被吞成 false)')
   assert(/CH\.discoveryRefresh[\s\S]{0,120}watcher\.refreshDiscovery\(force === true\)/.test(ipc), 'D52i IPC 侧只认 force === true(渲染层送来任何非布尔的脏值都不算"强制刷新"的通行证)')
-  const pb = (() => { const i = wt.indexOf('private publishDiscovery('); return i < 0 ? '' : wt.slice(i, wt.indexOf('\n  }\n', i)) })()
+  const pb = (() => { const i = wt.indexOf('private publishDiscovery('); return i < 0 ? '' : wt.slice(i, bodyEnd(wt, i)) })()
   assert(/this\.status\.discoveryAt = Date\.now\(\)/.test(pb) && !/this\.discoveryAt\b/.test(wt), 'D52j 大厅时刻只有一个家(status.discoveryAt): 私有一式一份的写法迟早漂移, 而渲染层读的是那份公开的')
   assert(/this\.pushDiscovery\(\)[\s\S]{0,200}this\.push\(\)/.test(pb), 'D52k 快照广播时同步推一次状态: 只有 discovery 那一条落屏、时刻却等下一轮才更新的话, 页头会显示"拉取于 上一轮"')
 }
@@ -1653,7 +1660,7 @@ checkWithAllowlist(
   assert(/一个请求覆盖全部关注/.test(zh) && /one bookmark-list request per round/.test(en), 'D53e 模式说明讲的是"怎么查我的关注", 双语同口径')
   assert(/列表模式每轮只发一发站内关注列表/.test(zh) && !/大厅/.test(zh.match(/pollSecDescPanda: '[\s\S]{0,200}'/)?.[0] || ''), 'D53f 轮询间隔那格的建议值跟着新真值源改口, 且不再顺带承诺大厅的有无')
   const segc = (() => { const i = wv.indexOf('const seg = computed'); return i < 0 ? '' : wv.slice(i, wv.indexOf('\n})\n', i)) })()
-  const disc = (() => { const i = segc.indexOf("view.value === 'discover'"); return i < 0 ? '' : segc.slice(i, segc.indexOf('\n  }\n', i)) })()
+  const disc = (() => { const i = segc.indexOf("view.value === 'discover'"); return i < 0 ? '' : segc.slice(i, bodyEnd(segc, i)) })()
   assert(/store\.watcher\?\.discoveryAt/.test(disc) && /ws\.segHallAt/.test(disc), 'D53g 发现页那一格的时间是大厅自己的钟(㊑): 全站榜不再搭轮询的车以后, 在这屏说"上轮拉取"是把轮次的计时器借给大厅')
   assert(disc.length > 0 && !/segRoundAt|segInterval/.test(disc), 'D53h 发现页不再回落轮次时间或检测间隔(大厅没拉过就不摆时间, 不借别处的钟凑一句)')
   assert(/segHallAt: '拉取于 \{time\}'/.test(zh) && /segHallAt: 'Pulled \{time\}'/.test(en), 'D53i segHallAt 双语成对(只在发现页出现的一格, 不该留英文界面的孤儿键)')
@@ -1671,7 +1678,7 @@ checkWithAllowlist(
   const seg = (decl) => {
     const i = wt.indexOf(decl)
     if (i < 0) return ''
-    const j = wt.indexOf('\n  }\n', i)
+    const j = bodyEnd(wt, i)
     return wt.slice(i, j < 0 ? undefined : j)
   }
   const rs = seg('private async roundSoop(')
@@ -1689,7 +1696,7 @@ checkWithAllowlist(
   const seg = (decl) => {
     const i = wt.indexOf(decl)
     if (i < 0) return ''
-    const j = wt.indexOf('\n  }\n', i)
+    const j = bodyEnd(wt, i)
     return wt.slice(i, j < 0 ? undefined : j)
   }
   const rt = seg('private async roundSoopTop(')
@@ -1710,7 +1717,7 @@ checkWithAllowlist(
   const seg = (src, decl) => {
     const i = src.indexOf(decl)
     if (i < 0) return ''
-    const j = src.indexOf('\n  }\n', i)
+    const j = bodyEnd(src, i)
     return src.slice(i, j < 0 ? undefined : j)
   }
   const fp = seg(so, 'async fetchPlay(')
@@ -1721,10 +1728,10 @@ checkWithAllowlist(
   assert(/const known = this\.freshBroadNo\(channel\)/.test(fp), 'D56a 取流先问一句"这一场的号我是不是已经有了"(列表整表白送 broad_no, 不用等于扔掉)')
   assert(/if \(r\.live\) this\.bnoCache\.set\(r\.userId, \{ bno: r\.live\.broadNo, at: Date\.now\(\) \}\)/.test(fv) && /else this\.bnoCache\.delete\(r\.userId\)/.test(fv), 'D56b 关注列表那一发顺手播种场次号, 而列表改口说离线就当场作废 —— 号是这一场的钥匙, 不是这个房的门牌')
   assert(/Date\.now\(\) - hit\.at >= SoopApi\.BNO_TTL/.test(fb) && /this\.bnoCache\.delete\(channel\)/.test(fb), 'D56c 号过期=当没读到过并删掉(不供成永久, 也不带着旧号白撞整链)')
-  assert(/const meta = await this\.fetchPageMeta\(channel\)\s*return this\.runPlayChain\(channel, password, meta\)/.test(fp), 'D56d 手里没号才读整页: 既有那条链路一字不动地留着(降级路径没被换掉, 只是不再是唯一路径)')
+  assert(/const meta = await this\.fetchPageMeta\(channel\)\s*return this\.runPlayChain\(channel, password, meta(, fullVariants)?\)/.test(fp), 'D56d 手里没号才读整页: 既有那条链路一字不动地留着(降级路径没被换掉, 只是不再是唯一路径; ㊔ 只多带一个档级参数)')
   assert(/if \(r\.ok \|\| r\.needPassword \|\| r\.needLogin\) return r/.test(fp), 'D56e 成功/要密码/要登录三类答案与场次号无关 → 原样回报, 不为它们多读一页')
   assert(/this\.bnoCache\.delete\(channel\)[\s\S]{0,80}this\.fetchPageMeta\(channel, false, true\)/.test(fp), 'D56f 只有真失败才回读整页定性, 且那一发必须 fresh(拿缓存页给旧号定性=自己骗自己)')
-  assert(/if \(!m\.living \|\| m\.broadNo !== known\) return this\.runPlayChain\(channel, password, m\)\s*return r/.test(fp), 'D56g 页面说没在播或给了新号才重走一次, 号还对得上就原样回报 —— 复用的代价上界恒为 1 页 + 1 次整链, 不会滚成三次五步')
+  assert(/if \(!m\.living \|\| m\.broadNo !== known\) return this\.runPlayChain\(channel, password, m(, fullVariants)?\)\s*return r/.test(fp), 'D56g 页面说没在播或给了新号才重走一次, 号还对得上就原样回报 —— 复用的代价上界恒为 1 页 + 1 次整链, 不会滚成三次五步(㊔ 重走时档级沿用 caller 要的那一份)')
   assert(/soopApi\.fetchPageMeta\(a\.userId, true, true\)/.test(wt), 'D56h 轮询探针以 fresh 取页: 它就是"这房现在怎么样"的裁判, 而最短一档 5 秒比页面 TTL 还小, 缓存会把两轮读成同一份页')
   assert(/if \(!fresh\) \{[\s\S]{0,120}const hit = this\.pageCache\.get\(channel\)/.test(fm) && /if \(!fresh\) this\.pageInflight\.set\(channel, p\)/.test(fm), 'D56i fresh 同时绕过微缓存与在飞合并: 探针既不该拿旧页, 也不该把自己并进别人那一发的结果里')
   assert(/this\.pageCache\.set\(channel, \{ at: Date\.now\(\), meta \}\)/.test(rp) && /this\.pageCache\.size > 64/.test(rp), 'D56j 页面缓存只在真读到以后写, 且带 64 条上限(先清过期再截断, 不随关注数无界增长)')
@@ -1774,9 +1781,9 @@ checkWithAllowlist(
   const invPa = seg(pa, 'invalidatePlay(userId: string): void {')
   assert(/this\.bumpEpoch\(channel\)/.test(invSo) && /this\.bumpEpoch\(userId\)/.test(invPa), 'D57f 显式作废即纪元 +1(顺序上先抬纪元再删缓存, 免得删与抬之间挤进一条链)')
   assert(
-    /this\.playInflight\.delete\(channel\)[\s\S]{0,60}this\.playInflight\.delete\(`\$\{channel\}#pw`\)/.test(invSo) &&
+    /for \(const pw of \[('', )?'#pw'[^\]]*\]\)[\s\S]{0,60}for \(const fan of \[[^\]]*'#top'[^\]]*\]\)[\s\S]{0,60}this\.playInflight\.delete\(/.test(invSo) &&
       /this\.playInflight\.delete\(userId\)[\s\S]{0,60}this\.playInflight\.delete\(userId \+ '#pw'\)/.test(invPa),
-    'D57g 在飞键有两个形状(裸房 / 房#密码槽), 作废必须都摘: 留一半 = 让新 caller 合进一条注定作废的链'
+    'D57g 在飞键的每一种形状(裸房 / 房#密码槽 / ㊔ 再加档级槽)作废时都必须摘净: 留一半 = 让新 caller 合进一条注定作废的链'
   )
   assert(
     /playEpochAll\+\+[\s\S]{0,120}this\.playCache\.clear\(\)[\s\S]{0,160}this\.playInflight\.clear\(\)/.test(seg(so, 'clearPlayCache(): void {')) &&
@@ -1824,7 +1831,7 @@ checkWithAllowlist(
   const seg = (decl) => {
     const i = wt.indexOf(decl)
     if (i < 0) return ''
-    const j = wt.indexOf('\n  }\n', i)
+    const j = bodyEnd(wt, i)
     return wt.slice(i, j < 0 ? undefined : j)
   }
   const hp = seg('private async harvestPages(')
@@ -1876,6 +1883,197 @@ checkWithAllowlist(
     'D60c 旧库形状只在读这一道收敛(load 里逐格迁移 + 删死键, 全库一处调用): 写侧再兜等于同时供着两套形状, 死键也就永远删不净',
     `调用点数=${(st.match(/migrateSettings\(/g) || []).length}`
   )
+}
+
+// ============================================================================
+// D61~D65 第 23 轮(㊔): 请求面收口 —— 三个"没人要的请求"与两处"方向反了的复用"
+//   这一轮的真值来自实测, 不是推理: master 令牌 exp=取源+585s, 而 5 条变体地址在**整轮无心跳**
+//   的情况下 27.1 分钟仍 5/5 全活 —— 变体不靠心跳续命, 15s 一轮全档齐养(≈11.5 万发/天)是把自己当播放器。
+//     R9  保活泵按 15s 无差别养所有缓存源(含已下播/已取关的): 周期与"该不该养"都要改
+//     R10 SOOP 每多解一档多 2 发(预取 8~10 发链), 而预取的产出只是徽标亮一下: 后台不该要全档菜单
+//     R11 风控信号只在 Panda 有账, SOOP 撞 403/429/HTML 后各泵照每轮重打: 越抖越打
+//     R12 门槛类回执(付费/成人/粉丝/道具/本场已断)每次进房都重打整链, 换回同一句话
+//     R13 代理端每个播放器请求各自打一次上游, 播放器+保活泵撞同一 target 即双份
+//   行为侧由 verify-follows H/I/J、verify-playcache T34/T34b/T35、verify-p1 G5、verify-keepalive S13~S15 数实发请求。
+// ============================================================================
+{
+  const pa = fs.readFileSync(R('src', 'main', 'services', 'pandalive.ts'), 'utf8')
+  const segPa = (decl) => {
+    const i = pa.indexOf(decl)
+    if (i < 0) return ''
+    const j = bodyEnd(pa, i)
+    return pa.slice(i, j < 0 ? undefined : j)
+  }
+  assert(/private static KEEPALIVE_MS = 60_000/.test(pa) && !/KEEPALIVE_MS = 15_000/.test(pa), 'D61a 泵周期 15s→60s 是改口不是加档(实测无心跳 27 分钟变体全活: 泵只需在没人看的时候别让会话饿死)')
+  assert(/const wait = Math\.min\(120_000, Math\.max\(PandaApi\.KEEPALIVE_MS, this\.playCache\.size \* 400\)\)/.test(pa) && /setTimeout\(\(\) => void loop\(\), wait\)/.test(pa), 'D61b 间隔随缓存规模自适应(每源 +400ms, 封顶 120s)且真作用在重排上 —— 只在首轮用基准值')
+  assert(/private static KEEPALIVE_OFFLINE_TTL_MS = 30 \* 60_000/.test(pa) && /private static KEEPALIVE_GUEST_TTL_MS = 10 \* 60_000/.test(pa), 'D61c 源缓存有两道活性时限: 已下播 30 分钟 / 不在关注表 10 分钟(缓存不再是"取到就永久算有源")')
+  const tk = segPa('private async keepaliveTick(')
+  assert(/const anchors = new Map\(store\.listAnchors\(\)\.map\(\(a\) => \[roomKey\(a\.platform, a\.userId\), a\]\)\)/.test(tk), 'D61d 关注表按复合键建(playCache 是裸 userId, 直接拿裸号建表会让同号 SOOP 关注覆盖 Panda 的 isLive)')
+  // 离线分支到"在播才入队"那一行之间 = 下播房能做的事的全集: 这一段里出现 queue.push 就是给已知下播的房发心跳
+  const off = tk.slice(tk.indexOf('if (!a.isLive) {'), tk.lastIndexOf('queue.push([userId, pack])'))
+  assert(off.length > 0 && !/queue\.push/.test(off) && /age > PandaApi\.KEEPALIVE_OFFLINE_TTL_MS/.test(off) && /this\.invalidatePlay\(userId\)/.test(off) && /\r?\n {10}continue/.test(off), 'D61e 已知下播: 一次心跳都不发(老纪律不动), 时限只管收尸让「秒开」徽标说实话 —— 从这一格到在播入队那行之间不许长出 queue.push')
+  assert(/if \(age <= PandaApi\.KEEPALIVE_GUEST_TTL_MS\) queue\.push\(\[userId, pack\]\)/.test(tk) && /不在关注表且已过宽限, 源出队/.test(tk), 'D61f 未关注源(临时进房回访)给 10 分钟宽限照常养, 到期收手并出声 —— 不静默蒸发')
+  assert((tk.match(/queue\.push/g) || []).length === 2, 'D61f2 整个 tick 只有两个入队点(宽限期内的未关注源 + 在播的关注源): 「只在关注且在播的源入队」是靠结构成立的, 不是靠日志说的', `实数=${(tk.match(/queue\.push/g) || []).length}`)
+  assert(!/this\.playCache\.delete\(userId\)/.test(tk) && (tk.match(/this\.invalidatePlay\(userId\)/g) || []).length === 2, 'D61g 收手一律走 invalidatePlay(纪元 +1 + 在飞摘净 + 徽标广播), 不许绕过纪元门直接删缓存条目', `实数=${(tk.match(/this\.invalidatePlay\(userId\)/g) || []).length}`)
+  assert(/const age = pack\.fetchedAt \? Date\.now\(\) - pack\.fetchedAt : 0/.test(tk) && /if \(!pack\.ok \|\| pack\.vod\) continue/.test(tk), 'D61h 无 fetchedAt 算 0 岁: 不是经缓存写入路径来的源不收手(宁漏一次清理也不误杀); 回放是静态分片, 无会话活性概念')
+  const ks = segPa('private async keepaliveSource(')
+  assert(/pack\.variants\?\.length \? pack\.variants\.map\(\(v\) => v\.url\) : \[pack\.m3u8 \|\| ''\]/.test(ks) && !/variants[\s\S]{0,80}\.slice\(/.test(ks), 'D61i 心跳仍全档齐养: 只养最高档会让其它档会话饿死, 用户切清晰度即暴毙(周期可以松, 覆盖面不能窄)')
+  assert(/isPrimary && \(st === 403 \|\| st === 404\)/.test(ks) && /const isPrimary = url === urls\[0\]/.test(ks), 'D61j 只有主档的 403/404 记真死(副档 404 仅观测): 网络层失败一个都不计, 否则断网恢复瞬间全量误杀+对瘫痪 API 群重铸')
+  assert(/源保活泵已启动\(基准 \$\{PandaApi\.KEEPALIVE_MS \/ 1000\}s[^\n]*只在关注且在播的源入队\)/.test(pa), 'D61k 启动那一行把新口径念出来(周期 + 自适应 + 入队门), 真机一眼能认出泵是哪一版')
+}
+{
+  const so = fs.readFileSync(R('src', 'main', 'services', 'soop.ts'), 'utf8')
+  const pa = fs.readFileSync(R('src', 'main', 'services', 'pandalive.ts'), 'utf8')
+  const si = fs.readFileSync(R('src', 'main', 'services', 'source.ts'), 'utf8')
+  const ipc = fs.readFileSync(R('src', 'main', 'ipc.ts'), 'utf8')
+  const wt = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
+  const seg = (s, decl) => {
+    const i = s.indexOf(decl)
+    if (i < 0) return ''
+    const j = bodyEnd(s, i)
+    return s.slice(i, j < 0 ? undefined : j)
+  }
+  assert(/const presets = fullVariants \? allPresets : allPresets\.slice\(0, 1\)/.test(so) && (so.match(/allPresets\.slice\(/g) || []).length === 1, 'D62a 档位扇出只有一个闸口(菜单一次读全, 请求按档发): 别处再 slice 一次就是第二条取流链')
+  assert(/partial: !fullVariants && allPresets\.length > 1/.test(so), 'D62b partial 只在"真的还有档没解"时成立: 单档房的那份源是完整菜单, 不该被满档 caller 判成残缺而白重打整链')
+  assert(/档位=\$\{variants\.length\}\$\{fullVariants \? '' : '\(只解最高档\)'\}/.test(so), 'D62c 拉源日志带档位与档级(真机一眼分得清预取那一发与进房那一发)')
+  const fp = seg(so, "async fetchPlay(channel: string, password = '', fullVariants = true)")
+  assert(fp.includes('this.runPlayChain(channel, password, m, fullVariants)') && fp.includes('this.runPlayChain(channel, password, meta, fullVariants)'), 'D62d fullVariants 沿 fetchPlay 的两条重打分支一路传到底: 在 bno 复用那一跳上把它丢了, 预取就又变成整链')
+  assert(/async getPlayCached\(channel: string, password = '', forceFresh = false, fullVariants = false\)/.test(so) && /getPlayCached\(id: string, password\?: string, forceFresh\?: boolean, fullVariants\?: boolean\)/.test(si), 'D62e 契约与实现对齐, 默认值是 false: 后台默认省档, 要全档必须明说(默认给全档 = 这个旋钮白装)')
+  assert(!/getPlayCached\(userId: string, password = '', forceFresh = false, fullVariants/.test(pa), 'D62f Panda 不装这个旋钮: 它的取源是一发 play + 一次 master(变体免费), 省档省不下任何请求, 加了只会让人以为两边同形')
+  assert(/sourceFor\(platform\)\.getPlayCached\(userId, safePwd\(password\), !!fresh, true\)/.test(ipc), 'D62g 播放器那一条(唯一的用户意图取源入口)显式要全档 —— 清晰度菜单缺档比多 4 发更糟')
+  assert(/await sourceFor\(platform\)\.getPlayCached\(uid\)\.catch/.test(wt) && (wt.match(/getPlayCached\([^)]*,[^)]*,[^)]*,/g) || []).length === 0, 'D62h watcher 里所有预取都走默认档级(只解最高档), 一处都不许自己传全档', `四处参数调用=${(wt.match(/getPlayCached\([^)]*,[^)]*,[^)]*,/g) || []).length}`)
+}
+{
+  const so = fs.readFileSync(R('src', 'main', 'services', 'soop.ts'), 'utf8')
+  const gp = (() => {
+    const i = so.indexOf('async getPlayCached(channel: string, password = ', 0)
+    const j = bodyEnd(so, i)
+    return so.slice(i, j < 0 ? undefined : j)
+  })()
+  assert(/const key = `\$\{channel\}\$\{password \? '#pw' : ''\}\$\{fullVariants \? '' : '#top'\}`/.test(gp), 'D63a 在途键同时表达密码槽与档级: 把"要全档"的 caller 合进一条只解最高档的在途链 = 塞给它一份残缺菜单')
+  // 注意: 这里匹配的是源码里的逻辑或, 必须写成 \|\| —— 裸 || 在正则里是"空交替", 恒真(= 契约不站岗)
+  assert(/if \(c && c\.ok && \(!fullVariants \|\| !c\.partial\)\) return c/.test(gp), 'D63b 命中方向(本轮反过一次, 锁死): 只要最高档的那方, 手里这份满不满档都够用; 要满档的那方绝不能接一份只解最高档的包')
+  assert(!/if \(c && c\.ok && \(!c\.partial \|\| fullVariants\)\)/.test(gp), 'D63c 反写的命中式不许回来(它同时犯两个错: 满档 caller 拿到残缺包, 预取 caller 白重打整链)')
+  assert(/const r = await this\.fetchPlay\(channel, password, fullVariants\)/.test(gp), 'D63d 在途链自己按档级发, 结果按 e0 纪元门落缓存(与 D57 同一条门, 省档不省掉作废语义)')
+  assert(/this\.playInflight\.set\(key, p\)/.test(gp) && /this\.playInflight\.delete\(key\)/.test(gp), 'D63e 在飞按 key 装/摘(四种形状各一条), 摘在 finally 里 —— 失败的那一发不许把键留在表上挡后来者')
+}
+{
+  const so = fs.readFileSync(R('src', 'main', 'services', 'soop.ts'), 'utf8')
+  const wt = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
+  const rc = fs.readFileSync(R('src', 'main', 'services', 'recorder.ts'), 'utf8')
+  const ipc = fs.readFileSync(R('src', 'main', 'ipc.ts'), 'utf8')
+  const seg = (s, decl) => {
+    const i = s.indexOf(decl)
+    if (i < 0) return ''
+    const j = bodyEnd(s, i)
+    return s.slice(i, j < 0 ? undefined : j)
+  }
+  const nr = seg(so, 'private noteRisk(url: string, status: number, text: string): void {')
+  assert(/const isPage = url\.startsWith\(`\$\{SOOP_ORIGIN\}\/`\)/.test(nr) && /const htmlOnApi = !isPage && text\.trimStart\(\)\.startsWith\('<'\)/.test(nr), 'D64a "接口回了 HTML"这条只在接口上算数: 播放页本来就是一篇 HTML(第一版拿整页当风控, 读一次页就冷却五分钟 = 自断)')
+  assert(/const httpHit = status === 403 \|\| status === 429 \|\| \(status >= 500 && status !== 515\)/.test(nr), 'D64b 5xx 里 515 排除在外(那是 Cloudflare "区域被屏蔽"的固定返回码, 每次必中 = 永久冷却)')
+  assert(!/throw/.test(nr) && /this\.riskUntil = Date\.now\(\) \+ SoopApi\.RISK_COOL_MS/.test(nr), 'D64c 记账只写表, 绝不抛(抛=把风控算成用户那一条链的失败); 判据与抬时间戳同函数内完成, 不给"看到了却没记"留缝')
+  assert(/if \(!this\.riskCooling\(\)\) logger\.warn/.test(nr), 'D64d 同一个冷却窗口只出声一次(每发都 warn = 日志里全是重复, 反而看不出风控开始的那一刻)')
+  assert(/private static RISK_COOL_MS = 5 \* 60_000/.test(so) && /riskCooling\(\): boolean \{\s*return Date\.now\(\) < this\.riskUntil/.test(so), 'D64e 冷却 5 分钟与读取口径(读时间戳, 不自减计数)')
+  assert((wt.match(/soopApi\.riskCooling\(\)/g) || []).length === 2, 'D64f watcher 里恰好两处消费(探针整批收手 + 预取泵整条收手): 一处都不许多, 消费点多了就等于把同一个闸门装在不同的路上', `实数=${(wt.match(/soopApi\.riskCooling\(\)/g) || []).length}`)
+  assert(!/riskCooling/.test(ipc) && !/riskCooling/.test(rc) && !/riskCooling/.test(seg(so, 'async getPlayCached(')), 'D64g 冷却只归后台的泵消费: 用户点开播/播放器起录/取源本身一律不看它 —— 冷却期把用户意图也挡下是拿时效换安全, 而这道交易没谈过')
+  const cool = /if \(soopApi\.riskCooling\(\) && sent\.length\) \{[\s\S]*?\n {4}\}/.exec(wt)
+  assert(!!cool && /sent = \[\]/.test(cool[0]) && !/fail\+\+|fail \+=|roundFailed \+=/.test(cool[0]), 'D64h 收手那格只做一件事: 把 sent 清空(这些房留在 probe 里由"被预算挡下"那一格统一计数)。两处都记会把同一批房数两遍')
+  assert(/const allFail = anchors\.length > 0 && covered === 0 && \(sent\.length > 0 \? fail === sent\.length : probe\.length > 0\)/.test(wt), 'D64i 失明判据把"冷却收手"当成全灭而非"没瞎": sent 被清空 ≠ 读到 0 失败, 冷却期正好把连坐提醒绕过去是最糟的组合')
+  assert(/this\.riskUntil = 0/.test(seg(so, 'clearPlayCache(): void {')), 'D64j 换号即撤冷却: 上一号的风控静默不该闷住新账号的泵(与 Panda 熔断随换号撤退同语义)')
+}
+{
+  const hp = fs.readFileSync(R('src', 'main', 'services', 'hlsProxy.ts'), 'utf8')
+  const pa = fs.readFileSync(R('src', 'main', 'services', 'pandalive.ts'), 'utf8')
+  const wt = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
+  const seg = (s, decl) => {
+    const i = s.indexOf(decl)
+    if (i < 0) return ''
+    const j = bodyEnd(s, i)
+    return s.slice(i, j < 0 ? undefined : j)
+  }
+  assert(/private inflightReads = new Map<string, Promise<ProxyRead>>\(\)/.test(hp) && (hp.match(/this\.readUpstream\(/g) || []).length === 2, 'D65a 清单与分片共用一条在飞表, 且上游只有 readUpstream 这一个读取入口(两个调用点): 各写一遍 fetchUpstream = 播放器与保活泵撞同一 target 时打两份')
+  assert(/const flying = this\.inflightReads\.get\(target\)\s*if \(flying\) return flying/.test(hp), 'D65b 合流按上游 target 认(令牌/签名已在 URL 里), 不按客户端认')
+  assert(/if \(this\.inflightReads\.get\(target\) === p\) this\.inflightReads\.delete\(target\)/.test(hp), 'D65c 撒锁按身份比: 后到的 finally 不许把下一批的键摘掉')
+  assert(!/inflightReads\.set\([^,]+,[\s\S]{0,40}Date\.now/.test(hp) && /只合流、不加 TTL 缓存/.test(hp), 'D65d 只合流不缓存: 直播清单每一轮都要新的, 把读满进内存的日子留着就是新段读成旧段')
+  assert(/private static GATE_CODES = \['needAdult', 'needFan', 'needUnlimitItem', 'needCoinPurchase', 'castEnd'\]/.test(pa) && /private static GATE_TTL_MS = 15 \* 60_000/.test(pa), 'D65e 门槛账只收这五个"不会自己好"的码, 15 分钟: 密码类与登录态类一个都不记账(用户下一次可能就把密码改对了)')
+  assert(/if \(PandaApi\.GATE_CODES\.includes\(code\)\) this\.gates\.set\(userId, \{ until: Date\.now\(\) \+ PandaApi\.GATE_TTL_MS, pack: gate \}\)/.test(pa), 'D65f 记账点唯一且在受限码分支内: 门外的失败(网络/满员)混进账里 = 把可重试的当不可重试的挡 15 分钟')
+  assert(/if \(g && g\.until > Date\.now\(\) && !password\) return \{ \.\.\.g\.pack \}/.test(pa), 'D65g 短路三条件(有账 + 没过期 + 没带密码)且返回的是拷贝: 复用的那句不许被调用方改一处就污染整本账')
+  assert(/this\.gates\.delete\(userId\)/.test(seg(pa, 'invalidatePlay(userId: string): void {')) && /this\.gates\.clear\(\)/.test(seg(pa, 'clearPlayCache(): void {')), 'D65h 门槛账跟着事件走: 开播/作废清这一房, 换号清整本 —— 上一个账号的"爱心余额不足"对这一个账号毫无意义')
+  const ep = seg(wt, 'private enqueuePrewarm(platform: Platform, userId: string): void {')
+  assert(/if \(a\?\.tags\?\.isPw\) return/.test(ep) && ep.indexOf('isPw) return') < ep.indexOf('q.push(userId)'), 'D65i 密码房不进预取队列(门在入队上游): 预取这一路永远没有密码, 这一发注定换回一句"要密码" —— SOOP 那句"要密码"背后是整条取源链')
+}
+
+// ============================================================================
+// D66 验证脚本自己的体检: 恒真的正则 = 不站岗的契约
+//   正则字面量里裸写 || 是"空交替"—— 那个空分支能匹配空串, 于是 .test() 恒真, 正断言永远绿。
+//   本轮 D63b 刚写下 (\(!fullVariants OROR !c\.partial\)) 时忘了转义逻辑或, 把源码改坏它照样报 PASS,
+//   而且报得理直气壮。这类失效不会自己出声(它长得就像"通过"), 只能由一条元契约扫全部验证脚本。
+//   判据两条: (a) 字面量里有不转义的连续两竖; (b) 字面量匹配空串(长度阈值 14, 放过 /\s*/ 这一类真短的)。
+//   2026-10-02 实测: 十条验证脚本按这两条扫 = 0 命中(修掉 D63b 之后), 所以阈值可以直接钉死。
+// ============================================================================
+{
+  const START = /[(!&|?,=:]\s*$/
+  const literal = (s, i) => {
+    let j = i + 1
+    let body = ''
+    while (j < s.length) {
+      const ch = s[j]
+      if (ch === '\\') {
+        body += ch + (s[j + 1] || '')
+        j += 2
+        continue
+      }
+      if (ch === '[') {
+        let k = j
+        while (k < s.length && s[k] !== ']') {
+          if (s[k] === '\\') k++
+          k++
+        }
+        body += s.slice(j, k + 1)
+        j = k + 1
+        continue
+      }
+      if (ch === '/') return body.length ? { body, end: j } : null
+      if (ch === '\n') return null
+      body += ch
+      j++
+    }
+    return null
+  }
+  const bad = []
+  const files = fs.readdirSync(R('scripts')).filter((n) => /^verify-.+\.mjs$/.test(n))
+  for (const f of files) {
+    const s = fs.readFileSync(R('scripts', f), 'utf8')
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] !== '/') continue
+      if (!START.test(s.slice(Math.max(0, i - 14), i))) continue
+      const lit = literal(s, i)
+      if (!lit) continue
+      i = lit.end
+      let inCls = false
+      for (let k = 0; k < lit.body.length - 1; k++) {
+        const c = lit.body[k]
+        if (c === '\\') {
+          k++
+          continue
+        }
+        if (c === '[') inCls = true
+        else if (c === ']') inCls = false
+        else if (c === '|' && !inCls && lit.body[k + 1] === '|') {
+          bad.push(`${f}: 裸逻辑或 /${lit.body}/`)
+          break
+        }
+      }
+      let re = null
+      try {
+        re = new RegExp(lit.body)
+      } catch {
+        re = null
+      }
+      if (re && lit.body.length >= 14 && re.test('')) bad.push(`${f}: 匹配空串 /${lit.body}/`)
+    }
+  }
+  assert(files.length >= 10 && bad.length === 0, 'D66a 十条验证脚本里没有一个恒真的正则字面量(扫描本身也要跑到: 文件数不足同样判失败)', `脚本数=${files.length} 命中=${bad.slice(0, 8).join(' | ')}`)
 }
 
 // ============================================================================

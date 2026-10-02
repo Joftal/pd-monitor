@@ -16,7 +16,7 @@
 //   F1  房间入参一把尺: isRoomId 与 parseRoomInput 同口径拒绝路径穿越/超长/控制字符
 //   G1  HLS 代理三道闸: 缺令牌/令牌错 → 403, 未签发 origin → 403, 非法 url → 400
 //   G2  代理正常链路: 清单重写带令牌 + 预载段过滤 + 上游请求头注入 + 跨实例令牌互不通用
-//   G3  签发 origin 表有上限并按活跃度淘汰(长跑不涨面)
+//   G3  签发 origin 表有上限并按活跃度淘汰(长跑不涨面) / ㊔ G5 上游在途合流: 同目标并发只发一发, 落定即撒锁、不设 TTL
 //   H1  机密降级: 无系统密钥 → plain 封装 + degraded=true + 日志留痕; 恢复后重写转 enc
 // ============================================================================
 import { createRequire } from 'module'
@@ -88,6 +88,7 @@ const world = {
   upstream: [],
   upstreamBody: {},
   upstreamStatus: {},
+  upstreamDelayMs: 0, // ㊔ 在途合流的量测用延迟(0=不发慢, G5 用来让两问撞进同一次上游读)
   hdrFor: () => ({ Cookie: 'sess=1', Origin: 'https://play.sooplive.com' })
 }
 
@@ -192,6 +193,7 @@ const baseStore = {
 
 const fakeUpstreamFetch = async (url, init = {}) => {
   world.upstream.push({ url, headers: init.headers || {} })
+  if (world.upstreamDelayMs) await new Promise((r) => setTimeout(r, world.upstreamDelayMs))
   const status = world.upstreamStatus[url] ?? 200
   const body = world.upstreamBody[url] ?? '#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg1.ts\n#EXTINF:6.0,\nseg2-preloading.ts\n#EXT-X-ENDLIST\n'
   return new Response(body, { status, headers: { 'content-type': 'application/vnd.apple.mpegurl' } })
@@ -312,6 +314,7 @@ async function reset(over = {}) {
   world.upstream.length = 0
   world.upstreamBody = {}
   world.upstreamStatus = {}
+  world.upstreamDelayMs = 0
   world.settings = defaults(over)
 }
 
@@ -569,6 +572,50 @@ console.log('\n--- G1/G2/G3 本地 HLS 代理访问面 ---')
   for (let i = 0; i < 60; i++) p4.playlistUrl(i % 2 ? `https://x${i}.example.com/a.m3u8` : 'https://keep.example.com/a.m3u8')
   const keepRes = await get(`http://127.0.0.1:${port4}/playlist.m3u8?t=${t4}&url=${encodeURIComponent('https://keep.example.com/a.m3u8')}`)
   assert(keepRes.status === 200, 'G4-1 反复签发的活跃 CDN 不被淘汰(否则录制自断)')
+  // G5 ㊔ 上游在途合流: 同一个目标并发几问只打上游一发(清单重载与分片重试正是这一形状)
+  {
+    const port = new URL(signed).port
+    const segUrl = new URL(mediaLine || 'media', `http://127.0.0.1:${port}`).href
+    world.upstreamDelayMs = 150
+    const before = world.upstream.length
+    const [ra, rb, rc] = await Promise.all([get(signed), get(signed), get(signed)])
+    assert(
+      world.upstream.length - before === 1 && ra.status === 200 && rb.text === ra.text && rc.text === ra.text,
+      'G5-1 并发三问同一清单只发一发上游, 三份都拿到改写后的正文(合流不吞任何一问)',
+      `上游=${world.upstream.length - before}`
+    )
+    const beforeSeg = world.upstream.length
+    world.upstreamDelayMs = 150
+    const [sa, sb] = await Promise.all([get(segUrl), get(segUrl)])
+    assert(
+      world.upstream.length - beforeSeg === 1 && sa.status === 200 && sb.status === 200,
+      'G5-2 同一分片并发重问(ffmpeg 重试)同样合流, 分片走 Buffer 不改写',
+      `上游=${world.upstream.length - beforeSeg}`
+    )
+    world.upstreamDelayMs = 0
+    const afterLive = world.upstream.length
+    const r2 = await get(signed)
+    assert(world.upstream.length - afterLive === 1 && r2.status === 200, 'G5-3 只在途合流、不设 TTL: 上一次落定之后再问要重新读(直播清单每一秒都是新数)')
+    world.upstreamDelayMs = 150
+    const beforeTwo = world.upstream.length
+    const ua = p.playlistUrl('https://cdnA.example.com/a.m3u8')
+    const ub = p.playlistUrl('https://cdnB.example.com/b.m3u8')
+    await Promise.all([get(ua), get(ub)])
+    assert(world.upstream.length - beforeTwo === 2, 'G5-4 不同目标各发一发(合流按目标键, 不跨房串正文)', `上游=${world.upstream.length - beforeTwo}`)
+    world.upstreamDelayMs = 0
+    // 失败那一发不许把坏正文供成"永久": 锁按身份撒, 下一问重新读上游
+    world.upstreamStatus['https://live.sooplive.com/abc/720.m3u8'] = 503
+    const beforeFail = world.upstream.length
+    const f1 = await get(signed)
+    const f2 = await get(signed)
+    assert(
+      f1.status === 503 && f2.status === 503 && world.upstream.length - beforeFail === 2,
+      'G5-5 上游 503 在两问之间落定时各发一发: 锁用完即撒, 坏读数不缓存',
+      `码=${f1.status}/${f2.status} 上游=${world.upstream.length - beforeFail}`
+    )
+    delete world.upstreamStatus['https://live.sooplive.com/abc/720.m3u8']
+    assert(p.inflightReads.size === 0, 'G5-6 合流表在每问落定后清空(长跑不留Promise 引用)')
+  }
   for (const pr of proxies) {
     pr.server.closeAllConnections?.()
     await new Promise((res) => pr.server.close(res))

@@ -20,6 +20,8 @@
 //   T30 ㊓⑥ 立即刷新的每平台 8 秒下限     T31 ㊓⑤ login_info 探针的判死节流(netFail 不节流)
 //   T32 ㊓④ 全站榜分页单飞锁(兜底轮与大厅共用) + 失败语义的两种吃法
 //   T33 ㊓⑦ 预取补扫改到首轮之后、按真值过滤、跳过已有源的房
+//   T34 ㊔ Panda 门槛回执账(五码 15 分钟短路, 带密码/强刷/作废/换号即解除) + 密码房不进预取队列
+//   T35 ㊔ SOOP 预取那一发的形状: 只解最高档(fullVariants=false), 不强制重打(forceFresh=false)
 // ============================================================================
 import { createRequire } from 'module'
 import * as fs from 'fs'
@@ -63,6 +65,7 @@ const world = {
   liveLoginInfo: true, // false ⇒ 全站榜响应不再带 loginInfo(会话判死期的列表形态)
   liveFail: false, // true ⇒ /v1/live 直接抛错(大厅按需刷新要证的"拉不到 ≠ 全站没人播")
   playCalls: [],   // /v1/live/play 真实发起记录(判定"是否重新拉源"的唯一依据)
+  playGate: {},    // userId -> 门槛码: 让 /v1/live/play 回 errorData.code(付费/成人/粉丝/道具/本场已断)
   liveCalls: [],   // /v1/live 分页请求记录(T16 复用性断言 + ㊑"轮询不再搭全站榜的车")
   bjCalls: [],     // /v1/member/bj 调用记录 [{userId, at}](轮扫覆盖/时刻断言)
   toasts: [],      // sendToast 记录
@@ -71,6 +74,7 @@ const world = {
   soopCalls: [],   // 任何落到 SOOP 替身的调用(断言 Panda 场景零越界)
   soopFresh: [],   // 以 fresh=true 发出的取页(㊒④: 探针那一发必须是新页, 微缓存不许拦它)
   soopCached: [],  // 替身手上"已有有效源"的频道(㊓⑦ 首轮补扫要跳过它们)
+  soopPlayArgs: [], // 落到 SOOP 取源的调用参数(㊔: 断言"预取只解最高档 / 进房解满档")
   recStarts: [],   // recorder.start 记录
   recStops: [],    // recorder.stop 记录
   recStartThrow: false, // true 时 recorder.start 抛错(T21 自录失败不伤链路)
@@ -123,6 +127,13 @@ const fakeFetch = async (url, init = {}) => {
   if (u.hostname === 'api.pandalive.co.kr' && u.pathname === '/v1/live/play') {
     const body = new URLSearchParams(init.body || '')
     world.playCalls.push({ userId: body.get('userId'), password: body.get('password') || '' })
+    const gate = world.playGate[body.get('userId')]
+    if (gate)
+      return fakeRes(200, {
+        result: false,
+        message: '조건이 충족되지 않았습니다.',
+        errorData: { code: gate }
+      })
     return fakeRes(200, {
       result: true,
       PlayList: { hls: [{ url: `https://cdn.live-video.net/${body.get('userId')}/master.m3u8` }] },
@@ -208,8 +219,10 @@ const mocks = {
           ...(world.soopMeta[channel] || {})
         }
       },
-      getPlayCached: async (channel) => {
+      getPlayCached: async (channel, password, forceFresh, fullVariants) => {
         world.soopCalls.push('getPlayCached:' + channel)
+        // ㊔: 档位扇出是 caller 传的第四格 —— 替身必须把它记下来, 否则"预取只解最高档"这一条打不中
+        world.soopPlayArgs.push({ channel, password: password || '', forceFresh: !!forceFresh, fullVariants: !!fullVariants })
         return { ok: false, error: 'soop stub' }
       },
       fetchPlay: async (channel) => {
@@ -219,7 +232,9 @@ const mocks = {
       invalidatePlay: (channel) => world.soopCalls.push('invalidatePlay:' + channel),
       // ㊓ 新增的两格: 替身必须同契约, 否则首轮补扫一碰 cachedSourceIds 就 TypeError(静默把场景打歪)
       seedPlay: (channel) => world.soopCalls.push('seedPlay:' + channel),
-      cachedSourceIds: () => (world.soopCached || []).map((c) => `soop:${c}`)
+      cachedSourceIds: () => (world.soopCached || []).map((c) => `soop:${c}`),
+      // ㊔ 风控静默台账: 本脚本一律回"没在冷却", 需要演冷却的场景改 world.soopRiskCooling
+      riskCooling: () => !!world.soopRiskCooling
     }
   },
   './recorder': {
@@ -313,8 +328,10 @@ async function reset() {
   db.anchors = []
   db.settings = mkSettings()
   world.inList = {}; world.bjMedia = {}; world.bj403 = {}; world.bjThrow = {}; world.bjNotFound = {}; world.latency = { liveMs: 0, bjMs: {} }
+  world.playGate = {} // ㊔ 门槛回执替身同样一场一份(不清会让下一场白捡一条短路)
   world.soopMeta = {}; world.soopThrow = {}; world.soopCalls.length = 0; world.soopFresh.length = 0
   world.soopCached = [] // ㊓⑦ 替身那份"已有源"清单同样一场一份
+  world.soopPlayArgs.length = 0
   world.liThrow = false; world.liveLoginInfo = true // ㊓⑤ 探针答案复位
   world.soopFavorites = null // ㊒ 默认"列表整条不接待": 想要预言机那场的场景自己摆行; world.soopFresh.length = 0
   // ㊑ 预言机场景隔离: 默认 bm=null(端点不接待) + 无会话罐(匿名) → 每一场都从"走全站榜那条链"起步,
@@ -1361,6 +1378,61 @@ db.anchors = [mkAnchor('y1', { platform: 'soop', isLive: true }), mkAnchor('y2',
   check('T33-7 跨平台不串台: 缓存清单读的是 SOOP 那一份(y2 跳过)', !world.soopCalls.includes('getPlayCached:y2'))
 }
 
+console.log('\n■ T34 ㊔ 门槛回执账 + 密码房不预取: 平台明说过不去的门槛不重打整链')
+await reset()
+{
+  world.playGate.g1 = 'needCoinPurchase'
+  db.anchors = [mkAnchor('g1', { isLive: true })]
+  const r1 = await api.getPlayCached('g1')
+  check('T34-1 门槛回执原样还给调用方(整链恰好一发)', r1.ok === false && playCount('g1') === 1, `实发=${playCount('g1')}`)
+  const r2 = await api.getPlayCached('g1')
+  check('T34-2 15 分钟内同房第二次取源零请求(那句门槛话不是网络故障, 重打只会换回同一句)', r2.ok === false && playCount('g1') === 1, `实发=${playCount('g1')}`)
+  await api.getPlayCached('g1', 'pw')
+  check('T34-3 带着密码来问的那一发不吃门(用户下一次可能改对)', playCount('g1') === 2, `实发=${playCount('g1')}`)
+  await api.getPlayCached('g1', '', true)
+  check('T34-4 手动强刷(forceFresh)照旧即时试(账不拦用户意图)', playCount('g1') === 3, `实发=${playCount('g1')}`)
+  api.invalidatePlay('g1')
+  await api.getPlayCached('g1')
+  check('T34-5 作废即清账: 事件(重开播/录制出错/强刷)之后重新问平台', playCount('g1') === 4, `实发=${playCount('g1')}`)
+  world.playGate.g2 = 'needLogin'
+  db.anchors.push(mkAnchor('g2', { isLive: true }))
+  await api.getPlayCached('g2')
+  await api.getPlayCached('g2')
+  check('T34-6 账只认那五个码: needLogin 不记账(后台自愈重登后必须能立刻再试)', playCount('g2') === 2, `实发=${playCount('g2')}`)
+  world.playGate.g3 = 'castEnd'
+  db.anchors.push(mkAnchor('g3', { isLive: true }))
+  await api.getPlayCached('g3')
+  await api.getPlayCached('g3')
+  check('T34-7 castEnd 在账上: 本场已断的那句话 15 分钟内不再复读', playCount('g3') === 1, `实发=${playCount('g3')}`)
+  api.clearPlayCache()
+  await api.getPlayCached('g3')
+  check('T34-8 换号/登出清账: 上一个账号的"爱心余额不足"对新账号毫无意义', playCount('g3') === 2, `实发=${playCount('g3')}`)
+}
+await reset()
+console.log('\n■ T34b ㊔ 密码房不进预取队列(预取那一路永远没有密码, 那一发注定换回"要密码")')
+{
+  db.anchors = [mkAnchor('pw1', { isLive: true, tags: { isAdult: false, isPw: true, type: 'free' } })]
+  watcher.enqueuePrewarm('pandalive', 'pw1')
+  const drained = await waitUntil(() => !watcher.prewarmPumping.pandalive && watcher.prewarmQueue.pandalive.length === 0, 2000)
+  check('T34b-1 密码房零发且不入队', drained && playCount('pw1') === 0 && watcher.prewarmQueue.pandalive.length === 0, `实发=${playCount('pw1')}`)
+  db.anchors.push(mkAnchor('pw2', { isLive: true }))
+  watcher.enqueuePrewarm('pandalive', 'pw2')
+  await waitUntil(() => playCount('pw2') > 0, 2000)
+  check('T34b-2 对照: 非密码房照旧排队拉源', playCount('pw2') === 1, `实发=${playCount('pw2')}`)
+}
+await reset()
+console.log('\n■ T35 ㊔ 预取的档位扇出: 后台那一发只买最高档, 满档由"真的进房"那一次买')
+{
+  world.soopFavorites = null
+  world.soopMeta = { z1: { living: true, broadNo: 21 } }
+  db.anchors = [mkAnchor('z1', { platform: 'soop', isLive: true })]
+  await roundOne('soop')
+  await waitUntil(() => !watcher.prewarmPumping.soop, 3000)
+  const arg = world.soopPlayArgs.find((x) => x.channel === 'z1')
+  check('T35-1 预取那一发 fullVariants=false(每多一档多两发: 1 aid + 1 调度)', !!arg && arg.fullVariants === false, JSON.stringify(arg))
+  check('T35-2 预取不带 forceFresh(泵不许把在途/缓存命中变成强制重打)', !!arg && arg.forceFresh === false, JSON.stringify(arg))
+}
+
 console.log('解读: T1/T2/T3 PASS ⇒ 「大厅轮询刷新会清源缓存」不成立(真实源码+可计数请求实证);')
 console.log('      T4 PASS ⇒ 列表内开播翻转的作废链路正常工作(对照);')
 console.log('      T17 PASS ⇒ 粉丝房 fanLive 专用通知+自录正常; T18 PASS ⇒ 下播 toast 单发, 重复判离线不重复;')
@@ -1391,4 +1463,7 @@ console.log('      T31 PASS ⇒ ㊓⑤ 判死期的 login_info 探针 5 分钟�
 console.log('      T32 PASS ⇒ ㊓④ 全站榜分页只有一处实现: 兜底轮与大厅同时启动共走一条在飞锁(一趟页), 锁用完即撒;'
   + ' 同一发失败的两种吃法 —— 大厅保留旧快照不抛错, 轮次必须记为本轮失败且不把在播读数改口.')
 console.log('      T33 PASS ⇒ ㊓⑦ 预取补扫挪到首轮之后: 排队发生在真值写回之后, 跳过手上已有源的房, 只跑首轮, 开关读本平台那一格, 缓存清单也读本平台那一份.')
+console.log('      T34/T34b PASS ⇒ ㊔ 门槛回执记账: 那五个码 15 分钟内不再重打整链, 而带密码/强刷/作废/换号四种事件都即时重新问;'
+  + ' 密码房根本不进预取队列(预取那一路永远没有密码).')
+console.log('      T35 PASS ⇒ ㊔ 预取那一发只解最高档(fullVariants=false)且不强制重打(forceFresh=false) —— 满档由用户真的进房那一次买.')
 process.exit(failures === 0 ? 0 : 1)
