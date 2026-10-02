@@ -309,6 +309,17 @@ class SoopApi {
   private playCache = new Map<string, PlayResult>()
   private playInflight = new Map<string, Promise<PlayResult>>()
   private cookieCache: { at: number; header: string } | null = null
+  /** 最近一次"这一房在播, 场次号是 X"的读数(关注列表整表白送 broad_no / 播放页实读), 按频道各存一格。
+   *  取流第一步原本只为拿这个号码就发一整页 HTML, 列表那一发既然给了就不该再买一次(㊒④)。
+   *  与 playCache 互不牵连: 源作废 ≠ 场次号作废 —— 它只随 TTL 与失败回落失效 */
+  private bnoCache = new Map<string, { bno: string; at: number }>()
+  /** 只比一轮轮询长一点: 过期就当没读到过, 回到读页那条既有链路(下播判定要的是页/路径这句话, 不是这里) */
+  private static BNO_TTL = 90_000
+  /** 播放页 HTML 的微缓存: 只给"连击型"调用方复用(录制启动前先取真名 → 紧接着拉整链, 同一页两发)。
+   *  轮询探针是来要新读数的, 一律 fresh 绕过这里 —— 最短一档 5s 比 TTL 还小, 缓存会吃掉头一轮 */
+  private pageCache = new Map<string, { at: number; meta: PageMeta }>()
+  private pageInflight = new Map<string, Promise<PageMeta>>()
+  private static PAGE_TTL = 10_000
 
   /** 本地 HLS 代理单实例: 所有房间/清晰度共用一个回环端口, 靠 ?url= 参数分流 */
   private proxyStarting: Promise<HlsProxy> | null = null
@@ -629,6 +640,12 @@ class SoopApi {
         return null
       }
       if (dropped) logger.warn('soop', `关注列表丢弃 ${dropped}/${rawRows.length} 条非法行`)
+      // 整表这一发同时是"谁在播、场次号多少"的免费真值: 记下来给取流链路复用(㊒④),
+      // 于是"列表覆盖到的房"取流时不必再为拿 nBroadNo 发一整页 HTML
+      for (const r of rows) {
+        if (r.live) this.bnoCache.set(r.userId, { bno: r.live.broadNo, at: Date.now() })
+        else this.bnoCache.delete(r.userId) // 列表报离线: 上一场的号码不再是这一场的钥匙, 留着只会让取流白撞一次
+      }
       return rows
     } catch (e) {
       logger.warn('soop', `关注列表拉取失败: ${String((e as Error).message || e)}`)
@@ -637,8 +654,23 @@ class SoopApi {
   }
 
   // ---------- 第 1 步: 播放页元信息 ----------
-  /** quiet: 轮询路径每轮每人一发, 日志由 watcher 自己按状态翻转落摘要, 这里再 info 会把日志刷爆 */
-  async fetchPageMeta(channel: string, quiet = false): Promise<PageMeta> {
+  /** quiet: 轮询路径每轮每人一发, 日志由 watcher 自己按状态翻转落摘要, 这里再 info 会把日志刷爆
+   *  fresh: 跳过 10 秒微缓存与在途合并 —— 探针就是要一个新读数 */
+  async fetchPageMeta(channel: string, quiet = false, fresh = false): Promise<PageMeta> {
+    if (!fresh) {
+      const hit = this.pageCache.get(channel)
+      if (hit && Date.now() - hit.at < SoopApi.PAGE_TTL) return hit.meta
+      const flying = this.pageInflight.get(channel)
+      if (flying) return flying
+    }
+    const p = this.readPageMeta(channel, quiet).finally(() => {
+      if (this.pageInflight.get(channel) === p) this.pageInflight.delete(channel)
+    })
+    if (!fresh) this.pageInflight.set(channel, p)
+    return p
+  }
+
+  private async readPageMeta(channel: string, quiet: boolean): Promise<PageMeta> {
     const pageUrl = roomPageUrl(channel)
     const res = await this.req(pageUrl, { headers: { ...this.baseHeaders(pageUrl), ...(await this.cookieHeader()) } })
     if (res.status !== 200) throw new Error(mt('soop.pageHttp', { status: res.status }))
@@ -654,6 +686,14 @@ class SoopApi {
       roomName: parseWindowString(res.text, 'szBroadTitle'),
       thumbUrl: parsePageThumb(res.text)
     }
+    // 无论调用方是不是强制重读, 这一份都进微缓存: 缓存只服务"几秒内的连击复用",
+    // 而探针这类要新读数的一方从不从缓存里取(上面已绕开)
+    this.pageCache.set(channel, { at: Date.now(), meta })
+    if (this.pageCache.size > 64) {
+      for (const [k, v] of this.pageCache) if (Date.now() - v.at >= SoopApi.PAGE_TTL) this.pageCache.delete(k)
+      while (this.pageCache.size > 64) this.pageCache.delete(this.pageCache.keys().next().value as string)
+    }
+    if (meta.living && meta.broadNo) this.bnoCache.set(channel, { bno: meta.broadNo, at: Date.now() })
     if (!quiet) logger.info('soop', `页面元信息 @${channel}: pathBno=${pathState.broadNo || '-'} pageBno=${page.broadNo || '-'} found=${page.found} offline=${meta.explicitOffline} → bno=${meta.broadNo || '-'} living=${meta.living}`)
     return meta
   }
@@ -747,8 +787,37 @@ class SoopApi {
     return [...presets].sort((a, b) => (b.height - a.height) || (b.bps - a.bps) || b.label.localeCompare(a.label))
   }
 
+  /** 列表或上一发页面给的在场场次号, 过期即当没读到过(回落到读整页那条既有链路) */
+  private freshBroadNo(channel: string): string {
+    const hit = this.bnoCache.get(channel)
+    if (!hit) return ''
+    if (Date.now() - hit.at >= SoopApi.BNO_TTL) {
+      this.bnoCache.delete(channel)
+      return ''
+    }
+    return hit.bno
+  }
+
   async fetchPlay(channel: string, password = ''): Promise<PlayResult> {
+    // ㊒④: 关注列表那一发本来就带着 broad_no, 取流第一发的整页 HTML 只为它而发 —— 有号就直接进第 2 步
+    const known = this.freshBroadNo(channel)
+    if (known) {
+      const r = await this.runPlayChain(channel, password, { channel, broadNo: known, explicitOffline: false, living: true, hostName: '', roomName: '', thumbUrl: '' })
+      // 成功最好; "要密码/要登录"与场次号无关, 照原样回报; 其余失败才回读整页, 让页面那句话来定性
+      if (r.ok || r.needPassword || r.needLogin) return r
+      logger.info('soop', `复用列表场次号未成功(${r.error || '未知'}), 回读播放页核对 @${channel}`)
+      this.bnoCache.delete(channel)
+      const m = await this.fetchPageMeta(channel, false, true)
+      // 页面说没在播 = 那一场已经断了(原判据由整链头部给出); 号码变了 = 新一场, 用新号重走;
+      // 页面说在播且号码没变 = 失败与场次号无关, 原样回报即可, 不重打整链
+      if (!m.living || m.broadNo !== known) return this.runPlayChain(channel, password, m)
+      return r
+    }
     const meta = await this.fetchPageMeta(channel)
+    return this.runPlayChain(channel, password, meta)
+  }
+
+  private async runPlayChain(channel: string, password: string, meta: PageMeta): Promise<PlayResult> {
     if (!meta.living) {
       if (meta.explicitOffline) return { ok: false, error: mt('soop.offline') }
       return { ok: false, error: mt('soop.noBno') }

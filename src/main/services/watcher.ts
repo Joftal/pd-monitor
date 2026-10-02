@@ -66,6 +66,15 @@ class Watcher {
   private soopLiveFound = 0
   /** SOOP 连续"整轮全灭"轮数: 单轮失败可能是抖动, 连续两轮说明改版/风控/断网, 必须让用户看见 */
   private soopFailStreak = 0
+  /** 降级探针的每轮预算(㊒②): 列表整表不可用时"每房一发"会放大成 718 发/轮, 网络越坏越打越凶。
+   *  40 发/轮在默认 1200ms 节流下 ≈58s, 正好贴着最短一档轮询; 718 个关注约 18 轮盖完一遍 */
+  private static SOOP_PROBE_BUDGET = 40
+  /** 上一轮发到哪: 预算切出来的那一刀必须轮换, 不能让排在后面的房永远不被读 */
+  private soopProbeCursor = 0
+  /** SOOP 自己的退避终点(㊒③): 连续两轮读不到就静默 5 分钟 —— 与 Panda 的熔断同语义但各记各的,
+   *  合并 status.circuitOpen 仍只跟 Panda(引擎只有一条链瞎了不该遮掉另一条的读数面) */
+  private soopCooldownUntil = 0
+  private static SOOP_COOLDOWN_MS = 5 * 60_000
   /** roomKey -> 连续"播放页报下播"轮数: 见 roundSoop, 单次读数不翻转状态 */
   private soopOfflineStreak = new Map<string, number>()
   status: WatcherStatus = {
@@ -109,6 +118,7 @@ class Watcher {
     this.errorStreak = 0
     this.cooldownUntil = 0
     this.soopFailStreak = 0
+    this.soopCooldownUntil = 0
     for (const p of PLATS) this.schedule(p, 300)
     this.push()
   }
@@ -240,11 +250,16 @@ class Watcher {
     if (!soopAnchors.length) {
       this.soopLiveFound = 0
       this.soopFailStreak = 0
+      // 一个房都不剩 = 没有东西可失明: 连冷却时间戳一起作废, 否则日后重新加回关注会被上一场的旧冷却闷住 5 分钟
+      this.soopCooldownUntil = 0
       S.liveFound = 0
       S.roundFailed = 0
       S.message = ''
       return
     }
+    // 冷却轮(㊒③)整轮零请求: 失明时"每一轮都重发"的形状正是风控最忌讳的, 而这段时间本来也没有可读的数。
+    // 不推进 lastRoundAt/roundMs(真发了请求才记时, 与 Panda 冷却同规约), 读数与那句话沿用上一轮
+    if (Date.now() < this.soopCooldownUntil) return
     const sBegin = Date.now()
     this.soopLiveFound = await this.roundSoop(soopAnchors, cfg.monitor.soop.requestGapMs)
     S.liveFound = this.soopLiveFound
@@ -660,7 +675,9 @@ class Watcher {
   /** SOOP 轮询: 优先「一发关注列表 + 本地匹配」(myapi/favorite 带 is_live/broad_info, 718 关注也只需一发),
    *  列表不可用(未登录/风控/改版)或该房不在列表里(应用内关注 ≠ 站内关注)→ 逐房回落到播放页探针。
    *  - 三态必分沿用旧规约: 在播 / 明确下播 / 读数不足则本轮不动它, 绝不把"没读到"写成"已下播"
-   *  - 节流: 兜底探针与 Panda 共用 requestGapMs; 列表模式下不发探针, 平台压力从 N 发/轮降到 1 发/轮 */
+   *  - 节流: 兜底探针与 Panda 共用 requestGapMs; 列表模式下不发探针, 平台压力从 N 发/轮降到 1 发/轮
+   *  - 探针有每轮预算(㊒②, 见上方 SOOP_PROBE_BUDGET): 列表整表失效时"每房一发"会放大成 718 发/轮
+   *    (实测 ≈5.7 万发/天, 且网络越坏越打越凶), 预算之下按游标轮转 —— 小集合(≤预算)与旧行为一字不差 */
   private async roundSoop(anchors: Anchor[], gapMs: number): Promise<number> {
     const now = Date.now()
     // 抖动计数只服务当前关注集: 已取关的房间即时清账, 防这张表无界增长
@@ -693,19 +710,36 @@ class Watcher {
       }
     }
 
+    // 每轮预算 + 游标轮转(㊒②): 只在真的超预算时才切刀, 于是"少数几个房不在列表里"这一常态一字不改
+    const budget = Watcher.SOOP_PROBE_BUDGET
+    let sent: Anchor[] = probe
+    if (probe.length > budget) {
+      const start = this.soopProbeCursor % probe.length
+      sent = [...probe.slice(start), ...probe.slice(0, start)].slice(0, budget)
+      this.soopProbeCursor = (start + budget) % probe.length
+      logger.info('soop', `探针超预算: 本轮发 ${budget}/${probe.length} 个(游标=${start}), 其余 ${probe.length - budget} 房本轮不读`)
+    } else {
+      this.soopProbeCursor = 0
+    }
+
     let fail = 0
-    for (const a of probe) {
+    for (const a of sent) {
       const st = await this.probeSoopOne(a, now)
       if (st === 'live') found++
       else if (st === 'fail') fail++
       if (gapMs > 0) await sleep(Math.max(300, gapMs) * (0.8 + Math.random() * 0.4))
     }
 
-    // 全部关注都读不到才计失败: 列表命中/部分房间抖动都不构成"平台级失明"
-    const allFail = anchors.length > 0 && fail === anchors.length
-    this.status.byPlatform.soop.roundFailed = fail // 列表整表覆盖时 fail=0, 这里同时负责复位
+    // 失明判据(㊒②): 列表一个房都没覆盖(整表不可用, 或全部关注都不在站内) 且实际发出的探针全灭。
+    // 有了每轮预算以后不能再拿 fail===anchors.length 当判据 —— 40 发永远追不上 718 个关注,
+    // 那条老判据会从"平台瞎了"悄悄退化成"永远不会瞎"
+    const covered = anchors.length - probe.length // 列表给了可读判据的房数
+    const allFail = anchors.length > 0 && covered === 0 && sent.length > 0 && fail === sent.length
+    // 「未读到状态」的口径随预算一起改口(㊒②): 发出去且失败的 + 本轮被预算挡下的 = 这一轮没读到的房数,
+    // 顶栏/工作区那句「本轮 N 个房间未读到状态, 卡片保留上次读数」据此仍然成立, 不新增读数面
+    this.status.byPlatform.soop.roundFailed = fail + (probe.length - sent.length) // 列表整表覆盖时 probe=0, 这里同时负责复位
     this.soopFailStreak = allFail ? this.soopFailStreak + 1 : 0
-    if (allFail) logger.warn('watcher', `SOOP 本轮 ${anchors.length} 个频道全部取页失败(网络/风控/改版) 连续 ${this.soopFailStreak} 轮`)
+    if (allFail) logger.warn('watcher', `SOOP 本轮 ${sent.length}/${anchors.length} 个频道取页全失败(网络/风控/改版) 连续 ${this.soopFailStreak} 轮`)
     if (this.soopFailStreak === 2) {
       // 只在跨阈值时提醒一次(与登录失效同语义): 恢复后 streak 归零才会重新武装
       sendToast(
@@ -713,6 +747,9 @@ class Watcher {
         { ev: 'generic', ctx: { detail: mt('watcher.soopDown', { n: anchors.length, r: this.soopFailStreak }) } }
       )
     }
+    // 连败到阈值就静默 5 分钟: 每一轮都重发的形状正是风控最忌讳的(网络本身坏时尤其如此),
+    // 而冷却期内本来也没有可读的数 —— 零请求, 读数沿用上一轮。每个失明轮都重新武装, 恢复当轮归零
+    if (this.soopFailStreak >= 2) this.soopCooldownUntil = Date.now() + Watcher.SOOP_COOLDOWN_MS
     this.pushAnchors()
     return found
   }
@@ -775,7 +812,9 @@ class Watcher {
   /** 播放页探针(列表覆盖不到的房): 三态必分, 单房失败只算它自己 */
   private async probeSoopOne(a: Anchor, now: number): Promise<'live' | 'other' | 'fail'> {
     try {
-      const m = await soopApi.fetchPageMeta(a.userId, true)
+      // fresh=true: 探针就是"这个房现在怎么样"的唯一裁判, 10 秒微缓存会让两轮读到同一份旧页
+      // (最短轮询间隔只有 5 秒), 于是"没读到变化"会被读成"还没开播"
+      const m = await soopApi.fetchPageMeta(a.userId, true, true)
       const wasLive = a.isLive
       if (m.living) {
         const patch: Partial<Anchor> = {
