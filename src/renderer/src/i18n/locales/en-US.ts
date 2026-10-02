@@ -196,7 +196,7 @@ export default {
     retryOn: 'On · up to {n} attempts',
     retryOff: 'Off (settings)',
     retryNaVod: 'N/A · a replay download cannot resume losslessly',
-    kaOn: 'Running · {n} tiers · beat {s}s ago',
+    kaOn: 'Running · {n} tiers held · primary beat {s}s ago',
     kaOff: 'Off (settings)',
     kaVod: 'Not needed for replay',
     kaNa: 'N/A (SOOP sources are re-minted on demand)',

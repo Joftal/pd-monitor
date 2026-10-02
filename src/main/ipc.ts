@@ -19,6 +19,7 @@ import { secrets } from './services/secrets'
 import { tgSendMessage } from './services/telegram'
 import { dataDir, defaultRecordRoot, diskFreeGb, UA, windowBg } from './util'
 import { logger } from './services/logger'
+import { asUser } from './services/netGate'
 import { thumbs } from './services/thumbs'
 import { mt, setMainLocale } from './i18n'
 
@@ -356,7 +357,7 @@ export function registerIpc(): void {
       // SOOP 无大厅: 播放页一发就有主播名/标题/在播态, 关注当场点亮卡片
       userImg = soopAvatarUrl(userId) // 列表与页面都不回头像字段, 地址由频道 ID 派生
       try {
-        const m = await soopApi.fetchPageMeta(userId)
+        const m = await soopApi.fetchPageMeta(userId, false, false, '添加')
         nick = m.hostName || userId
         title = m.roomName
         isLive = m.living
@@ -450,7 +451,8 @@ export function registerIpc(): void {
     let r
     try {
       // 播放器要完整清晰度菜单 ⇒ fullVariants=true(㊔): 后台预取只解了最高档的那份源在这里补齐全档
-      r = await sourceFor(platform).getPlayCached(userId, safePwd(password), !!fresh, true)
+      // ㊕: 整条取流链打成用户级 —— 按站车道(后台请求一站一发)给这一发让路, 点开播不该排在预取队列后面
+      r = await asUser(() => sourceFor(platform).getPlayCached(userId, safePwd(password), !!fresh, true))
     } catch (e) {
       // 网络异常/风控(403/429 等)——必须回落为 ok:false, 否则前端永远停在"获取直播流…"
       return { ok: false, error: mt('ipc.playFail', { msg: (e as Error).message || String(e) }) }
@@ -524,7 +526,7 @@ export function registerIpc(): void {
     } else if (!anchor && platform === 'soop') {
       // SOOP 同样要在建目录前拿到真名: 落盘路径是 <根>/soop/<主播名(主播ID)>, 用频道号占位会得到不可读目录
       try {
-        const m = await soopApi.fetchPageMeta(userId, true)
+        const m = await soopApi.fetchPageMeta(userId, true, false, '录制取名')
         nick = m.hostName || userId
         title = m.roomName || ''
       } catch {

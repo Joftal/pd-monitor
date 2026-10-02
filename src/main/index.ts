@@ -2,6 +2,7 @@ import { app, BrowserWindow, Tray, Menu, nativeImage, session } from 'electron'
 import * as path from 'path'
 import { registerIpc, pushAccounts } from './ipc'
 import { api, SESSION_PARTITION, applyProxy } from './services/pandalive'
+import { soopApi } from './services/soop'
 import { store } from './services/store'
 import { watcher } from './services/watcher'
 import { recorder } from './services/recorder'
@@ -185,8 +186,11 @@ app.whenReady().then(() => {
         : `SOOP 轮询启动(间隔=${m.pollIntervalSec}s, gap=${m.requestGapMs}ms)`
     )
   }
-  // 源保活泵: 维持已缓存源的会话活性(退出观看后满员房也能凭旧源继续看)
+  // 源保活泵: 维持已缓存源的会话活性(退出观看后满员房也能凭旧源继续看), 并顺带做 Panda 侧的年龄收手
   api.startKeepalive()
+  // SOOP 没有心跳可打, 但同一句记账纪律要有(㊕): 缓存里那份签名源过龄就该出队, 徽标才说实话。
+  // 这一条只扫内存, 零网络, 也不受 keepaliveStream 影响
+  soopApi.startCacheSweep()
   // 重启后源缓存(内存态)为空的补洞改由 watcher 在首轮落地后做(㊓⑦):
   // 旧实现在这里按库里的 isLive(上一场的快照)逐个 prewarm —— 开机头 90 秒实测 14~36 发整页读
   // + 16~21 发取流, 其中不少房其实已经下播; 首轮先用真值把状态校准, 再只预取仍然在播且无源的房

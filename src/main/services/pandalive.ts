@@ -8,11 +8,13 @@ import type { Anchor } from '../../shared/types'
 import { UA, sleep } from '../util'
 import { vault, CookieJar } from './vault'
 import { store } from './store'
+import { hostOf, laneRun } from './netGate'
 import { logger } from './logger'
 import { mt } from '../i18n'
 
 // ============ pandalive API 客户端 ============
 // - 全局限速队列(串行 + 最小间隔 + 抖动), 防 IP 风控
+// - 队列外的旁路(jsonPriority/登录探针)与 SOOP 那侧一起过「按站车道」(见 netGate): 同一主机后台一发一发排, 用户级让路
 // - 请求走 Electron net(Chromium 网络栈), 代理经 session.setProxy 生效
 // - Cookie 由 vault(DPAPI 加密) 持久化
 // - 风控特征识别 -> RiskError, 供 watcher 熔断
@@ -312,6 +314,21 @@ export async function nodeHttpRequest(
 }
 
 class PandaApi {
+  /** 兜底重发的留痕(㊕): 会话请求撞上 Chromium 网络层错误(ERR_FAILED / DNS 黑洞 / 超时)时,
+   *  同一句话由 Node 再打一遍 —— 旧写法一声不吭, 请求数凭空翻倍却没有痕迹, 审计只能从"拉源成功"的计数倒推。
+   *  逐条写会在断网期把日志刷成计数器(那一形态每请求都触发), 所以 60 秒只出声一次, 静默窗口内的次数在下一句里一起报 */
+  private fallbackCnt = 0
+  private fallbackLogUntil = 0
+  private noteFallback(reason: string, target: string): void {
+    this.fallbackCnt++
+    const now = Date.now()
+    if (now < this.fallbackLogUntil) return
+    this.fallbackLogUntil = now + 60_000
+    const n = this.fallbackCnt
+    this.fallbackCnt = 0
+    logger.warn('api', `会话请求失败(${reason}) → Node 兜底重发 ×${n}: ${target.replace(/^https?:\/\//, '').slice(0, 48)}`)
+  }
+
   /** 拉取任意绝对 URL 文本(带 pandalive Origin/Referer, 经 session/代理/Node 兜底)
    *  Cookie 仅对 pandalive 域附带: 媒体源(CDN)不需要也不应拿到会话凭证 */
   private async fetchText(url: string): Promise<string> {
@@ -334,6 +351,7 @@ class PandaApi {
       return await res.text()
     } catch (e) {
       if ((e as { httpStatus?: number }).httpStatus) throw e // 原则同上: 只兜网络层异常
+      this.noteFallback(String((e as Error).message || e), url)
       const res = await nodeHttpRequest('GET', url, headers, undefined, nodeProxyUrl)
       if (res.status !== 200) {
         // 与主路径同构打标: 保活泵等消费方凭 httpStatus 区分"真死(403/404)"与"网络层未知"
@@ -493,7 +511,22 @@ class PandaApi {
   }
 
   // ---------- 底层请求 ----------
+  /** ㊕: api 站的每一发都过一遍按站车道(见 netGate)。限速队列自己那条节奏不动 —— 它睡在"上一发落定之后",
+   *  车道要求的是"距上一发起跑一个间隔", 队列里排着的活天然已经满足, 于是这条队列不会被罚两遍;
+   *  真正被管住的是绕过队列的那两条旁路(jsonPriority 与登录探针)。
+   *  媒体/CDN 那一面(fetchText)不进车道: 保活泵要在 60 秒里跑完 17 个房 × 若干档, 串成一条会把源饿死,
+   *  而 CDN 的 403/404 是"源死了"不是风控 —— 那一句写进 netGate 的抬头。 */
   private async rawFetch(
+    method: 'GET' | 'POST',
+    path: string,
+    form?: Record<string, string>,
+    extraHeaders: Record<string, string> = {},
+    jarOverride?: CookieJar
+  ): Promise<{ status: number; text: string }> {
+    return laneRun(hostOf(API), store.getSettings().monitor.pandalive.requestGapMs, () => this.sendRaw(method, path, form, extraHeaders, jarOverride))
+  }
+
+  private async sendRaw(
     method: 'GET' | 'POST',
     path: string,
     form?: Record<string, string>,
@@ -530,6 +563,7 @@ class PandaApi {
     } catch (e) {
       if (e instanceof Error && e.message.includes('ERR_FAILED')) {
         // 兜底: Node 原生请求(支持代理 CONNECT 隧道, 与设置页代理一致)
+        this.noteFallback(e.message, path)
         const res = await nodeHttpRequest(method, API + path, headers, body, nodeProxyUrl)
         if (!jarOverride) this.harvestCookies(res.setCookies)
         status = res.status
@@ -741,24 +775,25 @@ class PandaApi {
     return [...this.playCache.entries()].filter(([, v]) => v.ok).map(([k]) => roomKey('pandalive', k))
   }
 
-  // ---- 源保活泵: 轻量心跳维持 IVS 会话活性 ----
+  // ---- 源保活泵: 每源一轮只读主档清单, 判"这份缓存还能不能用" ----
   // 场景: 前期取了源退出观看, 后期房间满员无法再调 /v1/live/play —— 满员拦截的是拉源 API,
-  // 不是流本身; 只要会话被持续请求养着, 旧源就能一直看。
-  // 心跳 = 每源每档只拉清单(数 KB), 不拉分片; 直达 CDN, 不占用 pandalive API 限速队列。
+  // 不是流本身; 缓存里那批长效变体地址还能直接播, 所以"别把旧源丢掉"是本泵的第一职责。
+  // 心跳 = 只拉主档清单(数 KB), 不拉分片; 直达 CDN, 不进 API 站车道(媒体面豁免, 见 netGate 抬头)。
   // 判死纪律: 只有主档 403/404(会话真死)计 strike; 网络层错误(断网/休眠/超时)不计 ——
   // 否则断网恢复瞬间全量误杀+对瘫痪 API 群重铸。连续 2 次真死才收尸; 收尸后若在播+开预取立即重铸。
-  // 周期依据(轮23 实测, 真机关泵): master 令牌的 exp = 取源 +585s(9.75 分钟)就过期, 而由它解析出的
-  // 变体地址在此后**无任何心跳**的情况下仍连续 200 且持续出新段, 到 27.1 分钟 5/5 档全活 ——
-  // 变体地址不靠心跳续命。15s 一轮全档齐养(4 源×5 档 = 20 发/15s ≈ 11.5 万发/天)是把自己当成播放器,
-  // 而真播放器的清单轮询本来就把会话养着, 泵只需要在"没人看"的时候别让会话饿死。
+  // 周期与覆盖面依据(轮23+轮24 两次实测, 真机关泵): master 令牌的 exp = 取源 +585~600s 就过期(403 未实拍, 判据是解码出来的 exp),
+  // 而由它解析出的变体地址在此后**无任何心跳**的情况下仍连续 200 并持续出新段 —— 轮23 量到 27.1 分钟
+  // 5/5 档全活, 轮24 复量 3 房 × 5 档静置 15 分钟 15/15 全活; master 的过期判据来自现场解码的 JWT exp(=签发 +600~602s), 那一发 403 今天没有自然样本(台账 ㊕⑧ 记为量不到)。
+  // ⇒ 变体地址不靠心跳续命(令牌按时间过期, 读它一次并不把 exp 往后推), 而副档失败在本泵只有观测价值,
+  //    于是"全档齐养"那 4/5 发是纯流量(15s 一轮 × 4 源 × 5 档 ≈ 11.5 万发/天)。周期 60s 基准 + 随规模自适应。
   private static KEEPALIVE_MS = 60_000
   /** 源缓存的活性时限(㊔): 泵不再无限养旧源 —— 只有"仍在关注且仍在播"才值得继续心跳。
    *  到期即 invalidatePlay(「已缓存」徽标随之熄灭, 与重铸冷却同语义: 宁熄灭不骗人), 下次进房重建。
    *  已下播/本地报离线的缓存源 30 分钟后收手; 不在关注表里的(应用内添加/官网侧已取关/临时进房回访) 10 分钟宽限后收手 */
   private static KEEPALIVE_OFFLINE_TTL_MS = 30 * 60_000
   private static KEEPALIVE_GUEST_TTL_MS = 10 * 60_000
-  /** 泳道并发数: 串行泵在大关注量下有效心跳会被拉长(实测 100 源×5 档 ≈ 148s/源);
-   *  4 泳道 + 50ms 间隙把 100 源心跳压回 ~16s, 对 CDN/本地均为平缓节奏 */
+  /** 泳道并发数: 串行泵在大关注量下有效心跳会被拉长(实测 100 源 × 5 档 ≈ 148s/源);
+   *  ㊕ 扇出收口后每源一发, 4 泳道 + 50ms 间隙把 100 源的一轮压回 ~19s, 对 CDN/本地均为平缓节奏 */
   private static KEEPALIVE_LANES = 4
   private keepaliveTimer: NodeJS.Timeout | null = null
   private keepaliveBusy = false
@@ -819,7 +854,6 @@ class PandaApi {
 
   private async keepaliveTick(): Promise<void> {
     if (this.keepaliveBusy) return
-    if (!store.getSettings().keepaliveStream) return
     this.keepaliveBusy = true
     try {
       // 关注表按复合键索引(playCache 本身是裸 userId, 出口处补 'pandalive'):
@@ -852,6 +886,10 @@ class PandaApi {
         }
         queue.push([userId, pack])
       }
+      // 闸门只关心跳, 不关记账(㊕): 旧写法把整段扫描都压在 keepaliveStream 之后, 于是关掉保活
+      // 就等于源缓存再也不按年龄收手 —— 上面那两条时限全靠这一趟扫描落地, 而它同时是
+      // 「已缓存」徽标与 getPlayCached 不说谎的前提。扫描零网络, 关掉时照跑。
+      if (!store.getSettings().keepaliveStream) return
       const lanes = Array.from({ length: PandaApi.KEEPALIVE_LANES }, async () => {
         for (let next = queue.shift(); next; next = queue.shift()) {
           await this.keepaliveSource(next[0], next[1], anchors.get(roomKey('pandalive', next[0])))
@@ -864,28 +902,28 @@ class PandaApi {
     }
   }
 
-  /** 单源心跳: 全档齐养(只看最高档会让其它档会话饿死, 切清晰度时暴毙); 主档 403/404 才计真死 */
+  /** 单源心跳: 只读主档(㊕ 扇出收口)。两条实测把"全档齐养"那条理由推翻了 ——
+   *  ① 变体是长效签名地址: 杀掉实例静置 15 分钟, 3 房 × 5 档全部 200 且清单仍在推进, 而令牌是按时钟过期的,
+   *     心跳读它一次并不把 exp 往后推 —— "副档不养会饿死"这件事没有发生;
+   *  ② 非主档失败在本函数里只有观测价值(判死只认主档), 于是那 4/5 发是纯流量。
+   *  切清晰度用的是缓存里那批长效地址(PlayerView 直接取 variants[i].url), 与心跳无关。
+   *  master(pack.m3u8) 绝不能进这一轮: 它的 IVS 令牌写死 exp = 取源 + 600 秒(现场解码得到, 403 本身未实拍), 到点即过期,
+   *  把它当活性判据 = 每 10 分钟误收一次尸。真死仍由主档 403/404 判定(连续两轮 → 收尸 + 重铸)。 */
   private async keepaliveSource(userId: string, pack: PlayResult, a: Anchor | undefined): Promise<void> {
-    const urls = [
-      ...new Set((pack.variants?.length ? pack.variants.map((v) => v.url) : [pack.m3u8 || '']).filter((u): u is string => Boolean(u)))
-    ]
-    if (!urls.length) return
+    const primary = pack.variants?.[0]?.url || ''
+    if (!primary) return
     let primaryDead = false
-    for (const url of urls) {
-      const isPrimary = url === urls[0]
-      try {
-        await Promise.race([
-          this.fetchText(url),
-          new Promise<never>((_, rej) => setTimeout(() => rej(new Error('keepalive timeout')), 12_000))
-        ])
-      } catch (e) {
-        const st = (e as { httpStatus?: number }).httpStatus
-        if (isPrimary && (st === 403 || st === 404)) primaryDead = true
-        // 网络层错误: 不计死(断网即整批阵亡的语义错误); 非主档失败: 仅观测
-      }
-      await sleep(50)
+    try {
+      await Promise.race([
+        this.fetchText(primary),
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error('keepalive timeout')), 12_000))
+      ])
+    } catch (e) {
+      const st = (e as { httpStatus?: number }).httpStatus
+      if (st === 403 || st === 404) primaryDead = true
+      // 网络层错误: 不计死(断网即整批阵亡的语义错误)
     }
-    this.keepaliveInfo.set(userId, { at: Date.now(), ok: !primaryDead, variants: urls.length })
+    this.keepaliveInfo.set(userId, { at: Date.now(), ok: !primaryDead, variants: pack.variants?.length || 1 })
     if (!primaryDead) {
       this.deadStreak.delete(userId)
       return

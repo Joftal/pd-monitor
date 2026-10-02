@@ -136,7 +136,11 @@ class Watcher {
       const L = this.loop[p]
       if (L.timer) clearTimeout(L.timer)
       L.timer = null
+      // 停轮即停泵(㊕): 两条队列都是"下一发要发真请求"的待办, 只清定时器会把它们留在手里 ——
+      // 泵自己还在排空(它原先只看熔断/冷却, 不看 running), 于是关掉监控之后仍然逐房拉源。
+      this.prewarmQueue[p] = []
     }
+    this.idleQueue = []
     this.push()
   }
 
@@ -217,6 +221,7 @@ class Watcher {
         store.flush()
         this.schedule(platform, this.intervalFor(platform))
         if (platform === 'pandalive') void this.pumpIdle() // 轮次间隙: 离线关注兜底泵(幂等, 在跑则 no-op)
+        void this.pumpPrewarm(platform) // 让路出去的预取在这里续上(幂等, 在跑则 no-op)
       }
     }
   }
@@ -542,7 +547,15 @@ class Watcher {
    *  失败不空表: 一页都没取到就保留上一份, "没读到"绝不画成"全站没人播"。 */
   async refreshDiscovery(force = false): Promise<DiscoveryItem[]> {
     if (this.discoveryInFlight) return this.discoveryInFlight
-    if (!force && Date.now() - this.status.discoveryAt < 60_000) return this.discovery
+    const since = Date.now() - this.status.discoveryAt
+    if (!force && since < 60_000) return this.discovery
+    // force(工作区「立即刷新」站在发现那一屏)只豁免 60 秒复用, 不豁免 8 秒下限(㊕):
+    // 渲染层那个 2.5s 冷却管的是按钮自身, 连点仍然会每 2.5s 打四到五页整表 ——
+    // 与 tick() 同一条下限、同一句节流留痕, 刚拉过一屏时再点本来也读不到新东西
+    if (force && since < Watcher.TICK_MIN_MS) {
+      logger.info('watcher', `大厅刷新节流: 距上次拉取 ${Math.round(since / 1000)}s, 不发新的一页`)
+      return this.discovery
+    }
     if (this.status.byPlatform.pandalive.circuitOpen || Date.now() < this.cooldownUntil) return this.discovery
     const p = (async () => {
       const { liveMap, err } = await this.harvestPages()
@@ -866,7 +879,7 @@ class Watcher {
     try {
       // fresh=true: 探针就是"这个房现在怎么样"的唯一裁判, 10 秒微缓存会让两轮读到同一份旧页
       // (最短轮询间隔只有 5 秒), 于是"没读到变化"会被读成"还没开播"
-      const m = await soopApi.fetchPageMeta(a.userId, true, true)
+      const m = await soopApi.fetchPageMeta(a.userId, true, true, '探针')
       const wasLive = a.isLive
       if (m.living) {
         const patch: Partial<Anchor> = {
@@ -1001,6 +1014,11 @@ class Watcher {
     const q = this.prewarmQueue[platform]
     try {
       while (q.length) {
+        // 让路(㊕): 停轮即停泵、轮次在飞时先不发预取 —— 与 pumpIdle 同规约。
+        // 旧写法只在 Panda 熔断时收手, 于是"关掉监控"与"一轮正在打整表"这两种时刻,
+        // 这条泵仍按 1.2s 一发逐房拉源(单房 2~6 发), 停轮语义只清了定时器没清泵。
+        // 队列不清空: 轮次落地后 runRound 的 finally 重新点泵, 排在后面的房照旧秒开。
+        if (!this.running || this.loop[platform].inFlight) break
         // 熔断期间不预取(避免高压撞墙) —— 只挡 Panda 自己这条队列
         if (platform === 'pandalive' && this.status.byPlatform.pandalive.circuitOpen) {
           q.length = 0

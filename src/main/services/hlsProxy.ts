@@ -225,9 +225,30 @@ export class HlsProxy {
    *  读满进内存再分发给各读者: 任一客户端中途断开都不影响另一个(共享流式体做不到这一点) */
   private inflightReads = new Map<string, Promise<ProxyRead>>()
 
+  /** 合流计数(㊕): 每一次命中省下的是一遍"内容一字不差的上游读", 不记就永远不知道这条链在替谁省。
+   *  分片是高频件, 逐次写会把日志刷成计数器 ⇒ 60 秒出声一次, 清单/分片各记各的数 */
+  private mergedPlays = 0
+  private mergedSegs = 0
+  private mergedLogUntil = 0
+  private noteMerge(kind: 'playlist' | 'segment'): void {
+    if (kind === 'playlist') this.mergedPlays++
+    else this.mergedSegs++
+    const now = Date.now()
+    if (now < this.mergedLogUntil) return
+    this.mergedLogUntil = now + 60_000
+    const p = this.mergedPlays
+    const s = this.mergedSegs
+    this.mergedPlays = 0
+    this.mergedSegs = 0
+    logger.info('hls', `上游在途合流 ×${p} 清单 / ×${s} 分片(近 60 秒): 后到的读者共用这一次上游读, 不再重打`)
+  }
+
   private readUpstream(target: string, timeoutMs: number, kind: 'playlist' | 'segment'): Promise<ProxyRead> {
     const flying = this.inflightReads.get(target)
-    if (flying) return flying
+    if (flying) {
+      this.noteMerge(kind)
+      return flying
+    }
     const p = (async (): Promise<ProxyRead> => {
       const up = await this.fetchUpstream(target, timeoutMs)
       const type = up.headers.get('content-type') || (kind === 'playlist' ? 'application/vnd.apple.mpegurl' : 'video/mp2t')

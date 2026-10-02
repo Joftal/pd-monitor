@@ -12,6 +12,8 @@ import {
 import { isRoomId, roomKey, soopAvatarUrl } from '../../shared/types'
 import { UA } from '../util'
 import { logger } from './logger'
+import { hostOf, laneRun } from './netGate'
+import { store } from './store'
 import { mt } from '../i18n'
 import { secrets } from './secrets'
 import { HlsProxy } from './hlsProxy'
@@ -583,7 +585,13 @@ class SoopApi {
     return p
   }
 
-  private async req(url: string, init: { method?: 'GET' | 'POST'; headers?: Record<string, string>; body?: string }, timeoutMs = 15_000): Promise<{ status: number; text: string; finalUrl: string }> {
+  /** ㊕: 每一发都过一遍按站车道(见 netGate)。这里不区分"是谁调的", 用户级标记由调用链顶端 asUser() 打,
+   *  沿异步链传到这一层 —— 所以预取泵/探针/保活的后台发会互相让开, 而点播放那一发不等。 */
+  private async req(url: string, init: { method?: 'GET' | 'POST'; headers: Record<string, string>; body?: string }, timeoutMs = 15_000): Promise<{ status: number; text: string; finalUrl: string }> {
+    return laneRun(hostOf(url), store.getSettings().monitor.soop.requestGapMs, () => this.sendReq(url, init, timeoutMs))
+  }
+
+  private async sendReq(url: string, init: { method?: 'GET' | 'POST'; headers: Record<string, string>; body?: string }, timeoutMs: number): Promise<{ status: number; text: string; finalUrl: string }> {
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), timeoutMs)
     try {
@@ -595,6 +603,7 @@ class SoopApi {
     } catch (e) {
       // Chromium 网络栈报错(ERR_FAILED 类)时按 pandalive 同规约走 Node 兜底, 保持代理设置一致
       if (!(e instanceof Error) || !/ERR_|abort|Timeout|timeout/i.test(e.message)) throw e
+      this.noteFallback(e.message, url)
       const res = await nodeHttpRequest(init.method || 'GET', url, init.headers || {}, init.body, nodeProxyUrl())
       const out = { status: res.status, text: res.text, finalUrl: url }
       this.noteRisk(url, out.status, out.text)
@@ -602,6 +611,22 @@ class SoopApi {
     } finally {
       clearTimeout(timer)
     }
+  }
+
+  /** 兜底重发的留痕(㊕): 这条日志说的是"同一个请求打了第二遍"—— 第一遍没落地, 第二遍由 Node 发出。
+   *  旧写法一声不吭, 于是请求数凭空翻倍却毫无痕迹, 审计只能从"拉源成功"的计数里倒推。
+   *  逐条写会在断网/DNS 黑洞期把日志刷成计数器(那一形态每请求都触发), 所以 60 秒只出声一次,
+   *  静默窗口里的次数在下一句里一起报出来 */
+  private fallbackCnt = 0
+  private fallbackLogUntil = 0
+  private noteFallback(reason: string, url: string): void {
+    this.fallbackCnt++
+    const now = Date.now()
+    if (now < this.fallbackLogUntil) return
+    this.fallbackLogUntil = now + 60_000
+    const n = this.fallbackCnt
+    this.fallbackCnt = 0
+    logger.warn('soop', `会话请求失败(${reason}) → Node 兜底重发 ×${n}: ${url.replace(/^https?:\/\//, '').slice(0, 48)}`)
   }
 
   /** 风控信号只记账, 不发火(㊔): 这一站的取流链单房就有 8~10 发、降级探针每轮几十发, 任何一发撞上
@@ -631,7 +656,22 @@ class SoopApi {
    *  返回 null = 列表本轮不可用(未登录 515 / Origin 被拒 / 改版缺 data / 非 JSON / 网络异常):
    *  调用方必须整体降级到 fetchPageMeta, 绝不能把"没拿到"当成"全都下播了"。
    *  单条脏数据只丢那一条并计数进日志。 */
+  /** 整表那一发的在途合并(㊕): 轮次、导入点击、立即刷新可能在同一瞬间各要一份 374KB 的同一张表,
+   *  旧写法一比一发往上游打。只做合流、不做 TTL 缓存 —— 这一发是"谁在播"的真值源,
+   *  给它的结果加时限等于拿"没读到"换时效; 而它每轮只有一发, 不是需要削峰的形状。
+   *  null(列表不可用)同样合并: 一轮坏了而导入同时落地时, 不该把同一发坏请求打两遍。 */
+  private favInflight: Promise<SoopFavoriteRow[] | null> | null = null
+
   async fetchFavorites(): Promise<SoopFavoriteRow[] | null> {
+    if (this.favInflight) return this.favInflight
+    const p = this.readFavorites().finally(() => {
+      if (this.favInflight === p) this.favInflight = null
+    })
+    this.favInflight = p
+    return p
+  }
+
+  private async readFavorites(): Promise<SoopFavoriteRow[] | null> {
     const headers: Record<string, string> = {
       'User-Agent': UA,
       Origin: WEB_ORIGIN,
@@ -682,22 +722,24 @@ class SoopApi {
 
   // ---------- 第 1 步: 播放页元信息 ----------
   /** quiet: 轮询路径每轮每人一发, 日志由 watcher 自己按状态翻转落摘要, 这里再 info 会把日志刷爆
-   *  fresh: 跳过 10 秒微缓存与在途合并 —— 探针就是要一个新读数 */
-  async fetchPageMeta(channel: string, quiet = false, fresh = false): Promise<PageMeta> {
+   *  fresh: 跳过 10 秒微缓存与在途合并 —— 探针就是要一个新读数
+   *  why: 落日志用的来路名(㊕)。整页 HTML 是这条链上最贵的一发, 而"292 发页面元信息 / 103 个房"
+   *       这种数只有知道来路才能判断该不该省 —— 探针、取流第一步、取流复查、加房、录制取名各是一回事 */
+  async fetchPageMeta(channel: string, quiet = false, fresh = false, why = '取流'): Promise<PageMeta> {
     if (!fresh) {
       const hit = this.pageCache.get(channel)
       if (hit && Date.now() - hit.at < SoopApi.PAGE_TTL) return hit.meta
       const flying = this.pageInflight.get(channel)
       if (flying) return flying
     }
-    const p = this.readPageMeta(channel, quiet).finally(() => {
+    const p = this.readPageMeta(channel, quiet, why).finally(() => {
       if (this.pageInflight.get(channel) === p) this.pageInflight.delete(channel)
     })
     if (!fresh) this.pageInflight.set(channel, p)
     return p
   }
 
-  private async readPageMeta(channel: string, quiet: boolean): Promise<PageMeta> {
+  private async readPageMeta(channel: string, quiet: boolean, why: string): Promise<PageMeta> {
     const pageUrl = roomPageUrl(channel)
     const res = await this.req(pageUrl, { headers: { ...this.baseHeaders(pageUrl), ...(await this.cookieHeader()) } })
     if (res.status !== 200) throw new Error(mt('soop.pageHttp', { status: res.status }))
@@ -721,7 +763,7 @@ class SoopApi {
       while (this.pageCache.size > 64) this.pageCache.delete(this.pageCache.keys().next().value as string)
     }
     if (meta.living && meta.broadNo) this.bnoCache.set(channel, { bno: meta.broadNo, at: Date.now() })
-    if (!quiet) logger.info('soop', `页面元信息 @${channel}: pathBno=${pathState.broadNo || '-'} pageBno=${page.broadNo || '-'} found=${page.found} offline=${meta.explicitOffline} → bno=${meta.broadNo || '-'} living=${meta.living}`)
+    if (!quiet) logger.info('soop', `页面元信息(来源=${why}) @${channel}: pathBno=${pathState.broadNo || '-'} pageBno=${page.broadNo || '-'} found=${page.found} offline=${meta.explicitOffline} → bno=${meta.broadNo || '-'} living=${meta.living}`)
     return meta
   }
 
@@ -838,7 +880,7 @@ class SoopApi {
       if (r.ok || r.needPassword || r.needLogin) return r
       logger.info('soop', `复用列表场次号未成功(${r.error || '未知'}), 回读播放页核对 @${channel}`)
       this.bnoCache.delete(channel)
-      const m = await this.fetchPageMeta(channel, false, true)
+      const m = await this.fetchPageMeta(channel, false, true, '取流复查')
       // 页面说没在播 = 那一场已经断了(原判据由整链头部给出); 号码变了 = 新一场, 用新号重走;
       // 页面说在播且号码没变 = 失败与场次号无关, 原样回报即可, 不重打整链
       if (!m.living || m.broadNo !== known) return this.runPlayChain(channel, password, m, fullVariants)
@@ -934,7 +976,7 @@ class SoopApi {
     }
   }
 
-  // ---------- 拉源缓存: 与 pandalive 同策(不设 TTL, 仅显式作废) ----------
+  // ---------- 拉源缓存: 与 pandalive 同策(不按取用时间过期, 只认显式作废 + 年龄收手) ----------
   /** 作废纪元(㊒㊓①): 每次显式作废 +1, 在飞的链写入前比对纪元 ——
    *  不比对时"下播/换号作废"会被一条先于它发出的链复活(缓存复活 = 读数复活) */
   private playEpoch = new Map<string, number>()
@@ -1024,6 +1066,44 @@ class SoopApi {
     this.deadStreak.clear()
     this.riskUntil = 0 // 上一号的风控静默不该闷住新账号的泵(与 Panda 熔断随换号撤退同语义)
     broadcastSrcCache()
+  }
+
+  /** 源缓存的年龄收手(㊕): SOOP 没有心跳可打, 但同一句话说得通 —— 缓存里那份是带签名的地址,
+   *  放着不管就是"徽标亮着而流已死"。时限抄 Panda 那两档(未关注的回访客 10 分钟 / 已下播 30 分钟),
+   *  在播且仍在关注表的源不限年龄: 下播翻转与上游判死已经各自会收尸, 时限再掐长场次只会多打一条整链。
+   *  这一趟只扫内存, 零网络。 */
+  private static CACHE_GUEST_TTL = 10 * 60_000
+  private static CACHE_OFFLINE_TTL = 30 * 60_000
+  private cacheSweepTimer: NodeJS.Timeout | null = null
+
+  startCacheSweep(): void {
+    if (this.cacheSweepTimer) return
+    const loop = (): void => {
+      this.sweepPlayCache()
+      this.cacheSweepTimer = setTimeout(loop, 60_000)
+    }
+    this.cacheSweepTimer = setTimeout(loop, 60_000)
+  }
+
+  /** 按年龄收手: 返回这一趟出队的源数。没有年龄读数的(不是经缓存写入路径来的包)不收 —— 宁漏一次清理也不误杀 */
+  sweepPlayCache(): number {
+    const anchors = new Map(store.listAnchors().map((a) => [roomKey(a.platform, a.userId), a]))
+    let dropped = 0
+    for (const [channel, pack] of [...this.playCache.entries()]) {
+      if (!pack.fetchedAt) continue
+      const age = Date.now() - pack.fetchedAt
+      const a = anchors.get(roomKey('soop', channel))
+      if (!a) {
+        if (age <= SoopApi.CACHE_GUEST_TTL) continue
+        logger.info('soop', `源缓存收手: @${channel} 不在关注表且已过宽限, 源出队`)
+      } else {
+        if (a.isLive || age <= SoopApi.CACHE_OFFLINE_TTL) continue
+        logger.info('soop', `源缓存收手: @${channel} 已下播且源挂了 ${Math.round(age / 60_000)} 分钟, 源出队`)
+      }
+      this.invalidatePlay(channel)
+      dropped++
+    }
+    return dropped
   }
 
   /** 已获取有效直播源的房间主键集(卡片「已缓存」徽标的事实源, 与 pandalive 汇成一个列表) */

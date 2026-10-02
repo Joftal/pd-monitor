@@ -11,6 +11,7 @@ import { thumbs } from './thumbs'
 import { tsName, diskFreeGb, scanTaskMedia, UA, sleep, defaultRecordRoot } from '../util'
 import { sendToast } from './notify'
 import { logger } from './logger'
+import { asUser } from './netGate'
 import { mt } from '../i18n'
 
 // ============ 录制引擎 ============
@@ -206,7 +207,8 @@ class Task implements RecTask {
 
   async run(): Promise<void> {
     fs.mkdirSync(this.dirPath, { recursive: true })
-    const play = await sourceFor(this.platform).getPlayCached(this.userId, this.password)
+    // ㊕: 用户按下录制的那一发取源算用户级(不等按站车道的后台队); 中途断线后的判活与续录仍是后台级
+    const play = await asUser(() => sourceFor(this.platform).getPlayCached(this.userId, this.password))
     if (!play.ok || !play.m3u8) {
       const err = new Error(play.error || mt('rec.fetchFail'))
       ;(err as Error & { needPassword?: boolean }).needPassword = play.needPassword
@@ -336,7 +338,11 @@ class Task implements RecTask {
     let stillLive = false
     let play: PlayResult | null = null
     try {
-      play = await sourceFor(this.platform).fetchPlay(this.userId, this.password)
+      // 判活这一发仍是现拉(forceFresh=true: 缓存里就是正在死的那一条, 绝不能读它),
+      // 但不再买整张菜单(㊕): 旧写法直调 fetchPlay, SOOP 那一路要把整条菜单解完(实测 8~10 发),
+      // 而录制用的从来只是最高档那一路 —— 改成只解最高档后这一跳降到 3~4 发,
+      // 并且按取源契约把结果走纪元门落回缓存(与 ㊓② 那颗续录种子同源)
+      play = await sourceFor(this.platform).getPlayCached(this.userId, this.password, true, false)
       stillLive = !!(play.ok && play.m3u8)
     } catch {
       stillLive = false // 拉不出也按下播论

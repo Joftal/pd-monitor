@@ -199,7 +199,7 @@ export default {
     retryOn: '开启 · 连续上限 {n} 次',
     retryOff: '已关闭(设置)',
     retryNaVod: '不适用 · 回放断点无法无损接回',
-    kaOn: '运行中 · {n}档齐养 · 心跳 {s} 秒前',
+    kaOn: '运行中 · {n}档在手 · 主档心跳 {s} 秒前',
     kaOff: '已关闭(设置)',
     kaVod: '回放无需保活',
     kaNa: '不适用(SOOP 源按需重铸)',
