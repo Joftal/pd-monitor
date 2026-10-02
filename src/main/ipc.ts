@@ -449,7 +449,8 @@ export function registerIpc(): void {
     if (bad) return { ok: false, error: bad }
     let r
     try {
-      r = await sourceFor(platform).getPlayCached(userId, safePwd(password), !!fresh)
+      // 播放器要完整清晰度菜单 ⇒ fullVariants=true(㊔): 后台预取只解了最高档的那份源在这里补齐全档
+      r = await sourceFor(platform).getPlayCached(userId, safePwd(password), !!fresh, true)
     } catch (e) {
       // 网络异常/风控(403/429 等)——必须回落为 ok:false, 否则前端永远停在"获取直播流…"
       return { ok: false, error: mt('ipc.playFail', { msg: (e as Error).message || String(e) }) }

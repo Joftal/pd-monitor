@@ -14,7 +14,10 @@ import { store } from './store'
 // =======================================
 
 export interface RoomSource {
-  getPlayCached(id: string, password?: string, forceFresh?: boolean): Promise<PlayResult>
+  /** fullVariants(㊔): 是否要解析全部清晰度档。只有 SOOP 有意义 —— 它每档要发 2 个请求,
+   *  所以后台预取只要最高档(返回的源包带 partial:true), 真进房才补齐全档;
+   *  Panda 的全档是从 master 一次解析白送的, 该客户端收下这个参数但无需理会。 */
+  getPlayCached(id: string, password?: string, forceFresh?: boolean, fullVariants?: boolean): Promise<PlayResult>
   fetchPlay(id: string, password?: string): Promise<PlayResult>
   invalidatePlay(id: string): void
   seedPlay(id: string, pack: PlayResult): void

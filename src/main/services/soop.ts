@@ -589,15 +589,42 @@ class SoopApi {
     try {
       const ses = session.fromPartition(SOOP_SESSION_PARTITION)
       const res = await ses.fetch(url, { ...init, signal: ctrl.signal } as RequestInit)
-      return { status: res.status, text: await res.text(), finalUrl: res.url || url }
+      const out = { status: res.status, text: await res.text(), finalUrl: res.url || url }
+      this.noteRisk(url, out.status, out.text)
+      return out
     } catch (e) {
       // Chromium 网络栈报错(ERR_FAILED 类)时按 pandalive 同规约走 Node 兜底, 保持代理设置一致
       if (!(e instanceof Error) || !/ERR_|abort|Timeout|timeout/i.test(e.message)) throw e
       const res = await nodeHttpRequest(init.method || 'GET', url, init.headers || {}, init.body, nodeProxyUrl())
-      return { status: res.status, text: res.text, finalUrl: url }
+      const out = { status: res.status, text: res.text, finalUrl: url }
+      this.noteRisk(url, out.status, out.text)
+      return out
     } finally {
       clearTimeout(timer)
     }
+  }
+
+  /** 风控信号只记账, 不发火(㊔): 这一站的取流链单房就有 8~10 发、降级探针每轮几十发, 任何一发撞上
+   *  403/429/5xx/接口回 HTML 都是"平台在嫌我们快"。旧判据要等"整轮探针全灭"才出声 —— 而列表健康时的
+   *  逐房被拦永远凑不出 covered===0, 等于这一半的失败没有保护。
+   *  不抛新异常: 现有调用方对非 200 各有各的吃法(列表回落 null、取流按结果码出文案), 在这里改抛法会把
+   *  一句文案的差别变成一条录制的成败 —— 由 riskCooling() 让后台的泵自己收手, 用户那一条不受牵连。
+   *  515 不算: 那是 SOOP 网关的"没登录"回执, 既有链路按登录态处理; 把它记成风控等于把登出当被 ban */
+  private noteRisk(url: string, status: number, text: string): void {
+    // 播放页本来就是 HTML(roomPageUrl 的唯一形状 = SOOP_ORIGIN/<频道>); 接口(host 各异、路径带扩展名)回 HTML 才是验证页
+    const isPage = url.startsWith(`${SOOP_ORIGIN}/`)
+    const httpHit = status === 403 || status === 429 || (status >= 500 && status !== 515)
+    const htmlOnApi = !isPage && text.trimStart().startsWith('<')
+    if (!httpHit && !htmlOnApi) return
+    if (!this.riskCooling()) logger.warn('soop', `疑似风控信号(HTTP ${status}${htmlOnApi && !httpHit ? ', 接口返回 HTML' : ''}), 后台泵收手 ${SoopApi.RISK_COOL_MS / 60_000} 分钟`)
+    this.riskUntil = Date.now() + SoopApi.RISK_COOL_MS
+  }
+
+  /** 后台泵(预取/降级探针)在风控静默期收手: 冷却只由时间到点解除, 一次幸运 200 不提前解锁 */
+  private riskUntil = 0
+  private static RISK_COOL_MS = 5 * 60_000
+  riskCooling(): boolean {
+    return Date.now() < this.riskUntil
   }
 
   /** 全量关注 + 各自在播状态(实测 718 条 / 374KB / 无分页), 一发替代逐房探针。
@@ -798,11 +825,15 @@ class SoopApi {
     return hit.bno
   }
 
-  async fetchPlay(channel: string, password = ''): Promise<PlayResult> {
+  async fetchPlay(channel: string, password = '', fullVariants = true): Promise<PlayResult> {
+    // ㊔: fullVariants=false 只解最高档(预取泵用的省发型)。这一路的成本不是"一发":
+    // 每个清晰度要 1 发 aid + 1 发 broad_stream_assign(实测档位=4 ⇒ 单房 4 页/整链 8~10 发),
+    // 而后台预取的房间用户多半根本不会点进去 —— 按档位扇出等于为一份没人看的菜单付全额。
+    // 真进房(ipc livePlay)与录制现拉都走完整档, 于是菜单与备用线路的读数与旧行为一字不差。
     // ㊒④: 关注列表那一发本来就带着 broad_no, 取流第一发的整页 HTML 只为它而发 —— 有号就直接进第 2 步
     const known = this.freshBroadNo(channel)
     if (known) {
-      const r = await this.runPlayChain(channel, password, { channel, broadNo: known, explicitOffline: false, living: true, hostName: '', roomName: '', thumbUrl: '' })
+      const r = await this.runPlayChain(channel, password, { channel, broadNo: known, explicitOffline: false, living: true, hostName: '', roomName: '', thumbUrl: '' }, fullVariants)
       // 成功最好; "要密码/要登录"与场次号无关, 照原样回报; 其余失败才回读整页, 让页面那句话来定性
       if (r.ok || r.needPassword || r.needLogin) return r
       logger.info('soop', `复用列表场次号未成功(${r.error || '未知'}), 回读播放页核对 @${channel}`)
@@ -810,14 +841,14 @@ class SoopApi {
       const m = await this.fetchPageMeta(channel, false, true)
       // 页面说没在播 = 那一场已经断了(原判据由整链头部给出); 号码变了 = 新一场, 用新号重走;
       // 页面说在播且号码没变 = 失败与场次号无关, 原样回报即可, 不重打整链
-      if (!m.living || m.broadNo !== known) return this.runPlayChain(channel, password, m)
+      if (!m.living || m.broadNo !== known) return this.runPlayChain(channel, password, m, fullVariants)
       return r
     }
     const meta = await this.fetchPageMeta(channel)
-    return this.runPlayChain(channel, password, meta)
+    return this.runPlayChain(channel, password, meta, fullVariants)
   }
 
-  private async runPlayChain(channel: string, password: string, meta: PageMeta): Promise<PlayResult> {
+  private async runPlayChain(channel: string, password: string, meta: PageMeta, fullVariants = true): Promise<PlayResult> {
     if (!meta.living) {
       if (meta.explicitOffline) return { ok: false, error: mt('soop.offline') }
       return { ok: false, error: mt('soop.noBno') }
@@ -846,7 +877,9 @@ class SoopApi {
       return null
     })
     if (!proxy) return { ok: false, error: mt('soop.proxyFail') }
-    const presets = this.sortPresets(info.presets).filter((p) => p.name && p.name.toLowerCase() !== 'auto')
+    const allPresets = this.sortPresets(info.presets).filter((p) => p.name && p.name.toLowerCase() !== 'auto')
+    // ㊔: 省发型只解最高档 —— 清晰度菜单上的其余档位是"没人点就不必买"的(每档 2 发)
+    const presets = fullVariants ? allPresets : allPresets.slice(0, 1)
     const variants: VariantInfo[] = []
     for (const p of presets) {
       try {
@@ -880,7 +913,7 @@ class SoopApi {
       return { ok: false, error: mt('soop.noStream') }
     }
 
-    logger.info('soop', `拉源成功 @${channel}: 档位=${variants.length} bno=${info.broadNo} cdn=${info.cdn}`)
+    logger.info('soop', `拉源成功 @${channel}: 档位=${variants.length}${fullVariants ? '' : '(只解最高档)'} bno=${info.broadNo} cdn=${info.cdn}`)
     // 开播时刻: 播放页整页没有任何时间串, 列表接口才有 broad_start —— 这里用 CHANNEL.BTIME(已播秒数)反推,
     // 零额外请求(这一发本来就要打)。取不到就留空, 不写臆造值
     const startTime = info.btime > 0 ? kstClock(Date.now() - info.btime * 1000) : ''
@@ -888,6 +921,8 @@ class SoopApi {
       ok: true,
       m3u8: variants[0].url,
       variants,
+      // 只解了最高档 ⇒ 这份源包不完整(卡片照算有源, 清晰度菜单等真进房补齐); 平台本来就只给一档时不算残缺
+      partial: !fullVariants && allPresets.length > 1,
       // 分段与清单都由本地代理带头, ffmpeg 侧不再需要注入 SOOP 头
       dlHeaders: {},
       title: info.roomName || meta.roomName,
@@ -910,18 +945,22 @@ class SoopApi {
   private bumpEpoch(channel: string): void {
     this.playEpoch.set(channel, (this.playEpoch.get(channel) || 0) + 1)
   }
-  async getPlayCached(channel: string, password = '', forceFresh = false): Promise<PlayResult> {
-    const key = password ? `${channel}#pw` : channel
+  async getPlayCached(channel: string, password = '', forceFresh = false, fullVariants = false): Promise<PlayResult> {
+    // 在途键同时表达密码槽位与扇出档级(㊔): 把"要全档"的 caller 合进一条只解最高档的在途链,
+    // 等于塞给它一份残缺的清晰度菜单 —— 宁可各走一条链(最多多 4 发, 且只在预取与进房撞在同一瞬时的窄口上)
+    const key = `${channel}${password ? '#pw' : ''}${fullVariants ? '' : '#top'}`
     if (!forceFresh) {
       const c = this.playCache.get(channel)
-      if (c && c.ok) return c
+      // 命中规则(㊔): 只要最高档的那一方, 手里这份是不是满档都够用(满档包含最高档);
+      // 要满档菜单的那一方, 一份只解了最高档的包绝不能给它 —— 那就是"清晰度菜单缺档"而不是"秒开"
+      if (c && c.ok && (!fullVariants || !c.partial)) return c
       const flying = this.playInflight.get(key)
       if (flying) return flying
     }
     const e0 = this.epochOf(channel)
     const p = (async () => {
       try {
-        const r = await this.fetchPlay(channel, password)
+        const r = await this.fetchPlay(channel, password, fullVariants)
         // 纪元不合 = 这条链出发后被作废过: 结果照还给调用方, 但不落缓存
         if (r.ok && this.epochOf(channel) === e0) {
           r.fetchedAt = Date.now()
@@ -950,9 +989,8 @@ class SoopApi {
   invalidatePlay(channel: string): void {
     this.bumpEpoch(channel)
     this.playCache.delete(channel)
-    // 在飞的两条(带密/不带密)一并摘掉: 留着等于让新 caller 合进一条注定作废的链, 复活走后门
-    this.playInflight.delete(channel)
-    this.playInflight.delete(`${channel}#pw`)
+    // 在飞的几条(带密/不带密 × 全档/只最高档, ㊔)一并摘掉: 留着等于让新 caller 合进一条注定作废的链, 复活走后门
+    for (const pw of ['', '#pw']) for (const fan of ['', '#top']) this.playInflight.delete(`${channel}${pw}${fan}`)
     this.deadStreak.delete(channel)
     broadcastSrcCache()
   }
@@ -984,6 +1022,7 @@ class SoopApi {
     this.playCache.clear()
     this.playInflight.clear()
     this.deadStreak.clear()
+    this.riskUntil = 0 // 上一号的风控静默不该闷住新账号的泵(与 Panda 熔断随换号撤退同语义)
     broadcastSrcCache()
   }
 

@@ -764,6 +764,15 @@ class Watcher {
     }
 
     let fail = 0
+    // ㊔(A4): 接口报过风控信号(403/429/5xx 非 515 / 接口回 HTML)→ 冷却期内探针整批收手。
+    // 关注列表那一发照旧每轮发: 1 发/轮不是风控忌讳的形状, 停它会直接丢开播时效;
+    // 收手的房不记进 fail 而是留在 probe 里 —— 下面那行按"预算挡下"的同一口径计入
+    // roundFailed(顶栏「本轮 N 个房间未读到状态」据此仍然成立), 两处都记会把同一批房数两遍。
+    // 读数沿用上一轮 —— 三态必分不动, 绝不把"没读到"写成"已下播"
+    if (soopApi.riskCooling() && sent.length) {
+      logger.info('soop', `接口风控冷却中: 本轮 ${sent.length} 发探针收手, 沿用上次读数`)
+      sent = []
+    }
     for (const a of sent) {
       const st = await this.probeSoopOne(a, now)
       if (st === 'live') found++
@@ -774,8 +783,10 @@ class Watcher {
     // 失明判据(㊒②): 列表一个房都没覆盖(整表不可用, 或全部关注都不在站内) 且实际发出的探针全灭。
     // 有了每轮预算以后不能再拿 fail===anchors.length 当判据 —— 40 发永远追不上 718 个关注,
     // 那条老判据会从"平台瞎了"悄悄退化成"永远不会瞎"
+    // ㊔(A4): 冷却收手时 sent 被清空, 这一发都没出去 ≠ 没瞎 —— 此时"覆盖 0 且有房待读"本身就是全灭,
+    // 不能让风控冷却反过来把连坐提醒(discovery 第 2 轮弹的那句)绕过去
     const covered = anchors.length - probe.length // 列表给了可读判据的房数
-    const allFail = anchors.length > 0 && covered === 0 && sent.length > 0 && fail === sent.length
+    const allFail = anchors.length > 0 && covered === 0 && (sent.length > 0 ? fail === sent.length : probe.length > 0)
     // 「未读到状态」的口径随预算一起改口(㊒②): 发出去且失败的 + 本轮被预算挡下的 = 这一轮没读到的房数,
     // 顶栏/工作区那句「本轮 N 个房间未读到状态, 卡片保留上次读数」据此仍然成立, 不新增读数面
     this.status.byPlatform.soop.roundFailed = fail + (probe.length - sent.length) // 列表整表覆盖时 probe=0, 这里同时负责复位
@@ -954,6 +965,10 @@ class Watcher {
   private prewarmPumping: Record<Platform, boolean> = { pandalive: false, soop: false }
 
   private enqueuePrewarm(platform: Platform, userId: string): void {
+    // 密码房不预取(㊔): 预取这一路永远没有密码, 这一发注定换回一句"要密码"
+    // —— 而 SOOP 那句"要密码"背后是整条取源链(实测每多一档多两发)。用户带着密码进房的那一条不受影响。
+    const a = store.listAnchors().find((x) => x.platform === platform && x.userId === userId)
+    if (a?.tags?.isPw) return
     const q = this.prewarmQueue[platform]
     if (q.includes(userId)) return
     q.push(userId)
@@ -988,6 +1003,13 @@ class Watcher {
       while (q.length) {
         // 熔断期间不预取(避免高压撞墙) —— 只挡 Panda 自己这条队列
         if (platform === 'pandalive' && this.status.byPlatform.pandalive.circuitOpen) {
+          q.length = 0
+          break
+        }
+        // ㊔(A4): SOOP 的接口自己报过风控形状 → 这条后台队列整条收手。
+        // 预取是"能晚一点就多晚一点"的那一类请求(用户真点开播时还有一条按需拉源的活路),
+        // 而拉源买的是 8~10 发链(每档 2 发), 正是冷却期最不该重发的形状
+        if (platform === 'soop' && soopApi.riskCooling()) {
           q.length = 0
           break
         }

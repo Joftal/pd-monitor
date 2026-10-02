@@ -77,6 +77,13 @@ function rewriteTagUri(line: string, baseUrl: string, mediaUrlOf: (abs: string) 
   }
 }
 
+/** 一次上游读的成品(状态/内容类型/已读满的正文): 清单给字符串, 分片给 Buffer —— 合流分发给每个本地读者 */
+interface ProxyRead {
+  status: number
+  type: string
+  body: Buffer | string
+}
+
 export interface HlsProxyOptions {
   /** 每次上游请求现取请求头(登录态会变, 不能在建代理时冻结) */
   headers: (target: string) => Promise<Record<string, string>> | Record<string, string>
@@ -211,29 +218,54 @@ export class HlsProxy {
       .finally(() => clearTimeout(timer))
   }
 
+  /** 在途合流(㊔): 同一个上游地址在同一瞬时被两个本地读者要 —— 最常见的形状是"边播边录同一房"
+   *  (播放器与 ffmpeg 各自轮询同一份清单、各自要同一个分片)。旧写法是一比一发往上游打,
+   *  分片字节数翻倍而内容一字不差。
+   *  只合流、不加 TTL 缓存: 直播清单的正确读法本来就是"每一轮都要新的", 缓存会把新段读成旧段。
+   *  读满进内存再分发给各读者: 任一客户端中途断开都不影响另一个(共享流式体做不到这一点) */
+  private inflightReads = new Map<string, Promise<ProxyRead>>()
+
+  private readUpstream(target: string, timeoutMs: number, kind: 'playlist' | 'segment'): Promise<ProxyRead> {
+    const flying = this.inflightReads.get(target)
+    if (flying) return flying
+    const p = (async (): Promise<ProxyRead> => {
+      const up = await this.fetchUpstream(target, timeoutMs)
+      const type = up.headers.get('content-type') || (kind === 'playlist' ? 'application/vnd.apple.mpegurl' : 'video/mp2t')
+      if (kind === 'playlist')
+        return {
+          status: up.status,
+          type,
+          body: up.status === 200 ? rewritePlaylist(await up.text(), target, this.mediaUrlOf, true) : `upstream ${up.status}`
+        }
+      return { status: up.status, type, body: Buffer.from(await up.arrayBuffer()) }
+    })().finally(() => {
+      if (this.inflightReads.get(target) === p) this.inflightReads.delete(target) // 按身份撒锁(与全站榜翻页同规约)
+    })
+    this.inflightReads.set(target, p)
+    return p
+  }
+
   private async servePlaylist(target: string, res: ServerResponse): Promise<void> {
-    const up = await this.fetchUpstream(target, 15_000)
-    if (up.status !== 200) {
-      if (up.status === 403 || up.status === 404) this.opts.onDeadUpstream?.(target, up.status)
-      res.writeHead(up.status || 502, { 'Access-Control-Allow-Origin': '*' })
-      res.end(`upstream ${up.status}`)
+    const r = await this.readUpstream(target, 15_000, 'playlist')
+    if (r.status !== 200) {
+      if (r.status === 403 || r.status === 404) this.opts.onDeadUpstream?.(target, r.status)
+      res.writeHead(r.status || 502, { 'Access-Control-Allow-Origin': '*' })
+      res.end(typeof r.body === 'string' ? r.body : `upstream ${r.status}`)
       return
     }
-    const text = await up.text()
-    const body = rewritePlaylist(text, target, this.mediaUrlOf, true)
     res.writeHead(200, {
-      'Content-Type': up.headers.get('content-type') || 'application/vnd.apple.mpegurl',
+      'Content-Type': r.type,
       'Access-Control-Allow-Origin': '*',
       'Cache-Control': 'no-cache'
     })
-    res.end(body)
+    res.end(r.body)
   }
 
   private async serveRaw(target: string, res: ServerResponse): Promise<void> {
-    const up = await this.fetchUpstream(target, 30_000)
-    const buf = Buffer.from(await up.arrayBuffer())
-    res.writeHead(up.status === 0 ? 502 : up.status, {
-      'Content-Type': up.headers.get('content-type') || 'video/mp2t',
+    const r = await this.readUpstream(target, 30_000, 'segment')
+    const buf = Buffer.isBuffer(r.body) ? r.body : Buffer.from(r.body)
+    res.writeHead(r.status === 0 ? 502 : r.status, {
+      'Content-Type': r.type,
       'Content-Length': String(buf.length),
       'Access-Control-Allow-Origin': '*',
       'Cache-Control': 'no-cache'

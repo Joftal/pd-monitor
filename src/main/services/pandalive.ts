@@ -138,6 +138,9 @@ export interface PlayResult {
   vod?: boolean
   /** 解析 master 得到的变体分档(带宽降序, 第一个为最高档) */
   variants?: VariantInfo[]
+  /** true = 这一份只解了最高档(预取泵用的省发型): 卡片仍算"有源", 但清晰度菜单要等真进房补齐全档。
+   *  只有 SOOP 会置位 —— Panda 的全档是从 master 一次解析白送的, 不存在"少解几档"的收益 */
+  partial?: boolean
   hlsBackups?: string[]
   title?: string
   nick?: string
@@ -728,7 +731,8 @@ class PandaApi {
     }
   }
 
-  // ---- 拉源缓存: 不设时限, 源能用就一直用; 仅显式事件作废(重开播/录制出错/换号/手动强刷) ----
+  // ---- 拉源缓存: 命中就一直用, 仅显式事件作废(重开播/录制出错/换号/手动强刷);
+  //      另有保活泵按活性时限收手(㊔): 不在表的过宽限、已下播的过时限即出队 —— 缓存不再只增不减
   private playCache = new Map<string, PlayResult>()
 
   /** "已获取有效直播源"的房间主键集(缓存即事实源; 卡片「秒开」徽标的用户可见投影)。
@@ -743,7 +747,16 @@ class PandaApi {
   // 心跳 = 每源每档只拉清单(数 KB), 不拉分片; 直达 CDN, 不占用 pandalive API 限速队列。
   // 判死纪律: 只有主档 403/404(会话真死)计 strike; 网络层错误(断网/休眠/超时)不计 ——
   // 否则断网恢复瞬间全量误杀+对瘫痪 API 群重铸。连续 2 次真死才收尸; 收尸后若在播+开预取立即重铸。
-  private static KEEPALIVE_MS = 15_000
+  // 周期依据(轮23 实测, 真机关泵): master 令牌的 exp = 取源 +585s(9.75 分钟)就过期, 而由它解析出的
+  // 变体地址在此后**无任何心跳**的情况下仍连续 200 且持续出新段, 到 27.1 分钟 5/5 档全活 ——
+  // 变体地址不靠心跳续命。15s 一轮全档齐养(4 源×5 档 = 20 发/15s ≈ 11.5 万发/天)是把自己当成播放器,
+  // 而真播放器的清单轮询本来就把会话养着, 泵只需要在"没人看"的时候别让会话饿死。
+  private static KEEPALIVE_MS = 60_000
+  /** 源缓存的活性时限(㊔): 泵不再无限养旧源 —— 只有"仍在关注且仍在播"才值得继续心跳。
+   *  到期即 invalidatePlay(「已缓存」徽标随之熄灭, 与重铸冷却同语义: 宁熄灭不骗人), 下次进房重建。
+   *  已下播/本地报离线的缓存源 30 分钟后收手; 不在关注表里的(应用内添加/官网侧已取关/临时进房回访) 10 分钟宽限后收手 */
+  private static KEEPALIVE_OFFLINE_TTL_MS = 30 * 60_000
+  private static KEEPALIVE_GUEST_TTL_MS = 10 * 60_000
   /** 泳道并发数: 串行泵在大关注量下有效心跳会被拉长(实测 100 源×5 档 ≈ 148s/源);
    *  4 泳道 + 50ms 间隙把 100 源心跳压回 ~16s, 对 CDN/本地均为平缓节奏 */
   private static KEEPALIVE_LANES = 4
@@ -788,14 +801,14 @@ class PandaApi {
 
   startKeepalive(): void {
     if (this.keepaliveTimer) return
-    logger.info('api', `源保活泵已启动(基准 ${PandaApi.KEEPALIVE_MS / 1000}s, 随缓存规模 0.4s/源 自适应放宽, 封顶 120s)`)
+    logger.info('api', `源保活泵已启动(基准 ${PandaApi.KEEPALIVE_MS / 1000}s, 随缓存规模 0.4s/源 自适应放宽, 封顶 120s; 只在关注且在播的源入队)`)
     const loop = async (): Promise<void> => {
       try {
         await this.keepaliveTick()
       } finally {
         if (this.keepaliveTimer) {
-          // 自适应间隔: 15s 基准; 每多一缓存源放宽 400ms(上限 120s) —— 大规模关注下日流量封顶 ~2.7GB,
-          // 单源心跳 40s~120s 对 IVS 会话闲置容忍仍属健康量级
+          // 自适应间隔: 60s 基准; 每多一缓存源放宽 400ms(上限 120s) —— 大规模关注下日流量再降一档,
+          // 而实测无心跳 27 分钟变体仍活, 单源 60s~120s 的心跳离"会话饿死"极远
           const wait = Math.min(120_000, Math.max(PandaApi.KEEPALIVE_MS, this.playCache.size * 400))
           this.keepaliveTimer = setTimeout(() => void loop(), wait)
         }
@@ -813,11 +826,32 @@ class PandaApi {
       // 直接用裸 userId 建表会让同号的 SOOP 关注覆盖 Panda 关注, 保活判定读到别人的 isLive
       const anchors = new Map(store.listAnchors().map((a) => [roomKey(a.platform, a.userId), a]))
       // 快照防漂移: tick 期间缓存可能增删
-      const queue = [...this.playCache.entries()].filter(([userId, pack]) => {
-        if (!pack.ok || pack.vod) return false // 回放是静态分片, 无会话活性概念
+      const snapshot = [...this.playCache.entries()]
+      const queue: [string, PlayResult][] = []
+      for (const [userId, pack] of snapshot) {
+        if (!pack.ok || pack.vod) continue // 回放是静态分片, 无会话活性概念
         const a = anchors.get(roomKey('pandalive', userId))
-        return !a || a.isLive // 已知下播: 会话死亡属预期, 不耗心跳; 未关注源(回访场景)照常养
-      })
+        // 无 fetchedAt = 不是经缓存写入路径来的源: 不收手, 交给判死那一条(宁漏一次清理也不误杀)
+        const age = pack.fetchedAt ? Date.now() - pack.fetchedAt : 0
+        if (!a) {
+          if (age <= PandaApi.KEEPALIVE_GUEST_TTL_MS) queue.push([userId, pack]) // 未关注源(回访场景): 宽限内照常养
+          else {
+            logger.info('api', `保活收手: @${userId} 不在关注表且已过宽限, 源出队`)
+            this.invalidatePlay(userId)
+          }
+          continue
+        }
+        if (!a.isLive) {
+          // 已知下播: 会话死亡属预期, 一次心跳都不发(这条老纪律不因本改动静动 —— 下播房的心跳是纯浪费)。
+          // 时限只管一件事: 挂在手里太久的旧源不再算"有源", 收尸让「秒开」徽标说实话
+          if (age > PandaApi.KEEPALIVE_OFFLINE_TTL_MS) {
+            logger.info('api', `保活收手: @${userId} 已下播且源挂了 ${Math.round(age / 60_000)} 分钟, 源出队`)
+            this.invalidatePlay(userId)
+          }
+          continue
+        }
+        queue.push([userId, pack])
+      }
       const lanes = Array.from({ length: PandaApi.KEEPALIVE_LANES }, async () => {
         for (let next = queue.shift(); next; next = queue.shift()) {
           await this.keepaliveSource(next[0], next[1], anchors.get(roomKey('pandalive', next[0])))
@@ -885,6 +919,7 @@ class PandaApi {
     this.bumpEpoch(userId)
     this.playCache.delete(userId)
     this.keepaliveInfo.delete(userId)
+    this.gates.delete(userId) // 事件(重开播/录制出错/手动强刷)一发生就该重新问一次平台: 门槛账只许活到下一个事件
     this.playInflight.delete(userId)
     this.playInflight.delete(userId + '#pw')
     this.pushSrcCache()
@@ -894,8 +929,26 @@ class PandaApi {
     this.playEpochAll++ // 换号: 所有在飞的链一律不许落缓存
     this.playCache.clear()
     this.keepaliveInfo.clear()
+    this.gates.clear() // 上一个账号的"爱心余额不足/粉丝门槛"对这一个账号毫无意义
     this.playInflight.clear()
     this.pushSrcCache()
+  }
+
+  // ---- 门槛回执的账(㊔): 平台明说过不去的那一类, 一段时间内不再替它重打整链 ----
+  /** 只收"账号/房间门槛"这类不会自己好的码; 密码类与登录态类由上层重试, 不记账 */
+  private static GATE_CODES = ['needAdult', 'needFan', 'needUnlimitItem', 'needCoinPurchase', 'castEnd']
+  private static GATE_TTL_MS = 15 * 60_000
+  private gates = new Map<string, { until: number; pack: PlayResult }>()
+
+  /** 受限码 → 给用户的那句话(唯一的映射处, 整链现拉与短路复用同一份) */
+  private gateResult(code: string, message: string): PlayResult {
+    if (code === 'needAdult') return { ok: false, error: mt('api.needAdult') }
+    if (code === 'needLogin') return { ok: false, error: mt('api.needLogin') }
+    if (code === 'needFan') return { ok: false, error: mt('api.needFan') }
+    if (code === 'needUnlimitItem') return { ok: false, error: mt('api.needUnlimitItem') }
+    if (code === 'needCoinPurchase') return { ok: false, error: mt('api.needCoinPurchase') }
+    if (/pw|password/i.test(code)) return { ok: false, needPassword: true, error: mt('api.needPw') }
+    return { ok: false, error: `${code}: ${message || mt('api.playFail')}` }
   }
 
   // ---- 保活运行状态(供播放页"播放源卡"展示) ----
@@ -940,6 +993,11 @@ class PandaApi {
     if (!forceFresh) {
       const c = this.playCache.get(userId)
       if (c && c.ok) return c
+      // 门槛回执的短路(㊔): 平台明说"这门槛过不去"(付费/成人/粉丝/道具/本场已断)的那句话不是网络故障,
+      // 15 分钟内同一房重打整链只会换回同一句 —— 而这些码一个都不是分钟级会翻转的事。
+      // 用户手动强刷(forceFresh)与"带着密码来"的那几次照旧即时试; 开播/作废事件即解除(见 invalidatePlay)
+      const g = this.gates.get(userId)
+      if (g && g.until > Date.now() && !password) return { ...g.pack }
       // 在途复用: 预取泵/自动录制/手动进房并发时, 同一目标只有一发在途请求
       const flying = this.playInflight.get(key)
       if (flying) return flying
@@ -948,7 +1006,7 @@ class PandaApi {
     const p = (async () => {
       try {
         const r = await this.fetchPlay(userId, password)
-        // 打戳写法: 随缓存对象共存亡 —— invalidate/clear 时戳自动作废, 与不设 TTL 的契约一致
+        // 打戳写法: 随缓存对象共存亡 —— 时戳既是播放页「上次取源」的读数, 也是保活泵收手的依据(㊔)
         // 纪元不合 = 这条链出发后被作废过: 结果照还给调用方, 但不落缓存
         if (r.ok && this.epochOf(userId) === e0) {
           r.fetchedAt = Date.now()
@@ -976,13 +1034,10 @@ class PandaApi {
     const code = j?.errorData?.code
     if (code) {
       logger.info('api', `拉源受限 @${userId}: ${code}`) // 付费/成人/粉丝门槛: 用户可见也留痕
-      if (code === 'needAdult') return { ok: false, error: mt('api.needAdult') }
-      if (code === 'needLogin') return { ok: false, error: mt('api.needLogin') }
-      if (code === 'needFan') return { ok: false, error: mt('api.needFan') }
-      if (code === 'needUnlimitItem') return { ok: false, error: mt('api.needUnlimitItem') }
-      if (code === 'needCoinPurchase') return { ok: false, error: mt('api.needCoinPurchase') }
-      if (/pw|password/i.test(code)) return { ok: false, needPassword: true, error: mt('api.needPw') }
-      return { ok: false, error: `${code}: ${j.message || mt('api.playFail')}` }
+      const gate = this.gateResult(code, j.message || '')
+      // 只有"账号/房间门槛"这一类才记账: needLogin 会由后台自愈重登, 密码错误用户下一次可能改对
+      if (PandaApi.GATE_CODES.includes(code)) this.gates.set(userId, { until: Date.now() + PandaApi.GATE_TTL_MS, pack: gate })
+      return gate
     }
     if (j?.result === false) {
       const msg = j.message || ''
