@@ -574,14 +574,17 @@ class PandaApi {
     }
     if (status === 403 || status === 429) {
       logger.warn('api', `疑似风控: HTTP ${status} ${method} ${path}`)
+      this.noteRisk(`HTTP ${status} ${method} ${path}`)
       throw new RiskError(mt('api.riskHttp', { status }), status)
     }
     if (status >= 500) {
       logger.warn('api', `服务器错误: HTTP ${status} ${method} ${path}`)
+      this.noteRisk(`HTTP ${status} ${method} ${path}`)
       throw new RiskError(mt('api.riskServer', { status }), status)
     }
     if (text.trimStart().startsWith('<')) {
       logger.warn('api', `返回HTML疑似风控验证页: ${method} ${path} (HTTP ${status})`)
+      this.noteRisk(`接口回 HTML ${method} ${path}`)
       throw new RiskError(mt('api.riskHtml'), status)
     }
     return { status, text }
@@ -593,6 +596,7 @@ class PandaApi {
     } catch {
       if (text === '' || text === '""') return {} as T
       logger.warn('api', '响应不是JSON(疑似风控)')
+      this.noteRisk('接口不回 JSON')
       throw new RiskError(mt('api.riskJson'))
     }
   }
@@ -695,6 +699,7 @@ class PandaApi {
       `/v1/live?hotyn=Y&adultShowAdModeYN=Y&offset=${offset}&limit=${limit}`
     )
     if ((j as { result?: boolean })?.result === false) {
+      this.noteRisk('整表接口 result=false')
       throw new RiskError(`live list result=false: ${(j as { message?: string })?.message || ''}`)
     }
     return { list: j.list ?? [], loginInfo: j.loginInfo }
@@ -800,32 +805,48 @@ class PandaApi {
   private deadStreak = new Map<string, number>()
   /** 重铸串行链: 泳道并发的群体性收尸合并为链式排队, 与主请求队列同节奏(1.2s+抖动),
    *  防 API 突发触发风控(机器驱动的后台修复, 不配用 jsonPriority 的用户级特权)。
-   *  风控自闭环: 重铸撞上 RiskError 即可知 API 在高压期 → 全链冷却 5 分钟闭嘴(与 watcher 熔断同语义,
-   *  跨模块零依赖); 冷却期补源暂缓(徽标暂熄可接受), 用户进房 getPlayCached 仍会即时重建。 */
+   *  冷却期补源暂缓(徽标暂熄可接受), 用户进房 getPlayCached 仍会即时重建。
+   *  判"要不要收手"读下面那本统一的风控账(㊖), 链自己不再单独计时。 */
   private remintTail: Promise<void> = Promise.resolve()
-  private remintCooldownUntil = 0
+
+  // ---- 风控自闭环(㊖): 客户端自己记的那本账 ----
+  // 熔断(watcher 的 circuitOpen)只管"整表轮次"这一面, 后台的两条泵(预取泵 / 保活重铸链)此前对风控完全失明:
+  // 熔断开着仍按 1.2s 一发逐房拉源(单房 2~6 发), 冷却期最不该重发的形状恰恰是它俩在发。
+  // 与 SOOP 的 riskCooling() 同语义 —— 任何风控形状(403/429/≥500/接口回 HTML/非 JSON)一落地即静默 5 分钟,
+  // 只让后台的泵收手; 用户那一条(进房、手动拉源、登录探针)照走, 不受牵连。
+  private riskUntil = 0
+  private static RISK_COOL_MS = 5 * 60_000
+
+  private noteRisk(why: string): void {
+    // 每个静默窗口只报一次: 高压期成串命中时, 每一发都念一遍只是刷屏
+    if (!this.riskCooling()) logger.warn('api', `疑似风控信号(${why}), 后台泵收手 ${PandaApi.RISK_COOL_MS / 60_000} 分钟`)
+    this.riskUntil = Date.now() + PandaApi.RISK_COOL_MS
+  }
+
+  /** 后台的泵读这一格(预取、重铸): 冷却期内一律收手; 用户请求与整表轮次不看它 */
+  riskCooling(): boolean {
+    return Date.now() < this.riskUntil
+  }
+
   private remintCoolLogged = false
 
   private enqueueRemint(userId: string): void {
-    if (Date.now() < this.remintCooldownUntil) {
+    if (this.riskCooling()) {
       if (!this.remintCoolLogged) {
         this.remintCoolLogged = true
-        logger.info('api', '重铸冷却中(重铸曾撞风控), 暂缓补源 —— 徽标暂熄, 进房时即重建')
+        logger.info('api', '后台风控冷却中, 暂缓补源 —— 徽标暂熄, 进房时即重建')
       }
       return
     }
     this.remintTail = this.remintTail.then(async () => {
       // 链步内二次检查: 前序步可能刚把冷却立起来 —— 双检查让"冷却期零重铸"成为结构保证而非时序运气
-      if (Date.now() >= this.remintCooldownUntil) {
+      if (!this.riskCooling()) {
         try {
           await this.getPlayCached(userId)
           logger.info('api', `保活重铸: @${userId}`)
         } catch (e) {
-          if (e instanceof RiskError) {
-            this.remintCooldownUntil = Date.now() + 5 * 60_000
-            this.remintCoolLogged = false
-            logger.warn('api', `保活重铸撞风控(@${userId}), 全链冷却 5 分钟`)
-          }
+          // 撞风控即把整本账交给 noteRisk(sendRaw 里那一发落地时就已记下), 这里只管收手语义
+          if (e instanceof RiskError) this.remintCoolLogged = false
           // 其余错误(满员/网络)维持静默语义
         }
       }
@@ -969,6 +990,7 @@ class PandaApi {
     this.keepaliveInfo.clear()
     this.gates.clear() // 上一个账号的"爱心余额不足/粉丝门槛"对这一个账号毫无意义
     this.playInflight.clear()
+    this.riskUntil = 0 // 上一号的风控静默不该闷住新账号的泵(与 SOOP 换号清账同语义, ㊖)
     this.pushSrcCache()
   }
 

@@ -81,6 +81,11 @@ class Watcher {
    *  合并 status.circuitOpen 仍只跟 Panda(引擎只有一条链瞎了不该遮掉另一条的读数面) */
   private soopCooldownUntil = 0
   private static SOOP_COOLDOWN_MS = 5 * 60_000
+  /** 关注列表连续"整表不可用"的轮数(㊖ 留痕): 列表拿不到(未登录/改版/整表解析失败)而整页探针读得动时,
+   *  失明判据 allFail 永远不成立 —— 冷却、连败、提醒一条都不触发, 日志里也只剩"这一轮读成功了 N 发"。
+   *  这个计数只负责把那一种降级形状写进留痕(见 roundSoop 的降级探针回执), 不参与任何收手判断:
+   *  rows===null 时这条逐房整页就是检测路径, 压它的节奏等于压开播发现延迟, 要减得先由用户认下时效那笔账。 */
+  private soopBlindStreak = 0
   /** roomKey -> 连续"播放页报下播"轮数: 见 roundSoop, 单次读数不翻转状态 */
   private soopOfflineStreak = new Map<string, number>()
   status: WatcherStatus = {
@@ -125,6 +130,8 @@ class Watcher {
     this.cooldownUntil = 0
     this.soopFailStreak = 0
     this.soopCooldownUntil = 0
+    // ㊖ 重启即作废失明连败账本: 留痕里的轮数必须是本轮会话的真实连续长度(与 D55d 同规约)
+    this.soopBlindStreak = 0
     this.pandaProbeUntil = 0 // 冷启动第一轮照旧问一次 login_info(㊑⑤ 的保证不因 ㊓⑤ 而退)
     for (const p of PLATS) this.schedule(p, 300)
     this.push()
@@ -472,7 +479,7 @@ class Watcher {
         throw e // 其余错误维持轮次失败语义
       }
     }
-    this.idleQueue = missing.filter((a) => !a.isLive) // 新快照整批替换(上轮未扫完的按最新状态重排)
+    this.setIdleQueue(missing.filter((a) => !a.isLive)) // 新快照整批替换, 但从上一窗口没扫到的那一间起排(㊖)
 
     // 会话存续证据: result:true 的整表只可能来自活会话(判死/风控都在 fetchBookmarks 里折成 null)
     if (api.hasSession()) {
@@ -641,7 +648,7 @@ class Watcher {
         throw e // 其余错误维持轮次失败语义
       }
     }
-    this.idleQueue = missing.filter((a) => !a.isLive) // 新快照整批替换(上轮未扫完的按最新状态重排)
+    this.setIdleQueue(missing.filter((a) => !a.isLive)) // 新快照整批替换, 但从上一窗口没扫到的那一间起排(㊖)
 
     // 登录态检测: loginInfo 非空即视为 cookie 有效(结构宽容);
     // 有效→无效 连续 2 轮才宣判作废(单轮缺字段可能是末页响应抖动)。
@@ -776,7 +783,6 @@ class Watcher {
       this.soopProbeCursor = 0
     }
 
-    let fail = 0
     // ㊔(A4): 接口报过风控信号(403/429/5xx 非 515 / 接口回 HTML)→ 冷却期内探针整批收手。
     // 关注列表那一发照旧每轮发: 1 发/轮不是风控忌讳的形状, 停它会直接丢开播时效;
     // 收手的房不记进 fail 而是留在 probe 里 —— 下面那行按"预算挡下"的同一口径计入
@@ -786,11 +792,28 @@ class Watcher {
       logger.info('soop', `接口风控冷却中: 本轮 ${sent.length} 发探针收手, 沿用上次读数`)
       sent = []
     }
+    let fail = 0
+    let probeLive = 0
     for (const a of sent) {
       const st = await this.probeSoopOne(a, now)
-      if (st === 'live') found++
-      else if (st === 'fail') fail++
+      if (st === 'live') {
+        found++
+        probeLive++
+      } else if (st === 'fail') fail++
       if (gapMs > 0) await sleep(Math.max(300, gapMs) * (0.8 + Math.random() * 0.4))
+    }
+    // ㊖ 留痕(原 P1-1 的减发那半已改判, 见台账 ㊖②): 探针那一发走的是 quiet(只有失败才 warn),
+    // 于是"这一轮烧了多少发最贵的整页"在日志里看不见。只在列表失明的轮次出声, 并把连续失明的轮数带上
+    // —— 列表正常时 probe 是个位数的常态, 每轮一行会把日志刷成计数器。
+    // 全灭那一轮不重复出声: 下面 allFail 那句 warn 报的正是同一件事(两句是重复读数面)。
+    // 为什么不做占空比: rows===null 时这条逐房整页【就是】检测路径(全站榜对 SOOP 不存在, 站内列表又读不到),
+    // 压它的节奏等于压开播发现延迟; 而 ㊒② 的每轮 40 发已经是这一面的上限。要再减, 得先由用户认下时效那笔账。
+    this.soopBlindStreak = rows === null && anchors.length ? this.soopBlindStreak + 1 : 0
+    if (sent.length && rows === null && fail < sent.length) {
+      logger.info(
+        'soop',
+        `降级探针回执: ${sent.length}/${probe.length} 发整页(在播=${probeLive} 未读到/下播=${sent.length - probeLive - fail} 失败=${fail}; 关注列表已连续 ${this.soopBlindStreak} 轮不可用)`
+      )
     }
 
     // 失明判据(㊒②): 列表一个房都没覆盖(整表不可用, 或全部关注都不在站内) 且实际发出的探针全灭。
@@ -932,6 +955,21 @@ class Watcher {
   // 队列无关, 它发的是 pandalive 请求); 熔断期清空停扫; 每人每轮至多扫一次(快照消费制, 新 round 发新快照)。
   private idleQueue: Anchor[] = []
   private idlePumping = false
+  /** 间隙泵的续扫游标(㊖): 快照每轮【整批替换】(见 roundByBookmark / roundByList 末尾), 而泵是 shift() 消费。
+   *  没有游标时, 只要"离线且列表不可见的关注"多于一个轮次间隙吃得下的量(默认 120s / 1.2s ≈ 100 房,
+   *  实测 158 关注里离线 148), 就是队首每轮被重扫、队尾一次都扫不到 —— 尾部主播的开播只能靠轮次自己的
+   *  列表命中, 而这条队列存在的理由恰恰是"列表此刻不可用"。同一形状还是 member/bj 的 ~0.8 发/秒持续流量。
+   *  idleDrained 记这一窗口实际消费了几发, 换快照时据此把游标续到没扫过的位置(与 SOOP 探针同一环形规约) */
+  private idleCursor = 0
+  private idleDrained = 0
+
+  /** 轮次交给间隙泵的新一批快照: 从上一窗口没扫到的那一间起排 */
+  private setIdleQueue(rest: Anchor[]): void {
+    const n = rest.length
+    this.idleCursor = n ? (this.idleCursor + this.idleDrained) % n : 0
+    this.idleDrained = 0
+    this.idleQueue = n > 1 ? [...rest.slice(this.idleCursor), ...rest.slice(0, this.idleCursor)] : rest
+  }
 
   private async pumpIdle(): Promise<void> {
     if (this.idlePumping) return
@@ -946,6 +984,8 @@ class Watcher {
           break
         }
         const a = this.idleQueue.shift()!
+        // 消费计数(㊖): 换快照时游标要续到"这一窗口实际看过几间"之后 —— 被守卫跳过的那几间也算看过
+        this.idleDrained++
         // 快照生成后被取关: 跳过(不再为其发请求; 事件层另有 onLiveStart/onLiveEnd 守卫双保险)
         if (!this.stillMonitored(a.platform, a.userId)) continue
         if (this.isGone(a)) continue // 查无此人: 不发请求(每轮都会被快照带回, 必须在消费前挡)
@@ -1031,9 +1071,22 @@ class Watcher {
           q.length = 0
           break
         }
+        // ㊖(P1-3): Panda 这一侧此前对风控完全失明 —— 下面那句 .catch(() => undefined) 把 RiskError 吞了,
+        // 于是取流撞 403 既进不了熔断(noteFailure 只有轮次与间隙泵两个调用点), 也不进任何自闭环,
+        // 整条队列会按 1.2s 一发一路打到底。现在与 SOOP 同规约: 客户端自己记风控账, 后台泵看它收手,
+        // 而用户手动进房那一条一律不看它(快道自有标记) —— 冷却期把用户意图也挡下是拿时效换安全, 这笔交易没谈过
+        if (platform === 'pandalive' && api.riskCooling()) {
+          q.length = 0
+          break
+        }
         const uid = q.shift()!
         // 入队后被取关: 不再为其拉源(与 pumpIdle/事件守卫同规约; 开播入口(onLiveStart)已挡)
-        if (!this.stillMonitored(platform, uid)) continue
+        // ㊖(P2-1): 同一次查找顺手重判"现在还在不在播"。队列是首轮落地那一刻的快照, 而排空要几分钟
+        // (实测 103 个房 ≈12 分钟), 泵到达时场次早已散掉的房仍会被拉一整条链 —— 实测 22 发整页 HTML
+        // 全回 offline=true、那 22 个房现在全部离线 = 100% 白付。秒开只对在播房有意义,
+        // 掉线的那一间下一场开播会由 onLiveStart 重新排队, 这里跳过不亏时效
+        const a = store.listAnchors().find((x) => x.platform === platform && x.userId === uid)
+        if (!a || !a.isLive) continue
         const gap = store.getSettings().monitor[platform].requestGapMs
         if (platform === 'pandalive') api.setGap(gap)
         const r = await sourceFor(platform).getPlayCached(uid).catch(() => undefined) // 失败静默(不打扰用户流)
