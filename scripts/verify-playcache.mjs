@@ -61,6 +61,7 @@ const world = {
   soopMeta: {},    // channel -> Partial<PageMeta>: SOOP 播放页三态替身(Panda 场景用不到, 仅防御)
   soopThrow: {},   // channel -> bool: SOOP 取页抛错(T24 平台隔离: 单平台故障不得连坐)
   soopCalls: [],   // 任何落到 SOOP 替身的调用(断言 Panda 场景零越界)
+  soopFresh: [],   // 以 fresh=true 发出的取页(㊒④: 探针那一发必须是新页, 微缓存不许拦它)
   recStarts: [],   // recorder.start 记录
   recStops: [],    // recorder.stop 记录
   recStartThrow: false, // true 时 recorder.start 抛错(T21 自录失败不伤链路)
@@ -182,8 +183,9 @@ const mocks = {
         world.soopCalls.push('favorites')
         return world.soopFavorites ?? null
       },
-      fetchPageMeta: async (channel) => {
+      fetchPageMeta: async (channel, quiet, fresh) => {
         world.soopCalls.push('pageMeta:' + channel)
+        if (fresh) world.soopFresh.push(channel)
         if (world.soopThrow[channel]) throw new Error('soop 取页失败(sim)')
         return {
           channel,
@@ -277,6 +279,9 @@ async function reset() {
   watcher.errorStreak = 0
   watcher.cooldownUntil = 0
   watcher.soopFailStreak = 0
+  // ㊒ SOOP 自己的退避与轮转游标也属跨场景状态: 不清就会让下一场开头几个断言跑在上一场的冷却期里
+  watcher.soopCooldownUntil = 0
+  watcher.soopProbeCursor = 0
   watcher.status.circuitOpen = false
   watcher.status.message = ''
   // ㊑ 大厅是按需的: 上一场刷新留下的快照与它的钟会污染下一场的"这一轮没碰全站榜"断言
@@ -292,7 +297,8 @@ async function reset() {
   db.anchors = []
   db.settings = mkSettings()
   world.inList = {}; world.bjMedia = {}; world.bj403 = {}; world.bjThrow = {}; world.bjNotFound = {}; world.latency = { liveMs: 0, bjMs: {} }
-  world.soopMeta = {}; world.soopThrow = {}; world.soopCalls.length = 0
+  world.soopMeta = {}; world.soopThrow = {}; world.soopCalls.length = 0; world.soopFresh.length = 0
+  world.soopFavorites = null // ㊒ 默认"列表整条不接待": 想要预言机那场的场景自己摆行; world.soopFresh.length = 0
   // ㊑ 预言机场景隔离: 默认 bm=null(端点不接待) + 无会话罐(匿名) → 每一场都从"走全站榜那条链"起步,
   // 想要预言机的场景自己把三件套凑齐: jar={sessKey} + world.bm=[行] + 会话 Either 已证明(cookieValid=true)
   // Either 能被 login_info 一问证真(world.loginInfo 默认 isLogin:true, 冷启动那条路就是这么走的)
@@ -761,6 +767,8 @@ world.soopMeta = { s24: { broadNo: 999, living: true, hostName: 'S主播', roomN
   await round()
   check('T24-1 SOOP 关注零 pandalive 请求(member/bj 与 play 均未越界)', world.bjCalls.every((c) => c.userId !== 's24') && playCount('s24') === 0)
   check('T24-2 SOOP 开播翻转写回关注卡(昵称/标题/截图同轮落地)', db.anchors[1].isLive === true && db.anchors[1].nick === 'S主播' && db.anchors[1].title === 'S标题' && db.anchors[1].thumbUrl === 's.jpg')
+  // ㊒④: 探针就是"这房现在怎么样"的裁判, 拿到上一轮的旧页等于把"还没开播"读成结论
+  check('T24-2b 播放页探针以 fresh 发问(绕过页面微缓存)', world.soopFresh.includes('s24'))
   const prewarmed = await waitUntil(() => world.soopCalls.includes('getPlayCached:s24'), 3000)
   check('T24-3 开播链路走 SOOP 契约: 旧源作废 + 预取均落 SOOP', world.soopCalls.includes('invalidatePlay:s24') && prewarmed)
   check('T24-4 自动录制按复合键起录(platform=soop)', world.recStarts.some((r) => r.platform === 'soop' && r.userId === 's24'))
@@ -794,12 +802,26 @@ world.soopMeta = { s24: { broadNo: 999, living: true, hostName: 'S主播', roomN
   await round()
   check('T24-10 SOOP 连续全灭: 不开 Panda 熔断、不计 Panda 连败', watcher.status.circuitOpen === false && watcher.errorStreak === 0)
   check('T24-11 SOOP 失明跨阈值出声一次(顶栏不得假绿)', world.toasts.filter((x) => x.title === 'watcher.soopDownT').length === 1)
+  const Ssoop = watcher.status.byPlatform.soop
+  const coolingOn = watcher.soopCooldownUntil > Date.now()
+  const probeBefore = world.soopCalls.filter((c) => c === 'pageMeta:s24').length
+  const roundAtBefore = Ssoop.lastRoundAt
+  const costBefore = Ssoop.roundMs
   await round()
   check('T24-12 连败期间不重复刷屏', world.toasts.filter((x) => x.title === 'watcher.soopDownT').length === 1)
+  // ㊒③ 退避是这一轮真正该验的东西: 失明时"每轮都重发"的形状正是风控最忌讳的
+  check('T24-12b 失明跨阈值即武装退避(soopCooldownUntil 落在未来)', coolingOn)
+  check('T24-12c 冷却轮整轮零请求(探针一发不发)', world.soopCalls.filter((c) => c === 'pageMeta:s24').length === probeBefore)
+  check('T24-12d 冷却轮不刷心跳读数: lastRoundAt/roundMs 沿用上一轮, 未读数不得归零',
+    Ssoop.lastRoundAt === roundAtBefore && Ssoop.roundMs === costBefore && Ssoop.roundFailed === 1)
+  // ㊍ 的平台分家: SOOP 哑了只写自己那半截状态。推熔断位会把 Panda 专供的「去登录」挂到 SOOP 顶栏上,
+  // 而合并视图的 circuitOpen 恒等于 Panda —— 用户会被带去重新登录一个根本没失效的账号
+  check('T24-12e SOOP 失明不开自己的熔断位, 合并读数也不被推高', Ssoop.circuitOpen === false && watcher.status.circuitOpen === false)
   world.soopThrow = {}
   world.soopMeta = { s24: { living: false, explicitOffline: true } }
+  watcher.soopCooldownUntil = Date.now() - 1 // 真实恢复路径就是等退避到期: 到期后的第一轮才该重新发问
   await round()
-  check('T24-13 SOOP 恢复即归零连败(重新武装提醒)', watcher.soopFailStreak === 0)
+  check('T24-13 SOOP 恢复即归零连败(重新武装提醒)', watcher.soopFailStreak === 0 && world.soopCalls.filter((c) => c === 'pageMeta:s24').length === probeBefore + 1)
 
   // 部分失败(设计稿 7.2「整轮部分失败」): 读不到 1 个房 ≠ 全灭, 也 ≠ 一切正常
   db.anchors.push(mkAnchor('s24b', { platform: 'soop', isLive: false }))
@@ -1084,6 +1106,60 @@ world.bjMedia = { ccc: liveItem({ userId: 'ccc' }) }
   check('T27-H2 逐个模式同样不搭全站榜的车(请求数=那一发刷新)', world.liveCalls.length === 1)
 }
 
+// ============ T28 ㊒ SOOP 降级探针的每轮预算 + 游标轮转 ============
+// 实测基线(2026-10-02 真库): 718 个 SOOP 关注, 列表整表不可用时"每房一发"= 718 发/轮 ≈ 5.7 万发/天,
+// 且网络越坏发得越凶。预算 40 + 游标轮转后一轮最多 40 发, 被挡下的房下一轮排到队首, 不会被永久饿死。
+// 这一场把 requestGapMs 设成 0: 探针之间的节流是按发数睡觉, 300ms × 40 会让单场断言跑十几秒
+// (真实下限由设置钳制在 300, 与预算无关 —— 预算管发数, 节流管发速)
+const soopSent = () => world.soopCalls.filter((c) => c.startsWith('pageMeta:')).map((c) => c.slice('pageMeta:'.length))
+const BUDGET = 40 // 与 Watcher.SOOP_PROBE_BUDGET 同值(改一处必须改两处, 由 D55 契约站岗)
+
+console.log('\n■ T28-A 预算: 整表失明时一轮最多 40 发, 其余本轮不读')
+await reset()
+db.settings.monitor.soop.requestGapMs = 0
+world.soopFavorites = null // 列表整条不接待 → 全部关注落逐房探针
+db.anchors = Array.from({ length: 45 }, (_, i) => mkAnchor(`b${String(i).padStart(2, '0')}`, { platform: 'soop', isLive: i >= 40 }))
+{
+  await roundOne('soop')
+  const sent = soopSent()
+  check('T28-A1 一轮发数=预算(45 个关注只读 40)', sent.length === BUDGET, `实发=${sent.length}`)
+  check('T28-A2 队尾那 5 个房本轮没被问', new Set(sent).size === BUDGET && !sent.includes('b44'))
+  check('T28-A3 未读数按新口径把挡下的也数进去(顶栏那句仍成立)', watcher.status.byPlatform.soop.roundFailed === 45 - BUDGET)
+  check('T28-A4 被挡下的在播房保持原读数, 且不因为"本轮没读"发下播通知', db.anchors.slice(40).every((a) => a.isLive === true) && world.toasts.length === 0)
+
+  await roundOne('soop')
+  const sent2 = soopSent().slice(sent.length)
+  check('T28-B1 第二轮仍是预算发数', sent2.length === BUDGET, `实发=${sent2.length}`)
+  check('T28-B2 上一轮被挡下的房这一轮排到队首(轮换不饿死任何房)', ['b40', 'b41', 'b42', 'b43', 'b44'].every((c) => sent2.includes(c)))
+  check('T28-B3 两轮并集覆盖全部 45 个房', new Set([...sent, ...sent2]).size === 45)
+}
+
+console.log('\n■ T28-C 常态(列表覆盖绝大部分关注): 预算不切刀, 与改造前一字不差')
+await reset()
+db.settings.monitor.soop.requestGapMs = 0
+world.soopFavorites = Array.from({ length: 45 }, (_, i) => ({ userId: `b${String(i).padStart(2, '0')}`, isLive: false, nick: '', lastStartTime: '' })).filter((r) => r.userId !== 'b07' && r.userId !== 'b23')
+db.anchors = Array.from({ length: 45 }, (_, i) => mkAnchor(`b${String(i).padStart(2, '0')}`, { platform: 'soop', isLive: false }))
+{
+  await roundOne('soop')
+  check('T28-C1 只有列表缺席的 2 个房被探针问(预算没动刀)', soopSent().length === 2 && soopSent().includes('b07') && soopSent().includes('b23'), `发数=${soopSent().length}`)
+  check('T28-C2 未超预算即游标归零(常态无需轮转)', watcher.soopProbeCursor === 0)
+  check('T28-C3 列表覆盖的 43 个房由列表判离线(整表覆盖时探针不得数进未读)', watcher.status.byPlatform.soop.roundFailed === 0 && watcher.status.byPlatform.soop.liveFound === 0)
+}
+
+console.log('\n■ T28-D 预算之上的失明: 整表全灭仍须判"这一站哑了"(判据只看实际发出的那一批)')
+await reset()
+db.settings.monitor.soop.requestGapMs = 0
+world.soopFavorites = null
+db.anchors = Array.from({ length: 45 }, (_, i) => mkAnchor(`d${String(i).padStart(2, '0')}`, { platform: 'soop', isLive: false }))
+for (const a of db.anchors) world.soopThrow[a.userId] = true // 网络/风控: 每一发取页都抛错
+{
+  await roundOne('soop')
+  await roundOne('soop')
+  check('T28-D1 连续两轮"发出的全失败"即判失明(streak=2, 40 发不必追上 45 个)', watcher.soopFailStreak === 2, `streak=${watcher.soopFailStreak}`)
+  check('T28-D2 失明只出声一次, 同时武装退避(下一轮一发都不发)', world.toasts.filter((x) => x.title === 'watcher.soopDownT').length === 1 && watcher.soopCooldownUntil > Date.now())
+  check('T28-D3 未读数=发出失败的 40 + 被预算挡下的 5 = 整表一个都没读到', watcher.status.byPlatform.soop.roundFailed === 45, `未读=${watcher.status.byPlatform.soop.roundFailed}`)
+}
+
 console.log('解读: T1/T2/T3 PASS ⇒ 「大厅轮询刷新会清源缓存」不成立(真实源码+可计数请求实证);')
 console.log('      T4 PASS ⇒ 列表内开播翻转的作废链路正常工作(对照);')
 console.log('      T17 PASS ⇒ 粉丝房 fanLive 专用通知+自录正常; T18 PASS ⇒ 下播 toast 单发, 重复判离线不重复;')
@@ -1103,4 +1179,7 @@ console.log('      T26 PASS ⇒ ㊍ 监控分家: 预取开关只关本平台那
 console.log('      T27 PASS ⇒ ㊑ 预言机: 一轮一发覆盖全部关注(0 全站榜/0 探针/覆盖数可核对), 开播事件链路不变, 下播两轮才翻,'
   + ' 列表不可用/风控/匿名/判死会话四种情形都回落且不把"没读到"判成"全员下播"; 会话门只挡匿名, "罐在但没证明"先问一句 login_info(冷启动第一轮当场转上预言机, 不再整轮落回四页);'
   + ' 大厅改按需(60 秒复用、手动强刷、熔断与退避期拒发、失败保留旧快照、并发合并在飞那次、快照换了钟跟着换).')
+console.log('      T24-12b/c/d PASS ⇒ ㊒③ SOOP 失明跨阈值即武装自己的退避: 冷却轮整轮零请求、不刷心跳读数、未读数不归零; 到期后第一轮才恢复判定.')
+console.log('      T28 PASS ⇒ ㊒② 降级探针有每轮预算: 45 个关注一轮 40 发, 被挡下的下一轮排到队首(两轮并集覆盖全部), 未读数把挡下的一起数进去;'
+  + ' 列表覆盖常态 2 个缺席房就发 2 发, 预算不动刀(与改造前一字不差).')
 process.exit(failures === 0 ? 0 : 1)

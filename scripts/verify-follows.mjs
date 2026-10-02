@@ -30,6 +30,10 @@
 //   E6  「导入 Panda 关注」与 SOOP 导入共用同一条落库码路
 //   E7  两平台导入的 preload / ApiBridge / 两枚按钮 / 双语文案接线齐全
 //   E8  북마크 取满 200 上限时跳过反向差值(列表不完整 ≠ 站内已取关)
+//   F1  ㊒④ 列表播种的场次号让取流跳过整页 HTML(拉源成功那一档 0 页; 标题/昵称仍由主信息给)
+//   F2  页面实读的号同样进缓存: 第二次取流不再读页; 号过期(>90s)才回落到读整页
+//   F4  复用的号没成功 → 只回读一页定性, 代价有上界(离线定性 / 同号原样回报 / 换场用新号重走一次)
+//   F5  播放页微缓存: TTL 内复用 + 并发合流, fresh=true 必穿透(探针那一发要的是新读数)
 // ============================================================================
 import { createRequire } from 'module'
 import * as fs from 'fs'
@@ -62,6 +66,12 @@ const world = {
   /** 播放页探针应答: live=有场次号 / offline=页面明确 null / broken=两者都没有(风控页或改版) */
   pageMode: 'live',
   pageFail: false,
+  /** 播放页里的 nBroadNo(㊒④: 换场/号失效的场景自己改这一个数) */
+  pageBno: null,
+  /** player_live_api.php 应答里 CHANNEL 段的覆盖项(未设=在播且各档齐, 让整链走到成功) */
+  apiChannel: null,
+  /** broad_stream_assign.html 应答: 非空=给地址, null=不给(调度失败) */
+  assign: 'https://livecast.sooplive.com/12345678-common-hd-1000.ts?limit=0&sid=x',
   /** api.pandalive.co.kr/v1/live/bookmark 的逐页应答数组(按 offset/200 取); bmStatus 覆盖 HTTP 码 */
   bmPages: [],
   bmStatus: 200,
@@ -105,9 +115,20 @@ const fakeSession = {
     }
     // 播放页探针: soop.ts 的 fetchPageMeta 走同一 req 通道
     if (world.pageFail) throw new Error('ERR_FAILED(sim)')
+    // ㊒④ 取流整链的两步(第 2 步主信息 + 第 3 步凭证)与第 4 步调度: 让 F 段能跑到"拉源成功"这一档
+    if (String(url).includes('player_live_api.php')) {
+      const type = /(?:^|&)type=([^&]*)/.exec(String(init.body || ''))?.[1] || ''
+      const ch = type === 'aid' ? { RESULT: 1, AID: 'aid-x' } : { RESULT: 1, BNO: '12345678', RMD: 'https://livecast.sooplive.com', CDN: 'gs_cdn', BJNICK: '甲', TITLE: '在播标题', BTIME: 60, VIEWPRESET: [{ label: 'HD', name: 'hd', label_resolution: 720, bps: 3000 }] }
+      const text = JSON.stringify({ CHANNEL: { ...ch, ...(world.apiChannel || {}) } })
+      return { status: 200, url, finalUrl: url, text: async () => text }
+    }
+    if (String(url).includes('broad_stream_assign')) {
+      const text = world.assign ? JSON.stringify({ view_url: world.assign }) : '{}'
+      return { status: 200, url, finalUrl: url, text: async () => text }
+    }
     const body =
       world.pageMode === 'live'
-        ? `<script>window.nBroadNo=12345678;window.szBjNick='探针昵称';window.szBroadTitle='探针标题';window.szBroadThumPath='//liveimg.sooplive.com/h/12345678.jpg';</script>`
+        ? `<script>window.nBroadNo=${world.pageBno ?? 12345678};window.szBjNick='探针昵称';window.szBroadTitle='探针标题';window.szBroadThumPath='//liveimg.sooplive.com/h/12345678.jpg';</script>`
         : world.pageMode === 'offline'
           ? `<script>window.nBroadNo=null;window.szBjNick='探针昵称';</script>`
           : `<html>check your connection</html>`
@@ -245,7 +266,16 @@ const mocks = {
       }
     }
   },
-  'src/main/services/hlsProxy.ts': { HlsProxy: class {} },
+  // ㊒④ F 段要让取流链跑到"拉源成功"才有东西可断言: 代理在这里只做地址换算, 不起真端口
+  'src/main/services/hlsProxy.ts': {
+    HlsProxy: class {
+      async listen() {}
+      playlistUrl(upstream) {
+        return 'http://127.0.0.1:0/x?url=' + encodeURIComponent(upstream)
+      }
+      close() {}
+    }
+  },
   'src/main/util.ts': {
     UA: 'TEST-UA',
     dataDir: () => ROOT,
@@ -321,6 +351,9 @@ function reset() {
   world.favBody = ''
   world.pageMode = 'live'
   world.pageFail = false
+  world.pageBno = null
+  world.apiChannel = null
+  world.assign = 'https://livecast.sooplive.com/12345678-common-hd-1000.ts?limit=0&sid=x'
   world.bmPages = []
   world.bmStatus = 200
   world.fetches.length = 0
@@ -335,6 +368,10 @@ function reset() {
   watcher.soopFailStreak = 0
   watcher.soopOfflineStreak.clear()
   soopApi.invalidateCookieCache()
+  // ㊒④ 两处微缓存也是跨场景状态: 不清就会让下一场"读到"上一场的场次号/旧页, 断言变成继承
+  soopApi.bnoCache.clear()
+  soopApi.pageCache.clear()
+  soopApi.pageInflight.clear()
 }
 
 const anchor = (over = {}) => ({
@@ -359,6 +396,16 @@ const anchor = (over = {}) => ({
 const findAnchor = (uid) => world.anchors.find((a) => a.userId === uid)
 /** 本轮发过的"播放页探针"次数(按 URL 里的频道名计) */
 const pageProbes = () => world.fetches.filter((f) => !String(f.url).includes('myapi')).length
+/** ㊒④ 某个频道的整页 HTML 发数: bno 复用与页面微缓存的唯一读数就是"还要不要为拿号读一页" */
+const pageHits = (ch) => world.fetches.filter((f) => String(f.url) === `https://play.sooplive.com/${ch}`).length
+/** player_live_api.php 的发数(可按 type 分: live=主信息, aid=清晰度凭证) */
+const apiHits = (type) => world.fetches.filter((f) => String(f.url).includes('player_live_api.php') && (!type || String(f.body).includes('type=' + type))).length
+/** 第 n 发主信息带的场次号(证明复用的就是列表那一个, 不是重新读出来的) */
+const apiBno = (i = 0) => {
+  const posts = world.fetches.filter((f) => String(f.url).includes('player_live_api.php') && String(f.body).includes('type=live'))
+  const m = /(?:^|&)bno=([^&]*)/.exec(String(posts[i]?.body || ''))
+  return m ? decodeURIComponent(m[1]) : ''
+}
 
 // ============ A: 关注列表客户端 ============
 console.log('A1 fetchFavorites 的请求面(Origin 必为 www)')
@@ -796,6 +843,109 @@ for (const loc of ['zh-CN', 'en-US']) {
     /importConfirmPanda/.test(src) && /importConfirmSoop/.test(src) && !/importBtnPanda/.test(src),
     `${loc} 有双平台导入确认文案(旧的按平台两枚按钮文案已清理)`
   )
+}
+
+// ============ F: ㊒④ SOOP 取流的场次号复用 + 播放页微缓存 ============
+// 实测基线(2026-10-02): 24 个在播关注的 broad_no 列表那一发已经全给了, 旧链路却仍为"拿一个号"
+// 在每次点开/录制/预取前 GET 一整页播放页 HTML。F 段用真 soop.ts 数整页发数。
+console.log('F1 列表播种场次号: 取流成功那一档整页 HTML 一发不发')
+reset()
+world.favBody = bodyOf([LIVE_ROW, OFF_ROW])
+{
+  const fRows = await soopApi.fetchFavorites()
+  assert(fRows.length === 2 && soopApi.bnoCache.get('aaa111')?.bno === '12345678', '在播行的 broad_no 存进场次号缓存')
+  assert(!soopApi.bnoCache.has('bbb222'), '离线行没有号可复用')
+  world.fetches.length = 0
+  const fPlay = await soopApi.fetchPlay('aaa111')
+  assert(fPlay.ok === true, '整链跑通(拉源成功)', fPlay.error)
+  assert(pageHits('aaa111') === 0, 'F1a 复用列表场次号: 一页 HTML 都不发', `页=${pageHits('aaa111')}`)
+  assert(apiBno(0) === '12345678', '第 2 步带的就是列表那一个号', `bno=${apiBno(0)}`)
+  assert(world.logInfo.some((m) => m.includes('拉源成功')) && !world.logInfo.some((m) => m.includes('页面元信息 @aaa111')), '日志形状与实机取证同一条: 有拉源成功, 没有页面元信息')
+  assert(fPlay.title === '在播标题' && fPlay.nick === '甲', '标题/昵称仍由主信息给(为省一页而合成的空 meta 不得把读数写空)', `${fPlay.nick}/${fPlay.title}`)
+}
+
+console.log('F1b 列表改口说离线: 上一场的号当场作废(留着只会让下一次取流白撞)')
+reset()
+world.favBody = bodyOf([LIVE_ROW])
+await soopApi.fetchFavorites()
+assert(soopApi.bnoCache.has('aaa111'), '先有一颗号')
+world.favBody = bodyOf([{ ...LIVE_ROW, is_live: false, broad_info: [] }])
+await soopApi.fetchFavorites()
+assert(!soopApi.bnoCache.has('aaa111'), '离线行清掉该房的号(号是这一场的钥匙, 不是这个房的门牌)')
+
+console.log('F2 页面实读到的号同样进缓存: 第二次取流不再读页')
+reset()
+{
+  const fCold = await soopApi.fetchPlay('ccc333')
+  assert(fCold.ok === true && pageHits('ccc333') === 1, '冷房第一次: 一页 + 整链', `页=${pageHits('ccc333')}`)
+  world.fetches.length = 0
+  // 只让页面微缓存过期(10 秒), 场次号缓存(90 秒)仍新鲜: 这一发省掉整页必须靠的是号缓存, 而不是同一份旧页
+  const pageHit = soopApi.pageCache.get('ccc333')
+  if (pageHit) pageHit.at = Date.now() - 11_000
+  const fWarm = await soopApi.fetchPlay('ccc333')
+  assert(fWarm.ok === true && pageHits('ccc333') === 0, '第二次直接进第 2 步(号就是刚读到的那个)', `页=${pageHits('ccc333')}`)
+  assert(apiBno(0) === '12345678', '第二次带的仍是页面那个号', `bno=${apiBno(0)}`)
+}
+
+console.log('F3 场次号过期(>90 秒)= 当没读到过, 回落到读整页那条既有链路')
+reset()
+{
+  soopApi.bnoCache.set('ddd444', { bno: '99999', at: Date.now() - 91_000 })
+  const fStale = await soopApi.fetchPlay('ddd444')
+  assert(pageHits('ddd444') === 1, '过期号不带上: 回读整页拿当前号', `页=${pageHits('ddd444')}`)
+  assert(apiBno(0) === '12345678' && fStale.ok === true, '带上的是页面此刻的真号, 链路仍走通(过期只是回落, 不是失败)', `bno=${apiBno(0)}`)
+}
+
+console.log('F4 复用的号没成功: 只回读一页定性, 代价有上界')
+reset()
+world.favBody = bodyOf([LIVE_ROW])
+await soopApi.fetchFavorites()
+world.apiChannel = { RESULT: -3 }
+world.pageMode = 'offline'
+world.fetches.length = 0
+{
+  const fGone = await soopApi.fetchPlay('aaa111')
+  assert(fGone.ok === false && String(fGone.error).startsWith('soop.offline'), '页面说这一场已断 → 报"已下播", 不是笼统接口失败', fGone.error)
+  assert(pageHits('aaa111') === 1 && apiHits('live') === 1, '上界: 1 页 + 1 发主信息(旧号不试第二次)', `页=${pageHits('aaa111')} api=${apiHits('live')}`)
+}
+reset()
+world.favBody = bodyOf([LIVE_ROW])
+await soopApi.fetchFavorites()
+world.apiChannel = { RESULT: -3 }
+world.fetches.length = 0
+{
+  const fSame = await soopApi.fetchPlay('aaa111')
+  assert(fSame.ok === false && String(fSame.error).startsWith('soop.playResult'), '页面对得上同一个号 → 失败与号无关, 原样回报那句', fSame.error)
+  assert(pageHits('aaa111') === 1 && apiHits('live') === 1, '不重打整链(同号再试一次只会再撞同一条错误)', `api=${apiHits('live')}`)
+}
+reset()
+world.favBody = bodyOf([LIVE_ROW])
+await soopApi.fetchFavorites()
+world.apiChannel = { RESULT: -3 }
+world.pageBno = 87654321
+world.fetches.length = 0
+{
+  await soopApi.fetchPlay('aaa111')
+  assert(apiBno(0) === '12345678' && apiBno(1) === '87654321', '页面给了新号 = 换场, 用新号重走', `${apiBno(0)}→${apiBno(1)}`)
+  assert(apiHits('live') === 2 && pageHits('aaa111') === 1, '重走只有一次(不多打整链)', `api=${apiHits('live')} 页=${pageHits('aaa111')}`)
+}
+
+console.log('F5 播放页微缓存: 连击型调用复用, 要新读数的自己绕过')
+reset()
+{
+  await soopApi.fetchPageMeta('eee555')
+  const fMeta2 = await soopApi.fetchPageMeta('eee555')
+  assert(pageHits('eee555') === 1 && fMeta2.broadNo === '12345678', 'TTL 内的第二次复用同一份页(录制启动前先取真名 → 紧接着拉整链)', `页=${pageHits('eee555')}`)
+  await soopApi.fetchPageMeta('eee555', false, true)
+  assert(pageHits('eee555') === 2, 'fresh=true 必须穿透 —— 探针是来要新读数的, 最短一档 5 秒比 TTL 还小')
+  soopApi.pageCache.set('fff666', { at: Date.now() - 11_000, meta: { channel: 'fff666', broadNo: '1', living: true, explicitOffline: false, hostName: '', roomName: '', thumbUrl: '' } })
+  await soopApi.fetchPageMeta('fff666')
+  assert(pageHits('fff666') === 1, '过期即当没读到过(回既有链路, 不把旧页供成永久)')
+}
+reset()
+{
+  const [fA, fB] = await Promise.all([soopApi.fetchPageMeta('hhh888'), soopApi.fetchPageMeta('hhh888')])
+  assert(pageHits('hhh888') === 1 && fA.broadNo === fB.broadNo, '并发两问合一次请求(整页是唯一昂贵的一步)', `页=${pageHits('hhh888')}`)
 }
 
 // ---------- 汇总 ----------

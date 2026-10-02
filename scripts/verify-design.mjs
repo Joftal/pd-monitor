@@ -59,6 +59,12 @@
 //   D48 store 的 getter 普查: 零消费者的死 getter 一律撤(㊀「无消费方即删」), 不留"以后可能用"
 //   D49 时长单位: 轮次耗时恒按秒且只在一处格式化(胶囊与设置页不许各读各的), 中文格子不混拉丁 s; 节流/分段/熔断/长时长各自的单位是语境, 不许被顺手统一
 //   D50 在播关注与站内发现的头两档排序同序(人气最高在前), 且默认档就跟着第一格(两视图默认都是人气最高)
+//   D51 Panda 轮询换真值源(㊑): 一发站内关注列表判全部关注, 读不到必须回落而不是判全员下播, 下播仍要两轮, 匿名不发注定失败的那一发
+//   D52 全站榜改按需(㊑): 大厅有独立入口 + 60 秒复用 + 熔断退避期拒发 + 失败保留旧快照 + 并发合流, 桥/预加载/IPC 三处接线齐全
+//   D53 大厅与 watchMode 解耦(㊑): 逐个模式不再清空快照, 「模式不可用」那句连出口与死键一起撤, 发现页那一格读大厅自己的钟
+//   D54 SOOP 降级探针有每轮预算(㊒): 环形游标轮换不饿死任何房, 未读数与新失明判据同口径改口
+//   D55 SOOP 有自己的退避(㊒): 失明轮零请求零心跳、每个失明轮重新武装, 但绝不推 Panda 熔断位也不新增第二句读数
+//   D56 SOOP 取流不再为拿场次号读整页(㊒): 列表播种的 broad_no 直接进第 2 步, 号过期/失效各有上界定性, 页面微缓存不拦探针
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -1641,6 +1647,79 @@ checkWithAllowlist(
 }
 
 // ============================================================================
+// D54~D56 ㊒ SOOP 降级链的三重收口(2026-10-02 第 21 轮, 用户指令「按你的建议进行调整」)
+//   实测基线: 718 个 SOOP 关注, 列表整表不可用时"每房一发"= 718 发/轮 ≈ 5.7 万发/天, 且网络越坏发得越凶;
+//   取流五步链的第一发整页 HTML(≈200KB)只为拿一个 nBroadNo, 而列表那一发本来就把 broad_no 全给了。
+//   三条契约分别锁: 探针的每轮预算与环形轮换(D54)、SOOP 自己的退避且绝不连坐 Panda(D55)、
+//   场次号复用与播放页微缓存(D56)。行为侧的对应用真源码跑请求计数(verify-playcache T24/T28、verify-follows F 段)。
+// ============================================================================
+{
+  const wt = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
+  const seg = (decl) => {
+    const i = wt.indexOf(decl)
+    if (i < 0) return ''
+    const j = wt.indexOf('\n  }\n', i)
+    return wt.slice(i, j < 0 ? undefined : j)
+  }
+  const rs = seg('private async roundSoop(')
+  assert(/private static SOOP_PROBE_BUDGET = 40/.test(wt) && /const budget = Watcher\.SOOP_PROBE_BUDGET/.test(rs), 'D54a 降级探针有每轮预算, 且预算只有一处定义(要改就只改一处)')
+  assert(/if \(probe\.length > budget\) \{[\s\S]{0,600}this\.soopProbeCursor = 0/.test(rs), 'D54b 刀只在真超出时落, 未超即游标归零 —— "少数几个房不在列表里"这一常态与改造前一字不差')
+  assert(/const start = this\.soopProbeCursor % probe\.length/.test(rs) && /sent = \[\.\.\.probe\.slice\(start\), \.\.\.probe\.slice\(0, start\)\]\.slice\(0, budget\)/.test(rs), 'D54c 切的是环形窗口而不是头一段: 本轮被挡下的房下一轮排到队首, 不会被永久饿死')
+  assert(/this\.soopProbeCursor = \(start \+ budget\) % probe\.length/.test(rs), 'D54d 游标推进取模(轮完一圈回队首), 不留单调递增、迟早越界的游标')
+  assert(/for \(const a of sent\)/.test(rs) && !/for \(const a of probe\)/.test(rs), 'D54e 循环只消费 sent: 预算不是日志里的装饰, 真发出去的就是那一刀')
+  assert(/roundFailed = fail \+ \(probe\.length - sent\.length\)/.test(rs), 'D54f「未读到状态」的口径随预算一起改口: 发出且失败的 + 本轮被挡下的 = 顶栏/工作区那一句的 N(旧口径只数 fail, 有了预算就少报)')
+  assert(/covered === 0/.test(rs) && /fail === sent\.length/.test(rs) && !/fail === anchors\.length/.test(rs), 'D54g 失明判据跟着改口(列表一个房都没覆盖 + 实际发出的全灭): 老的 fail===anchors.length 在预算下永远不成立, 留着等于"永远不会瞎"')
+}
+{
+  const wt = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
+  const mi = fs.readFileSync(R('src', 'main', 'i18n.ts'), 'utf8')
+  const seg = (decl) => {
+    const i = wt.indexOf(decl)
+    if (i < 0) return ''
+    const j = wt.indexOf('\n  }\n', i)
+    return wt.slice(i, j < 0 ? undefined : j)
+  }
+  const rt = seg('private async roundSoopTop(')
+  const rs = seg('private async roundSoop(')
+  const st = seg('start(): void {')
+  assert(/if \(Date\.now\(\) < this\.soopCooldownUntil\) return/.test(rt), 'D55a SOOP 有自己的退避: 退避期整轮零请求(连列表那一发也不发) —— 失明时"每一轮都重发"的形状正是风控最忌讳的')
+  assert(rt.indexOf('soopCooldownUntil) return') < rt.indexOf('this.roundSoop(') && rt.indexOf('soopCooldownUntil) return') < rt.indexOf('const sBegin'), 'D55b 门在发问与计时上游: 冷却轮既不请求也不写 lastRoundAt/roundMs(真发了才记时, 与 Panda 冷却同规约), 顶栏「上次拉取耗时」不被空转轮刷成刚刚')
+  assert(/if \(this\.soopFailStreak >= 2\) this\.soopCooldownUntil = Date\.now\(\) \+ Watcher\.SOOP_COOLDOWN_MS/.test(rs), 'D55c 每个失明轮都重新武装(不是只有跨阈值那一次), 恢复当轮归零')
+  assert(/this\.soopFailStreak = 0[\s\S]{0,80}this\.soopCooldownUntil = 0/.test(st), 'D55d 重启监控即把连败与退避一起作废: 只清一半会让新会话莫名哑五分钟')
+  // 读数面只许一处出声: 退避这件事不许新造一句 key(watcher.soopDown 那句「这期间不会有 SOOP 开播通知」本就写着它)
+  const soopKeys = [...new Set([...mi.matchAll(/'(watcher\.soop\w+)'/g)].map((m) => m[1]))].sort()
+  assert(soopKeys.join(',') === 'watcher.soopDown,watcher.soopDownT,watcher.soopPartial', 'D55e 退避不新增第二句读数: 失明那句已在顶栏 tooltip 与工作区正文, 同一件事不在两处各说一遍', soopKeys.join(','))
+  assert(!/circuitOpen/.test(rt) && !/circuitOpen/.test(rs), 'D55f SOOP 的失明只写自己那半截状态: 不推熔断位(㊍ 分家), 合并 circuitOpen 恒等于 Panda, 顶栏「去登录」那颗按钮因此仍是 Panda 专供')
+}
+{
+  const so = fs.readFileSync(R('src', 'main', 'services', 'soop.ts'), 'utf8')
+  const wt = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
+  const seg = (src, decl) => {
+    const i = src.indexOf(decl)
+    if (i < 0) return ''
+    const j = src.indexOf('\n  }\n', i)
+    return src.slice(i, j < 0 ? undefined : j)
+  }
+  const fp = seg(so, 'async fetchPlay(')
+  const fv = seg(so, 'async fetchFavorites(')
+  const fb = seg(so, 'private freshBroadNo(')
+  const fm = seg(so, 'async fetchPageMeta(')
+  const rp = seg(so, 'private async readPageMeta(')
+  assert(/const known = this\.freshBroadNo\(channel\)/.test(fp), 'D56a 取流先问一句"这一场的号我是不是已经有了"(列表整表白送 broad_no, 不用等于扔掉)')
+  assert(/if \(r\.live\) this\.bnoCache\.set\(r\.userId, \{ bno: r\.live\.broadNo, at: Date\.now\(\) \}\)/.test(fv) && /else this\.bnoCache\.delete\(r\.userId\)/.test(fv), 'D56b 关注列表那一发顺手播种场次号, 而列表改口说离线就当场作废 —— 号是这一场的钥匙, 不是这个房的门牌')
+  assert(/Date\.now\(\) - hit\.at >= SoopApi\.BNO_TTL/.test(fb) && /this\.bnoCache\.delete\(channel\)/.test(fb), 'D56c 号过期=当没读到过并删掉(不供成永久, 也不带着旧号白撞整链)')
+  assert(/const meta = await this\.fetchPageMeta\(channel\)\s*return this\.runPlayChain\(channel, password, meta\)/.test(fp), 'D56d 手里没号才读整页: 既有那条链路一字不动地留着(降级路径没被换掉, 只是不再是唯一路径)')
+  assert(/if \(r\.ok \|\| r\.needPassword \|\| r\.needLogin\) return r/.test(fp), 'D56e 成功/要密码/要登录三类答案与场次号无关 → 原样回报, 不为它们多读一页')
+  assert(/this\.bnoCache\.delete\(channel\)[\s\S]{0,80}this\.fetchPageMeta\(channel, false, true\)/.test(fp), 'D56f 只有真失败才回读整页定性, 且那一发必须 fresh(拿缓存页给旧号定性=自己骗自己)')
+  assert(/if \(!m\.living \|\| m\.broadNo !== known\) return this\.runPlayChain\(channel, password, m\)\s*return r/.test(fp), 'D56g 页面说没在播或给了新号才重走一次, 号还对得上就原样回报 —— 复用的代价上界恒为 1 页 + 1 次整链, 不会滚成三次五步')
+  assert(/soopApi\.fetchPageMeta\(a\.userId, true, true\)/.test(wt), 'D56h 轮询探针以 fresh 取页: 它就是"这房现在怎么样"的裁判, 而最短一档 5 秒比页面 TTL 还小, 缓存会把两轮读成同一份页')
+  assert(/if \(!fresh\) \{[\s\S]{0,120}const hit = this\.pageCache\.get\(channel\)/.test(fm) && /if \(!fresh\) this\.pageInflight\.set\(channel, p\)/.test(fm), 'D56i fresh 同时绕过微缓存与在飞合并: 探针既不该拿旧页, 也不该把自己并进别人那一发的结果里')
+  assert(/this\.pageCache\.set\(channel, \{ at: Date\.now\(\), meta \}\)/.test(rp) && /this\.pageCache\.size > 64/.test(rp), 'D56j 页面缓存只在真读到以后写, 且带 64 条上限(先清过期再截断, 不随关注数无界增长)')
+  assert(/if \(meta\.living && meta\.broadNo\) this\.bnoCache\.set\(channel, \{ bno: meta\.broadNo, at: Date\.now\(\) \}\)/.test(rp), 'D56k 页面实读到的号同样进缓存(连击型取流第二次就不再读页), 但"在场且给得出号"才进 —— 离线/读数不足的一页不播种')
+}
+
+// ============================================================================
+console.log('\n' + '─'.repeat(72))
 console.log('\n' + '─'.repeat(72))
 console.log(`设计契约: 通过 ${PASS} / 失败 ${FAIL}`)
 if (FAIL) {
