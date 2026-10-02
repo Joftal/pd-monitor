@@ -79,6 +79,12 @@
 //   D68 force 下限与关注列表合流(㊕): 手动刷新豁免 60 秒复用却不豁免 8 秒下限(与 tick 同一枚常量), 关注列表那一发有在飞合并且按身份撒
 //   D69 预取让路 · 年龄收手(㊕): 泵与轮次/停轮让路但不清队, 两条队列随 stop 一起清; SOOP 抄同两档且收手零网络, 闸门只关心跳不关记账
 //   D70 三处观测面(㊕): 兜底重发与代理合流各 60 秒出声一句(次数一起报), 页面读那一发按来源标签分得清谁在读
+//   D71 保活扇出收口(㊕): 每源一轮一发主档, 心跳里没有档循环, 投影读数改口报"档在手"
+//   D72 间隙泵续扫游标(㊖): 快照整批替换必须从上一窗口没扫到的那一间起排, 消费每间只计一次
+//   D73 预取出队时重判真值(㊖): 排空要几分钟, 散场/取关的房不再为其拉整条链, 且跳过不清队
+//   D74 Panda 也有自己的风控账(㊖): 五种风控形状全记账, 只让后台两条泵收手, 用户那一条与换号不受牵连
+//   D75 播放器网络重试有上限(㊖): 致命错误的重连必须有终点, 满次数上抛换源而不是无限重连死源
+//   D76 SOOP 降级态只留痕不减发(㊖, P1-1 改判): 失明轮数只喂日志, 不留退避死字段, 全灭轮不重复出声
 // ============================================================================
 import * as fs from 'fs'
 import * as path from 'path'
@@ -2221,6 +2227,84 @@ checkWithAllowlist(
     'D71e 减的是档不是纪律: 入队两格、下播零心跳、两道活性时限原样不动(㊔ 那三条边界不因本改动松动)'
   )
   assert(/if \(n < 2\) return/.test(ks) && /this\.invalidatePlay\(userId\)/.test(ks) && /this\.enqueueRemint\(userId\)/.test(ks), 'D71f 判死仍是"连续两发 + 收尸 + 在播且开预取才重铸": 一发换窄了也不许顺手把两连击改成一击(单次 403 误杀正是 S4 锁的那一条)')
+}
+
+// ============================================================================
+// D72~D76 轮25(㊖): 请求面审计落地的四条 + 撤销的一条
+//   这一轮的起点是一张"有没有大批量/重重请求"的问句, 落下来的东西分两类:
+//   加闸门(D73/D74/D75)与加可见性(D72/D76)。D76 那一条原本是"减发", 复核时发现自己的修法
+//   会踩掉 ㊒② 锁死的检测路径, 因此撤销了减发那半、只留留痕 —— 撤销也要站岗, 否则同一形状会被人再写回来。
+//   行为侧取证: verify-playcache T37(留痕只在该出声时出声)、T38(两道新泵闸)、T39(游标轮换),
+//   verify-keepalive S18(风控账只认形状不认发起方)。
+// ============================================================================
+{
+  const wt = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
+  const seg = (decl) => {
+    const i = wt.indexOf(decl)
+    if (i < 0) return ''
+    const j = bodyEnd(wt, i)
+    return wt.slice(i, j < 0 ? undefined : j)
+  }
+  const sq = seg('private setIdleQueue(rest: Anchor[]): void {')
+  const pi = seg('private async pumpIdle(): Promise<void> {')
+  assert(/this\.idleCursor = n \? \(this\.idleCursor \+ this\.idleDrained\) % n : 0/.test(sq), 'D72a 续扫游标按"这一窗口实际消费了几发"续算并取模: 快照长度每轮都在变, 不取模的游标会把下一批排到数组外面')
+  assert(/\[\.\.\.rest\.slice\(this\.idleCursor\), \.\.\.rest\.slice\(0, this\.idleCursor\)\]/.test(sq), 'D72b 轮换的是同一批房、只换起点(与 SOOP 探针游标同一环形规约): 队尾饿死的根因是"每轮都从 r0 起排", 不是"扫得慢"')
+  assert(/const n = rest\.length/.test(sq) && /this\.idleQueue = n > 1 \?/.test(sq), 'D72c 长度 0/1 的快照走原路: 只有一间时不必复制一遍数组, 空批更要游标归零(不留指向不存在位置的游标)')
+  assert((wt.match(/this\.setIdleQueue\(/g) || []).length === 2 && (wt.match(/private setIdleQueue\(/g) || []).length === 1, 'D72d 两处轮次快照都走这一扇门 + 定义一处: 谁再直接赋 idleQueue 谁就绕过续扫(T10b 那种"看着还在跑其实没接线"的变异)', `调用=${(wt.match(/this\.setIdleQueue\(/g) || []).length}`)
+  assert(!/this\.idleQueue = (?:missing|rest|queue)/.test(wt), 'D72e 旧写法"新快照整批替换"不许回来(它把队首重扫、队尾一次都扫不到写进了结构里; stop/per-anchor 那两处的清空是作废队列, 不是换快照)')
+  assert((pi.match(/this\.idleDrained\+\+/g) || []).length === 1, 'D72f 每间房只计一次消费: 双计会让游标一次跳两间, 等于一半关注永远轮不到(这条泵的存在理由恰恰是"列表此刻不可用")')
+}
+{
+  const wt = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
+  const i = wt.indexOf('private async pumpPrewarm(platform: Platform): Promise<void> {')
+  const pp = wt.slice(i, i < 0 ? undefined : i + 4200)
+  assert(/const a = store\.listAnchors\(\)\.find\(\(x\) => x\.platform === platform && x\.userId === uid\)/.test(pp) && /if \(!a \|\| !a\.isLive\) continue/.test(pp), 'D73a 出队时按当下真值重判(还在表里吗 + 还在播吗)在同一次查找里办完: 队列是首轮落地那一刻的快照, 而排空要几分钟 —— 秒开只对在播房有意义')
+  assert(!/if \(!this\.stillMonitored\(platform, uid\)\) continue/.test(pp), 'D73b 旧的"只查取关"那一行不许回来: 它旁边再补一条 isLive 会变成两次查找、两个答案来源(同一件事不该有两处真值)')
+  assert(/if \(!a \|\| !a\.isLive\) continue(?![\s\S]{0,60}q\.length = 0)/.test(pp), 'D73c 跳过只针对掉线者, 不许顺手清队(清队 = 把排在后面的在播房一起牺牲掉)')
+  assert(/22 发整页 HTML/.test(pp) && /103 个房/.test(pp), 'D73d 实测依据写在改动处而不是只写在报告里: 这一格的量级(22/22 全回 offline = 100% 白付)只能从现场来, 后人调它时要能看见数')
+}
+{
+  const pd = fs.readFileSync(R('src', 'main', 'services', 'pandalive.ts'), 'utf8')
+  const wt = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
+  const ipc = fs.readFileSync(R('src', 'main', 'ipc.ts'), 'utf8')
+  const segP = (decl) => {
+    const i = pd.indexOf(decl)
+    if (i < 0) return ''
+    const j = bodyEnd(pd, i)
+    return pd.slice(i, j < 0 ? undefined : j)
+  }
+  assert(/private riskUntil = 0/.test(pd) && /private static RISK_COOL_MS = 5 \* 60_000/.test(pd) && /riskCooling\(\): boolean \{\s*return Date\.now\(\) < this\.riskUntil/.test(pd), 'D74a Panda 那本账与 SOOP 同语义同长度(读时间戳, 不自减计数): 两边各造一种冷却, 后台泵就要读两面钟')
+  assert((pd.match(/this\.noteRisk\(/g) || []).length === 5, 'D74b 五种风控形状全部记账(403/429、≥500、接口回 HTML、不回 JSON、整表 result=false): 漏一种就等于那条路上泵照旧失明 —— 旧写法正是只认 403 抛错、不认账', `实数=${(pd.match(/this\.noteRisk\(/g) || []).length}`)
+  assert((pd.match(/this\.noteRisk\([^)]*\)\s*\n\s*throw new RiskError/g) || []).length === 5, 'D74c 记账不许代替判决: 五处都必须在 noteRisk 之后照旧抛出 RiskError(熔断/轮次失败语义靠它, 只记不抛会把风控读成"没事")', `成对数=${(pd.match(/this\.noteRisk\([^)]*\)\s*\n\s*throw new RiskError/g) || []).length}`)
+  assert(!/noteRisk/.test(segP('async fetchBj(')), 'D74d 业务错误不记账: bj 的 result=false 是"这号不存在/无权限"那一类, 不是平台压力信号 —— 把它记进冷却会让一个查无此人的房闷掉全部后台泵 5 分钟')
+  assert((wt.match(/api\.riskCooling\(\)/g) || []).length === 1, 'D74e watcher 里 Panda 这面钟恰好一处消费(预取泵): 间隙泵自己有 noteFailure→熔断, 两处都读会把同一个风控信号记两遍账', `实数=${(wt.match(/api\.riskCooling\(\)/g) || []).length}`)
+  assert(/if \(platform === 'pandalive' && api\.riskCooling\(\)\) \{\s*q\.length = 0\s*break\s*\}/.test(wt), 'D74f 预取泵看 Panda 的账整条收手且清队: 预取买的是 2~6 发链, 正是冷却期最不该重发的形状(与 SOOP 那一条同规约)')
+  const er = segP('private enqueueRemint(userId: string): void {')
+  assert(/if \(this\.riskCooling\(\)\) \{/.test(er) && /this\.remintTail = this\.remintTail\.then\(async \(\) => \{\s*\/\/ 链步内二次检查[\s\S]{0,80}if \(!this\.riskCooling\(\)\) \{/.test(er), 'D74g 重铸链头一道 + 链步内二次检查: 前序步刚把冷却立起来时, 已经排在链上的后续步也不许发问("冷却期零重铸"是结构保证, 不是时序运气)')
+  assert(!/riskCooling/.test(ipc) && !/riskCooling/.test(segP('async getPlayCached(')), 'D74h 冷却只归后台的泵消费: 用户进房、手动拉源、播放器起录一律不看它 —— 冷却期把用户意图也挡下是拿时效换安全, 这笔交易没谈过')
+  assert(/this\.riskUntil = 0/.test(segP('clearPlayCache(): void {')), 'D74i 换号即撤账: 上一号的风控静默不该闷住新账号的泵(与 SOOP/D64j 同语义)')
+}
+{
+  const hp = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'HlsPlayer.vue'), 'utf8')
+  assert(/const NET_RETRY_MAX = 3/.test(hp) && /let netRetry = 0/.test(hp), 'D75a 网络类致命错误的重试有上限且计数住在 load() 里(每条 src 一份): 上限存在的意义是让循环有终点')
+  assert(/hls\.on\(Hls\.Events\.MANIFEST_PARSED, \(_e, data\) => \{\s*netRetry = 0/.test(hp), 'D75b 清单解析成功即重新给满预算: 播得动就不算重试, 否则一次断流后的第一发正常片段也会被后来的抖动打死')
+  assert(/\} else if \(netRetry < NET_RETRY_MAX\) \{\s*netRetry\+\+\s*hls\?\.startLoad\(\)/.test(hp), 'D75c 有预算才 startLoad: startLoad() 每次调用都把 hls.js 自己的重试计数重新武装一遍, 无脑调用等于一条没有终点的循环')
+  assert((hp.match(/hls\?\.startLoad\(\)/g) || []).length === 1, 'D75d 全文件只有一处真调用 startLoad: 第二处就是第二条没有计数的重连路', `实数=${(hp.match(/hls\?\.startLoad\(\)/g) || []).length}`)
+  assert(/网络重试满 \$\{NET_RETRY_MAX\} 次: 上抛换源/.test(hp), 'D75e 满次数要出声并上抛 url-dead(不是静默停止): 停在"重试完"与停在"源死了"在日志里必须分得开')
+  const pv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'PlayerView.vue'), 'utf8')
+  assert(/function onUrlDead\(\) \{[\s\S]{0,400}m3u8\.value = ''/.test(pv) && /<HlsPlayer v-if="m3u8"[\s\S]{0,120}@url-dead="onUrlDead"/.test(pv), 'D75f 终点真的存在: 上层收 url-dead 后清空 m3u8 → v-if 卸载组件 → onUnmounted destroy。没有这一环, 上限 3 次只是把无限循环改成每 3 次重挂载的循环')
+}
+{
+  const wt = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
+  const i = wt.indexOf('private async roundSoop(')
+  const rs = wt.slice(i, bodyEnd(wt, i))
+  assert(!/soopProbeSkipUntil|SOOP_BLIND_MAX_MS|probeHeld/.test(wt), 'D76a 撤销要撤干净: 退避终点、封顶常量、让路标志三枚死字段一律不在(留着它们比留着 bug 更坏 —— 下一轮审计会照着它们再写一遍占空比)')
+  assert(!/if \([^)]*soopBlindStreak/.test(rs), 'D76b 失明轮数只喂日志, 不参与任何判定: 它一旦进了 if, 这条逐房整页就开始被压节奏, 而 rows===null 时它就是检测路径(全站榜对 SOOP 不存在, 站内列表又读不到)')
+  assert(/if \(sent\.length && rows === null && fail < sent\.length\)/.test(rs), 'D76c 留痕只在"列表失明且探针读得动"那一格出声: 常态轮它是噪声(列表覆盖时 probe 是个位数), 全灭轮那句 warn 已经在报同一件事(两句=重复读数面)')
+  assert(/降级探针回执: \$\{sent\.length\}\/\$\{probe\.length\} 发整页/.test(rs) && /关注列表已连续 \$\{this\.soopBlindStreak\} 轮不可用/.test(rs), 'D76d 回执报的是这一轮的账(发数/在播/下播/失败)并带连续失明轮数: 探针那一发走 quiet, 不写这一句就没人知道最贵的一发烧了多少')
+  assert(/为什么不做占空比/.test(rs) && /要再减, 得先由用户认下时效那笔账/.test(rs), 'D76e 不改的理由写在代码里: 没有它, 下一份审计报告会把同一个"5.76 万发/天"再判一次, 而这一次的结论是"减发需授权"')
+  assert(/const allFail = anchors\.length > 0 && covered === 0 && \(sent\.length > 0 \? fail === sent\.length : probe\.length > 0\)/.test(rs), 'D76f 失明判据与 ㊒② 一字不差(留痕不改变任何判据): 这一轮的改动只加了一句日志, 冷却/连败/提醒的触发条件全部原样')
+  assert(!/sent = \[\]/.test(rs.slice(rs.indexOf('let fail = 0'), rs.indexOf('const covered'))), 'D76g 探针循环与留痕之间不许再出现"把 sent 清空"那一格(只有风控冷却那一格有权这么做, 而它由 D64h 站岗)')
 }
 
 // ============================================================================

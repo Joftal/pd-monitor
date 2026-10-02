@@ -23,6 +23,8 @@
 //   S16 闸门只关心跳不关记账(㊕): keepaliveStream=false 时年龄收手照样落地, 且这一趟零请求
 //   S17 扇出收口(㊕): 每源一轮只发一发(主档), 副档一读也不读, master 也绝不进心跳
 //         —— 实测依据: 变体地址静置 15 分钟 15/15 全活, 而 master 的 IVS 令牌 exp=取源+600s, 到点按令牌语义过期(403 未实拍)
+//   S18 风控账统一(㊖): 任何一发风控形状(用户请求也算)都立 5 分钟静默, 后台补源据此收手;
+//         满员这类业务失败不立账, 换号清账
 // ============================================================================
 import { createRequire } from 'module'
 import * as fs from 'fs'
@@ -175,7 +177,7 @@ function resetWorld() {
   world.playLatencyMs = 0
   world.play403 = false
   api.clearPlayCache()
-  api.remintCooldownUntil = 0 // 重铸风控冷却跨场景复位(S14)
+  api.riskUntil = 0 // 风控自闭环账本跨场景复位(S14/㊖: 生产侧随换号清账, 见 clearPlayCache)
 }
 
 const variantCount = (userId) => world.cdnCalls.filter((p) => p.includes(`/${userId}/`) && !p.endsWith('/master.m3u8')).length
@@ -413,6 +415,31 @@ assert(
   'S17-4 投影里那格报的是"档在手"(两份档仍报 2)而不是心跳发数: 减发不改变用户手上的菜单'
 )
 
+// S18 风控账统一(㊖): 冷却不再只由"重铸自己撞风控"点亮 —— 任何一发风控形状(用户那一发也算)都记账,
+//         后台两条泵(补源重铸 / 开播预取)据此收手; 换号即清账。判据是"这一站正在高压", 不是"谁撞的"。
+resetWorld()
+db.anchors.push({ platform: 'pandalive', userId: 'r1', isLive: true })
+world.play403 = true
+await api.getPlayCached('r1').catch(() => {}) // 用户手动拉源撞 403: 它自己不看冷却, 照抛给调用方
+assert(api.riskCooling(), 'S18-1 用户请求撞风控同样记账(旧账本 remintCooldownUntil 只有重铸链看得见)')
+world.play403 = false
+await api.getPlayCached('r1') // 补一发有效源, 让收尸路径有的可收
+const p18 = markPlay()
+world.variantMode = 'dead404'
+await tick()
+await tick() // 连续 2 次真死 → 收尸 → enqueueRemint
+await settle(400)
+assert(markPlay() === p18, 'S18-2 冷却期内补源重铸被丢弃: 用户那一发立起的账同样管住后台(零额外 API 请求)')
+world.variantMode = 'ok'
+api.clearPlayCache()
+assert(!api.riskCooling(), 'S18-3 换号即清账: 上一号的风控静默不许闷住新账号的泵(与 SOOP 换号清账同语义)')
+// S18-4 非风控的失败不立账: 满员(result=false)是房间状态不是平台高压
+resetWorld()
+db.anchors.push({ platform: 'pandalive', userId: 'full2', isLive: true })
+world.playOk = false
+await api.getPlayCached('full2')
+assert(!api.riskCooling(), 'S18-4 满员不发风控账: 后台冷却只认风控形状, 不许把"房间满"读成"站在高压"')
+
 console.log(`\n==== 结果: ${PASS} 通过 / ${FAIL} 失败 ====`)
 if (FAIL) {
   console.log('失败项:\n - ' + fails.join('\n - '))
@@ -422,4 +449,5 @@ console.log(`解读: S1/S7 心跳只走 CDN 零 API 占用; S3 网络异常零�
       S4/S5 单次不误杀, 连续真死才收尸且重铸仅一发; S6 满员保持熄灭不骚扰;
       S2/S8 下播与回放不耗请求; S10/S15 回访源在 10 分钟宽限内同养、过限出队, 下播源 30 分钟出队(下播期间本就零心跳), 长场次一律照养;
       S11 并发合并; S12 自重叠防护; S14 重铸撞风控即全链冷却, 排队者丢弃(零请求); S16 关掉保活只关掉心跳, 记账照跑(零网络);
-      S17 每源一轮一发主档, 副档与 master 都不进心跳(实测: 变体静置 15 分钟 15/15 全活; master 那枚 JWT exp=签发+600s, 到点按令牌语义过期 —— 那一发 403 没有自然样本).`)
+      S17 每源一轮一发主档, 副档与 master 都不进心跳(实测: 变体静置 15 分钟 15/15 全活; master 那枚 JWT exp=签发+600s, 到点按令牌语义过期 —— 那一发 403 没有自然样本);
+      S18 风控账只认形状不认发起方: 用户那一发撞风控, 后台的补源同样收手(换号清账, 满员不算).`)
