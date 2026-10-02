@@ -4,7 +4,7 @@ import { Readable, Writable } from 'stream'
 import * as fs from 'fs'
 import * as path from 'path'
 import { EV, Platform, roomKey, REC_RETRY_MAX, sanitizePathPart, Anchor, RecHistoryItem, RecTask } from '../../shared/types'
-import { api } from './pandalive'
+import { api, PlayResult } from './pandalive'
 import { sourceFor } from './source'
 import { store } from './store'
 import { thumbs } from './thumbs'
@@ -162,6 +162,8 @@ class Task implements RecTask {
   private finalized = false
   private lastBytes = 0
   private lastBytesAt = 0
+  /** 意外退出那一发现拉到的新签名源(㊓②): 续录直接复用, 不再打第二条完整取流链 */
+  private freshSeed: PlayResult | null = null
 
   constructor(opt: StartRecOptions, dirPath: string) {
     // id 带平台前缀: 同 userId 跨平台不再可能撞成同一任务。
@@ -332,14 +334,17 @@ class Task implements RecTask {
   /** 意外退出统一语义: 拉一次现行流判下播/中断 —— 真下播按完成收尾, 还在播才记错误(不自动换源) */
   private async handleUnexpectedExit(reason: string): Promise<void> {
     let stillLive = false
+    let play: PlayResult | null = null
     try {
-      const play = await sourceFor(this.platform).fetchPlay(this.userId, this.password)
+      play = await sourceFor(this.platform).fetchPlay(this.userId, this.password)
       stillLive = !!(play.ok && play.m3u8)
     } catch {
       stillLive = false // 拉不出也按下播论
     }
     if (stillLive) {
       this.error = mt('rec.interrupted', { reason })
+      // 这一次现拉就是"新签名源": 存下来交给续录复用(finalize 会作废旧源, 而这一发比它新)
+      this.freshSeed = play
       await this.finalize('error', 'interrupted')
     } else {
       await this.finalize('done') // 正常下播: 完成态收尾
@@ -537,7 +542,8 @@ class Task implements RecTask {
     if (status === 'error') {
       recorder.maybeRetry(
         { platform: this.platform, userId: this.userId, nick: this.nick, title: this.title, password: this.password, vod: this.vod, startedAt: this.startedAt },
-        failKind
+        failKind,
+        this.freshSeed
       )
     } else {
       recorder.clearRetry(this.platform, this.userId)
@@ -606,6 +612,12 @@ class Recorder {
 
   async start(opt: StartRecOptions): Promise<RecTask> {
     const key = roomKey(opt.platform, opt.userId)
+    // 用户手动接管 = 这条房不再欠一次自动续录(否则定时器会在手动任务收尾后又自作主张地开录)
+    if (!opt.auto) {
+      const pend = this.retryTimers.get(key)
+      if (pend) clearTimeout(pend)
+      this.retryTimers.delete(key)
+    }
     const exist = this.tasks.get(key)
     if (exist && (exist.status === 'recording' || exist.status === 'remuxing')) {
       return Recorder.publicTask(exist)
@@ -656,6 +668,8 @@ class Recorder {
 
   async stopAll(): Promise<void> {
     this.shuttingDown = true // 退出流程: 封堵"收尾期间 error 触发自动续录"的竞态
+    for (const t of this.retryTimers.values()) clearTimeout(t)
+    this.retryTimers.clear()
     for (const t of [...this.tasks.values()]) {
       await t.stop()
       await sleep(300)
@@ -672,12 +686,24 @@ class Recorder {
   private static HEALTHY_MS = 10 * 60 * 1000
   private retryStreak = new Map<string, number>()
   private shuttingDown = false
+  /** 续录退避(㊓③): 上一条五步链刚死就立刻再打一条, 等于在源最抖的时刻把扇出打满。
+   *  计时器按房挂键: 两个房先后失效不该互相顶掉退避 */
+  private static RETRY_BACKOFF_MS = 10_000
+  private retryTimers = new Map<string, NodeJS.Timeout>()
 
   clearRetry(platform: Platform, userId: string): void {
-    this.retryStreak.delete(roomKey(platform, userId))
+    const key = roomKey(platform, userId)
+    this.retryStreak.delete(key)
+    const pend = this.retryTimers.get(key)
+    if (pend) clearTimeout(pend)
+    this.retryTimers.delete(key)
   }
 
-  maybeRetry(prev: { platform: Platform; userId: string; nick: string; title: string; password: string; vod: boolean; startedAt: number }, failKind?: string): void {
+  maybeRetry(
+    prev: { platform: Platform; userId: string; nick: string; title: string; password: string; vod: boolean; startedAt: number },
+    failKind?: string,
+    seed?: PlayResult | null
+  ): void {
     if (this.shuttingDown) return
     if (prev.vod) return // 回放下载不续(进度无法无损接回)
     if (failKind !== 'stall' && failKind !== 'interrupted') return // 满盘等不可续场景直接放行
@@ -693,12 +719,24 @@ class Recorder {
     }
     streak += 1
     this.retryStreak.set(key, streak)
-    logger.warn('rec', `${prev.nick}(@${prev.userId}) 源失效(${failKind}), 自动续录第 ${streak} 次`)
+    const delay = Recorder.RETRY_BACKOFF_MS * 2 ** (streak - 1)
+    logger.warn('rec', `${prev.nick}(@${prev.userId}) 源失效(${failKind}), ${delay / 1000}s 后自动续录第 ${streak} 次`)
     sendToast({ type: 'info', platform: prev.platform, title: mt('rec.toastStart', { nick: prev.nick }), body: mt('rec.retryResume', { n: streak }) }, { ev: 'recStart', ctx: { anchor: store.listAnchors().find((x) => x.platform === prev.platform && x.userId === prev.userId) ?? null, detail: mt('rec.retryResume', { n: streak }) } })
-    // finalize(error) 已 invalidatePlay: 新任务必换新签名源 —— 这正是续录要解决的问题
-    void this.start({ platform: prev.platform, userId: prev.userId, nick: prev.nick, title: prev.title, password: prev.password, auto: true }).catch(() => {
-      // start 失败已弹"启动失败"气泡; streak 保留, 待下个健康周期清白
-    })
+    // finalize(error) 已 invalidatePlay: 新任务必换新签名源 —— 这正是续录要解决的问题。
+    // 中断探针刚现拉到的那一发就是新签名, 种回缓存即省掉第二条完整链(㊓②)
+    if (seed?.ok) sourceFor(prev.platform).seedPlay(prev.userId, seed)
+    const pend = this.retryTimers.get(key)
+    if (pend) clearTimeout(pend)
+    this.retryTimers.set(
+      key,
+      setTimeout(() => {
+        this.retryTimers.delete(key)
+        if (this.shuttingDown) return
+        void this.start({ platform: prev.platform, userId: prev.userId, nick: prev.nick, title: prev.title, password: prev.password, auto: true }).catch(() => {
+          // start 失败已弹"启动失败"气泡; streak 保留, 待下个健康周期清白
+        })
+      }, delay)
+    )
   }
 
   /**

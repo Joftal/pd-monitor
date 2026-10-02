@@ -24,6 +24,9 @@ import { mt } from '../i18n'
 const MAX_PAGES = 5
 const PAGE_SIZE = 100
 
+/** 全站榜一轮分页的产物: 已翻到的部分 + 列表响应自带的 loginInfo + 中途的错(没有则 null) */
+type PageHarvest = { liveMap: Map<string, LiveItem>; loginInfo: unknown; err: unknown | null }
+
 /** 平台 startTime("YYYY-MM-DD HH:MM:SS", 韩国时区) -> 已播秒数; 解析失败/未来时间归 0 */
 function liveElapsedSec(startTime: string): number {
   const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/.exec(String(startTime || '').trim())
@@ -56,6 +59,9 @@ class Watcher {
   private discovery: DiscoveryItem[] = []
   /** 大厅快照的在飞请求(㊑): 全站榜不再搭轮询的车, 谁打开谁触发, 60 秒内复用(时刻记在 status.discoveryAt) */
   private discoveryInFlight: Promise<DiscoveryItem[]> | null = null
+  /** 会话判死态下 login_info 探针的再问时刻(㊓⑤): 30s 结果缓存短于轮询间隔, 判死期等于每轮白付一发 */
+  private pandaProbeUntil = 0
+  private static LOGIN_PROBE_COOL_MS = 5 * 60_000
   /** 预言机连续"报下播"轮数: 与 soopOfflineStreak 同规约, 单轮读数不翻转状态 */
   private pandaOfflineStreak = new Map<string, number>()
   /** 本轮 Panda 用的是哪条真值链 + 预言机覆盖到的关注数(只服务轮次摘要日志, 让"1 发覆盖 158"可被事后核对) */
@@ -119,6 +125,7 @@ class Watcher {
     this.cooldownUntil = 0
     this.soopFailStreak = 0
     this.soopCooldownUntil = 0
+    this.pandaProbeUntil = 0 // 冷启动第一轮照旧问一次 login_info(㊑⑤ 的保证不因 ㊓⑤ 而退)
     for (const p of PLATS) this.schedule(p, 300)
     this.push()
   }
@@ -135,10 +142,21 @@ class Watcher {
 
   /** 立即触发一轮(不等待定时器); 指定平台就只惊动那一条 —— 工作区里的「立即刷新」不该顺手把
    *  另一个平台的请求也发出去。省略参数=两平台各一轮(设置页改完即时生效走这条)。
-   *  在飞的那一条跳过; schedule() 会覆盖它未触发的旧定时器, 连续 tick 自然合并为一轮 */
+   *  在飞的那一条跳过; schedule() 会覆盖它未触发的旧定时器, 连续 tick 自然合并为一轮。
+   *  每平台 8 秒下限(㊓⑥): 正常态一轮 = 一发整站列表(SOOP 实测 374KB), 连点即连发 —— 这是
+   *  唯一由人手放大的请求面, 刚落地一轮时再点本来也读不到新东西 */
+  private static TICK_MIN_MS = 8_000
+
   tick(platform?: Platform): void {
     for (const p of platform ? [platform] : PLATS) {
-      if (this.running && !this.loop[p].inFlight) this.schedule(p, 0)
+      const L = this.loop[p]
+      if (!this.running || L.inFlight) continue
+      const since = Date.now() - L.lastAt
+      if (L.lastAt && since < Watcher.TICK_MIN_MS) {
+        logger.info('watcher', `${platformName(p)} 立即刷新节流: 距上一轮 ${Math.round(since / 1000)}s, 不发新的一轮`)
+        continue
+      }
+      this.schedule(p, 0)
     }
   }
 
@@ -191,6 +209,9 @@ class Watcher {
               : `${all} 全站=${this.status.liveCount} ${tail}`
         )
       }
+      // 首轮落地后才补预取(㊓⑦): 旧实现是开机瞬间按库里的 isLive(上一场的快照)逐个拉源 ——
+      // 实测每次启动头 90 秒 14~36 发整页读 + 16~21 发取流, 其中相当一部分房其实已经下播
+      if (L.roundCnt === 1) this.prewarmSweep(platform)
       this.push()
       if (this.running) {
         store.flush()
@@ -358,8 +379,16 @@ class Watcher {
     // 30 秒缓存 + 在飞合并, 与启动自愈那次同源(通常零增量), 答案是要的 → 预言机立刻上车;
     // 答案是"没登录"的 → 本轮照旧走兜底链, 代价是每 30 秒一发小请求, 远小于它省下的那四页
     if (!api.cookieValid) {
+      // 判死态下这一发探针 30s 缓存短于轮询间隔 = 每轮白付一发(㊓⑤)。
+      // 服务端明确回"没登录"后 5 分钟内不再问: 紧随其后的全站榜响应本来就带 loginInfo 在替它说话。
+      // netFail(网络/风控)不节流 —— 读不到 ≠ 判死, 下一轮照问
+      if (Date.now() < this.pandaProbeUntil) {
+        this.pandaOracle = 'list'
+        return null
+      }
       const info = await api.checkLoginInfo()
       if (!info.isLogin) {
+        if (!info.netFail) this.pandaProbeUntil = Date.now() + Watcher.LOGIN_PROBE_COOL_MS
         this.pandaOracle = 'list'
         return null
       }
@@ -479,6 +508,34 @@ class Watcher {
     this.push()
   }
 
+  /** 全站榜分页: 翻到短页或 MAX_PAGES 为止。错误不抛出去, 挂在 err 上一并带回已翻到的部分 ——
+   *  大厅要"失败也不空表"(用部分), 兜底轮要"本轮失败"(推给熔断计数), 同一发请求两种吃法。
+   *  两条链共用的正是这条在飞锁, 不是各自的壳 */
+  private pageHarvest: Promise<PageHarvest> | null = null
+  private async harvestPages(): Promise<PageHarvest> {
+    if (this.pageHarvest) return this.pageHarvest
+    const p = (async (): Promise<PageHarvest> => {
+      const liveMap = new Map<string, LiveItem>()
+      let loginInfo: unknown = undefined
+      try {
+        for (let page = 0; page < MAX_PAGES; page++) {
+          const r = await api.fetchLivePage(page * PAGE_SIZE, PAGE_SIZE)
+          if (r.loginInfo) loginInfo = r.loginInfo
+          for (const item of r.list) liveMap.set(item.userId, item)
+          if (r.list.length < PAGE_SIZE) break
+        }
+      } catch (e) {
+        return { liveMap, loginInfo, err: e }
+      }
+      return { liveMap, loginInfo, err: null }
+    })()
+    this.pageHarvest = p
+    void p.finally(() => {
+      if (this.pageHarvest === p) this.pageHarvest = null
+    })
+    return p
+  }
+
   /** 大厅(全站榜)按需刷新(㊑): 轮询换用站内关注列表后, 这几页只在用户真的站在「发现」那一屏时才拉。
    *  60 秒内的快照直接复用 —— 来回切视图/翻页/搜索都不该再打官网四页(实测 4 页 / 403KB)。
    *  熔断或退避期不发(与 pumpIdle 同语义), 调用方继续看旧快照; 在飞的那次合并, 不重复发。
@@ -488,16 +545,8 @@ class Watcher {
     if (!force && Date.now() - this.status.discoveryAt < 60_000) return this.discovery
     if (this.status.byPlatform.pandalive.circuitOpen || Date.now() < this.cooldownUntil) return this.discovery
     const p = (async () => {
-      const liveMap = new Map<string, LiveItem>()
-      try {
-        for (let page = 0; page < MAX_PAGES; page++) {
-          const { list } = await api.fetchLivePage(page * PAGE_SIZE, PAGE_SIZE)
-          for (const item of list) liveMap.set(item.userId, item)
-          if (list.length < PAGE_SIZE) break
-        }
-      } catch (e) {
-        logger.warn('watcher', `大厅刷新失败, 沿用上一份快照: ${String((e as Error).message || e)}`)
-      }
+      const { liveMap, err } = await this.harvestPages()
+      if (err) logger.warn('watcher', `大厅刷新失败, 沿用上一份快照: ${String((err as Error).message || err)}`)
       if (liveMap.size) this.publishDiscovery(liveMap)
       return this.discovery
     })()
@@ -525,17 +574,9 @@ class Watcher {
 
   /** list 模式: 拉全站列表, 本地匹配; 全量列表同时作为大厅数据源。返回 Panda 侧在播数 */
   private async roundByList(anchors: Anchor[]): Promise<number> {
-    const liveMap = new Map<string, LiveItem>()
-    let page = 0
-    let loginInfo: unknown = undefined
-    while (page < MAX_PAGES) {
-      const { list, loginInfo: li } = await api.fetchLivePage(page * PAGE_SIZE, PAGE_SIZE)
-      loginInfo = li
-      for (const item of list) liveMap.set(item.userId, item)
-      // 没到满页即已到列表底部
-      if (list.length < PAGE_SIZE) break
-      page++
-    }
+    // 分页与大厅共走一条在飞锁(㊓④); 轮次这一路要失败语义: 部分页不许冒充成功
+    const { liveMap, loginInfo, err } = await this.harvestPages()
+    if (err) throw err
     this.publishDiscovery(liveMap)
 
     const now = Date.now()
@@ -922,6 +963,21 @@ class Watcher {
   /** 对外入口: 关注"已在播"主播时补一发预取(列表模式下该类主播永不再触发 onLiveStart, 预取泵对其缺席) */
   prewarmNow(platform: Platform, userId: string): void {
     this.enqueuePrewarm(platform, userId)
+  }
+
+  /** 首轮之后的预取补扫(㊓⑦): 只认首轮刚落地的真值, 且跳过手上已有有效源的房。
+   *  泵本身按 gap 逐个节流, 所以这里只负责"该不该排队", 不负责速率 */
+  private prewarmSweep(platform: Platform): void {
+    if (!store.getSettings().monitor[platform].prefetchStream) return
+    const cached = new Set(sourceFor(platform).cachedSourceIds())
+    let queued = 0
+    for (const a of store.listAnchors()) {
+      if (a.platform !== platform || !a.isLive || this.isGone(a)) continue
+      if (cached.has(roomKey(platform, a.userId))) continue
+      this.enqueuePrewarm(platform, a.userId)
+      queued++
+    }
+    if (queued) logger.info('watcher', `${platformName(platform)} 首轮后补预取: ${queued} 个在播房排队`)
   }
 
   private async pumpPrewarm(platform: Platform): Promise<void> {

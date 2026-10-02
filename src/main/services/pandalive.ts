@@ -873,15 +873,28 @@ class PandaApi {
     broadcastSrcCache()
   }
 
+  /** 种一枚刚现拉到的有效源(㊓②): 续录复用中断探针那一发, 不再打第二条完整取流链 */
+  seedPlay(userId: string, pack: PlayResult): void {
+    if (!pack.ok) return
+    pack.fetchedAt = Date.now()
+    this.playCache.set(userId, pack)
+    this.pushSrcCache()
+  }
+
   invalidatePlay(userId: string): void {
+    this.bumpEpoch(userId)
     this.playCache.delete(userId)
     this.keepaliveInfo.delete(userId)
+    this.playInflight.delete(userId)
+    this.playInflight.delete(userId + '#pw')
     this.pushSrcCache()
   }
 
   clearPlayCache(): void {
+    this.playEpochAll++ // 换号: 所有在飞的链一律不许落缓存
     this.playCache.clear()
     this.keepaliveInfo.clear()
+    this.playInflight.clear()
     this.pushSrcCache()
   }
 
@@ -910,6 +923,17 @@ class PandaApi {
 
   private playInflight = new Map<string, Promise<PlayResult>>()
 
+  /** 作废纪元(㊓①): 与 soop 同策 —— 显式作废过一次的房, 先于它发出的链不许再把源写回来 */
+  private playEpoch = new Map<string, number>()
+  private playEpochAll = 0
+  private epochOf(userId: string): number {
+    return this.playEpochAll + (this.playEpoch.get(userId) || 0)
+  }
+
+  private bumpEpoch(userId: string): void {
+    this.playEpoch.set(userId, (this.playEpoch.get(userId) || 0) + 1)
+  }
+
   async getPlayCached(userId: string, password = '', forceFresh = false): Promise<PlayResult> {
     // 去重键带密码槽位: 无密码预取与用户手动输密码不共享在途(避免结果错配)
     const key = password ? userId + '#pw' : userId
@@ -920,11 +944,13 @@ class PandaApi {
       const flying = this.playInflight.get(key)
       if (flying) return flying
     }
+    const e0 = this.epochOf(userId)
     const p = (async () => {
       try {
         const r = await this.fetchPlay(userId, password)
         // 打戳写法: 随缓存对象共存亡 —— invalidate/clear 时戳自动作废, 与不设 TTL 的契约一致
-        if (r.ok) {
+        // 纪元不合 = 这条链出发后被作废过: 结果照还给调用方, 但不落缓存
+        if (r.ok && this.epochOf(userId) === e0) {
           r.fetchedAt = Date.now()
           this.playCache.set(userId, r)
           this.pushSrcCache()

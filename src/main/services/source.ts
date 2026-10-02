@@ -8,6 +8,8 @@ import { store } from './store'
 //   getPlayCached = 命中有效缓存零请求, 未命中才拉源(在途去重)
 //   fetchPlay     = 强制现拉(直播探针)
 //   invalidatePlay= 显式作废该房间源包
+//   seedPlay      = 把刚现拉到的有效源种进缓存(探针结果复用, 省一条链)
+//   cachedSourceIds = 手上已有有效源的房间主键(卡片「已缓存」徽标的事实源)
 // 新增平台只需再实现一个同契约客户端并在此登记。
 // =======================================
 
@@ -15,6 +17,8 @@ export interface RoomSource {
   getPlayCached(id: string, password?: string, forceFresh?: boolean): Promise<PlayResult>
   fetchPlay(id: string, password?: string): Promise<PlayResult>
   invalidatePlay(id: string): void
+  seedPlay(id: string, pack: PlayResult): void
+  cachedSourceIds(): string[]
 }
 
 export function sourceFor(platform: Platform): RoomSource {

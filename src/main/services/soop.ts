@@ -900,6 +900,16 @@ class SoopApi {
   }
 
   // ---------- 拉源缓存: 与 pandalive 同策(不设 TTL, 仅显式作废) ----------
+  /** 作废纪元(㊒㊓①): 每次显式作废 +1, 在飞的链写入前比对纪元 ——
+   *  不比对时"下播/换号作废"会被一条先于它发出的链复活(缓存复活 = 读数复活) */
+  private playEpoch = new Map<string, number>()
+  private playEpochAll = 0
+  private epochOf(channel: string): number {
+    return this.playEpochAll + (this.playEpoch.get(channel) || 0)
+  }
+  private bumpEpoch(channel: string): void {
+    this.playEpoch.set(channel, (this.playEpoch.get(channel) || 0) + 1)
+  }
   async getPlayCached(channel: string, password = '', forceFresh = false): Promise<PlayResult> {
     const key = password ? `${channel}#pw` : channel
     if (!forceFresh) {
@@ -908,10 +918,12 @@ class SoopApi {
       const flying = this.playInflight.get(key)
       if (flying) return flying
     }
+    const e0 = this.epochOf(channel)
     const p = (async () => {
       try {
         const r = await this.fetchPlay(channel, password)
-        if (r.ok) {
+        // 纪元不合 = 这条链出发后被作废过: 结果照还给调用方, 但不落缓存
+        if (r.ok && this.epochOf(channel) === e0) {
           r.fetchedAt = Date.now()
           this.playCache.set(channel, r)
           this.deadStreak.delete(channel) // 新源在手: 上一源的判死计数作废
@@ -926,8 +938,21 @@ class SoopApi {
     return p
   }
 
+  /** 种一枚刚现拉到的有效源(㊓②): 续录复用中断探针那一发, 不再打第二条完整取流链 */
+  seedPlay(channel: string, pack: PlayResult): void {
+    if (!pack.ok) return
+    pack.fetchedAt = Date.now()
+    this.playCache.set(channel, pack)
+    this.deadStreak.delete(channel)
+    broadcastSrcCache()
+  }
+
   invalidatePlay(channel: string): void {
+    this.bumpEpoch(channel)
     this.playCache.delete(channel)
+    // 在飞的两条(带密/不带密)一并摘掉: 留着等于让新 caller 合进一条注定作废的链, 复活走后门
+    this.playInflight.delete(channel)
+    this.playInflight.delete(`${channel}#pw`)
     this.deadStreak.delete(channel)
     broadcastSrcCache()
   }
@@ -955,7 +980,10 @@ class SoopApi {
   }
 
   clearPlayCache(): void {
+    this.playEpochAll++ // 换号/登出: 所有在飞的链一律不许落缓存
     this.playCache.clear()
+    this.playInflight.clear()
+    this.deadStreak.clear()
     broadcastSrcCache()
   }
 
