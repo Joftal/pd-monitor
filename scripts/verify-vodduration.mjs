@@ -70,6 +70,7 @@ function loadTs(rel) {
   const localRequire = (id) => {
     if (id in mocks) return mocks[id]
     if (id === '../../shared/types') return loadTs('src/shared/types.ts')
+    if (id === './netGate') return loadTs('src/main/services/netGate.ts') // ㊕ 车道挂真实现
     return require(id)
   }
   new Function('exports', 'require', 'module', '__filename', '__dirname', js)(m.exports, localRequire, m, file, path.dirname(file))

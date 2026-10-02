@@ -4,13 +4,13 @@
 // 方法: electron/store/notify 等依赖替换为可计数 mock; 真实加载 pandalive.ts(sucrase 现编译);
 //       keepaliveTick 以私有方法直调驱动(等效 60s 定时器, 测试不等待).
 // 场景:
-//   S1  基线: 缓存源后 tick 只发 CDN 心跳(全档齐养), 零 pandalive API 请求
+//   S1  基线: 缓存源后 tick 只发 CDN 心跳(每源只读主档), 零 pandalive API 请求
 //   S2  下播跳过: anchor 离线 → tick 对该源零请求
 //   S3  网络层失败不计死: 全网络异常 × 3 tick → 缓存原样, 零重铸(防断网团灭)
 //   S4  主档 404 单次不误杀: strike=1 不清缓存
 //   S5  主档连续 404: 收尸 + 在播+预取 → 重铸一发, 心跳恢复
 //   S6  满员重铸失败: 收尸后保持熄灭, 后续 tick 不再重复打 API
-//   S7  副档 404 仅观测: 不收尸不重铸
+//   S7  副档不再被读(㊕ 改口): 每轮只点主档一根, 副档的死活本泵结构上看不见
 //   S8  vod 回放包: tick 跳过(静态分片无活性概念)
 //   S9  开关关闭: keepaliveStream=false → tick 零请求
 //   S10 未关注的缓存源(临时进房): 10 分钟宽限内照常养(回访场景)
@@ -20,6 +20,9 @@
 //   S14 重铸风控自闭环: 重铸撞 403 → 全链冷却 5 分钟, 排队中的后续重铸直接丢弃
 //   S15 活性时限(㊔): 收手只认「不在关注表过 10 分钟」与「已下播过 30 分钟」两格,
 //         下播期间本来就零心跳, 而长场次(90 分钟在播)一律照养 —— 时限不许掐活源
+//   S16 闸门只关心跳不关记账(㊕): keepaliveStream=false 时年龄收手照样落地, 且这一趟零请求
+//   S17 扇出收口(㊕): 每源一轮只发一发(主档), 副档一读也不读, master 也绝不进心跳
+//         —— 实测依据: 变体地址静置 15 分钟 15/15 全活, 而 master 的 IVS 令牌 exp=取源+600s, 到点按令牌语义过期(403 未实拍)
 // ============================================================================
 import { createRequire } from 'module'
 import * as fs from 'fs'
@@ -151,6 +154,8 @@ function loadTs(rel) {
   const localRequire = (id) => {
     if (id in mocks) return mocks[id]
     if (id === './pandalive') return loadTs('src/main/services/pandalive.ts')
+    // ㊕ 车道挂真实现(不另写替身): 替身绿而真车道从未被跑过, 正是这套脚本此前踩过的坑
+    if (id === './netGate') return loadTs('src/main/services/netGate.ts')
     if (id === '../../shared/types') return loadTs('src/shared/types.ts')
     return require(id)
   }
@@ -188,7 +193,7 @@ db.anchors.push({ platform: 'pandalive', userId: 'a', isLive: true })
 await api.getPlayCached('a')
 const apiCallsAtCache = markPlay()
 await tick()
-assert(variantCount('a') === 2, 'S1-1 每 tick 全档齐养: 2 个分档各 1 次心跳')
+assert(variantCount('a') === 1, 'S1-1 每 tick 每源只读主档一发(㊕ 扇出收口: 副档不靠心跳续命, 实测静置 15 分钟 15/15 全活)')
 assert(markPlay() === apiCallsAtCache, 'S1-2 保活 tick 零 pandalive API 请求(fetchPlay/fetchBj)')
 assert(api.cachedSourceIds().includes(rk('a')), 'S1-3 缓存保持有效')
 
@@ -227,8 +232,9 @@ for (let i = 0; i < 30 && world.playCalls.filter((u) => u === 'a').length < 2; i
 assert(world.playCalls.filter((u) => u === 'a').length === 2, 'S5-1 连续 2 次真死: 收尸后重铸 fetchPlay 一发')
 assert(api.cachedSourceIds().includes(rk('a')), 'S5-2 重铸成功(房未满): 缓存复活, 心跳可恢复')
 world.variantMode = 'ok'
+const s5Mark = markCdn()
 await tick()
-assert(variantCount('a') >= 2, 'S5-3 重铸后心跳继续齐养(新源已接管)')
+assert(world.cdnCalls.length - s5Mark === 1, 'S5-3 重铸后心跳继续(新源已接管): 一轮恰好一发, 不多打副档')
 
 // S6 满员: 重铸失败, 保持熄灭且不再骚扰 API
 resetWorld()
@@ -246,15 +252,19 @@ await tick()
 await tick()
 assert(world.playCalls.filter((u) => u === 'full').length === playsMark, 'S6-2 熄灭的源: 后续 tick 零心跳零重试(不再骚扰 API)')
 
-// S7 副档 404 仅观测
+// S7 副档不再被读(㊕ 扇出收口)
 resetWorld()
 db.anchors.push({ platform: 'pandalive', userId: 'a', isLive: true })
 await api.getPlayCached('a')
 world.variantMode = 'secondary404'
 await tick()
 await tick()
-assert(api.cachedSourceIds().includes(rk('a')), 'S7-1 副档 404 × 2: 不收尸(主档活着即不判死)')
+assert(api.cachedSourceIds().includes(rk('a')), 'S7-1 副档 404 × 2: 不收尸(判死只认主档)')
 assert(world.playCalls.filter((u) => u === 'a').length === 1, 'S7-2 副档 404: 零重铸')
+assert(
+  world.cdnCalls.filter((p) => p.endsWith('/v720.m3u8')).length === 0,
+  'S7-3 副档清单一次都没被读(正面证据): 旧写法每 tick 各点一根, 而它的失败在本泵只有观测价值'
+)
 
 // S8 vod 回放包跳过
 resetWorld()
@@ -278,7 +288,7 @@ store.setSettings({ keepaliveStream: true })
 resetWorld()
 await api.getPlayCached('guest') // 临时进房, 不在关注列表
 await tick()
-assert(variantCount('guest') === 2, 'S10 未关注缓存源(回访场景): 照常齐养')
+assert(variantCount('guest') === 1, 'S10 未关注缓存源(回访场景): 宽限内照常一发主档')
 
 // S11 重铸与手动拉源并发去重
 resetWorld()
@@ -303,7 +313,7 @@ const c3 = markCdn()
 const p1 = tick()
 const p2 = tick() // 应立即空返回
 await Promise.all([p1, p2])
-assert(variantCount('a') === 2 + 0, 'S12 并发 tick: keepaliveBusy 守卫, 心跳不翻倍')
+assert(variantCount('a') === 1 + 0, 'S12 并发 tick: keepaliveBusy 守卫, 心跳不翻倍')
 
 // S13 状态投影(播放页"播放源卡"数据源)
 resetWorld()
@@ -361,7 +371,47 @@ db.anchors.push({ platform: 'pandalive', userId: 'long', isLive: true })
 await api.getPlayCached('long')
 api.playCache.get('long').fetchedAt -= 90 * 60_000 // 在播三小时的长场次
 await tick()
-assert(kaStatus('long').cached === true && variantCount('long') === 2, 'S15-3 时限不许掐长场次: 仍在播的源挂 90 分钟照养(收手只认"关注表 + 在播"这两格都不满足)')
+assert(kaStatus('long').cached === true && variantCount('long') === 1, 'S15-3 时限不许掐长场次: 仍在播的源挂 90 分钟照养(收手只认"关注表 + 在播"这两格都不满足)')
+
+// S16 闸门只关心跳, 不关记账(㊕): 关掉保活后源缓存仍按年龄收手, 且这一趟零网络
+resetWorld()
+store.setSettings({ keepaliveStream: false })
+db.anchors.push({ platform: 'pandalive', userId: 'off2', isLive: true })
+await api.getPlayCached('off2')
+db.anchors[0].isLive = false
+api.playCache.get('off2').fetchedAt -= 31 * 60_000 // 下播且挂了 31 分钟: S15-2 同一格
+const c6 = markCdn()
+const p6 = markPlay()
+await tick()
+assert(kaStatus('off2').cached === false, 'S16-1 保活关闭时年龄收手照样落地: 挂满 31 分钟的下播源出队(「已缓存」徽标不再谎报)')
+assert(world.cdnCalls.length === c6 && world.playCalls.length === p6, 'S16-2 收手这一趟零请求: 关掉的是心跳, 不是记账')
+store.setSettings({ keepaliveStream: true })
+
+// S17 扇出收口(㊕): 每源一轮只发一发主档 —— 依据是轮24 静置实测(3 房 × 5 档 15 分钟 15/15 全活),
+//         加 master 那枚 JWT 现场解出的 exp=签发+600s(到点按令牌语义过期; 那一发 403 无自然样本, 台账 ㊕⑧ 记为量不到), 不是"少发为快"的偏好
+resetWorld()
+db.anchors.push(
+  { platform: 'pandalive', userId: 'f1', isLive: true },
+  { platform: 'pandalive', userId: 'f2', isLive: true },
+  { platform: 'pandalive', userId: 'f3', isLive: true }
+)
+for (const id of ['f1', 'f2', 'f3']) await api.getPlayCached(id) // 每房两份档
+// 只数这三房自己的路径: 前一场景(S14/S15)留下的重铸链会晚一点补一发 master, 全局计数会被它污染
+const at = (suf) => world.cdnCalls.filter((p) => /^\/(f1|f2|f3)\//.test(p) && p.endsWith(suf)).length
+await tick()
+assert(at('/v1080.m3u8') === 3, 'S17-1 三源一轮恰好三发(旧写法 3 源 × 2 档 = 6 发): 扇出按"源"发而不按"档"发')
+assert(
+  at('/v720.m3u8') === 0,
+  'S17-2 副档一根不点: 切档用的是缓存里那批长效地址(PlayerView 直取 variants[i].url), 与心跳无关'
+)
+assert(
+  at('/master.m3u8') === 3,
+  'S17-3 master 绝不进心跳: 每房只在拉源那一刻读过一次; 它的 IVS 令牌 exp=取源+600s(现场解码), 到点即过期, 拿来当活性判据 = 每 10 分钟误收一次尸(整批缓存源被误杀后群重铸)'
+)
+assert(
+  ['f1', 'f2', 'f3'].every((id) => kaStatus(id).variants === 2),
+  'S17-4 投影里那格报的是"档在手"(两份档仍报 2)而不是心跳发数: 减发不改变用户手上的菜单'
+)
 
 console.log(`\n==== 结果: ${PASS} 通过 / ${FAIL} 失败 ====`)
 if (FAIL) {
@@ -371,4 +421,5 @@ if (FAIL) {
 console.log(`解读: S1/S7 心跳只走 CDN 零 API 占用; S3 网络异常零收尸零重铸(断网不团灭);
       S4/S5 单次不误杀, 连续真死才收尸且重铸仅一发; S6 满员保持熄灭不骚扰;
       S2/S8 下播与回放不耗请求; S10/S15 回访源在 10 分钟宽限内同养、过限出队, 下播源 30 分钟出队(下播期间本就零心跳), 长场次一律照养;
-      S11 并发合并; S12 自重叠防护; S14 重铸撞风控即全链冷却, 排队者丢弃(零请求).`)
+      S11 并发合并; S12 自重叠防护; S14 重铸撞风控即全链冷却, 排队者丢弃(零请求); S16 关掉保活只关掉心跳, 记账照跑(零网络);
+      S17 每源一轮一发主档, 副档与 master 都不进心跳(实测: 变体静置 15 分钟 15/15 全活; master 那枚 JWT exp=签发+600s, 到点按令牌语义过期 —— 那一发 403 没有自然样本).`)

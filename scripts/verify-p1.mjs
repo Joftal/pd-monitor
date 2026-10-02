@@ -18,6 +18,7 @@
 //   G2  代理正常链路: 清单重写带令牌 + 预载段过滤 + 上游请求头注入 + 跨实例令牌互不通用
 //   G3  签发 origin 表有上限并按活跃度淘汰(长跑不涨面) / ㊔ G5 上游在途合流: 同目标并发只发一发, 落定即撒锁、不设 TTL
 //   H1  机密降级: 无系统密钥 → plain 封装 + degraded=true + 日志留痕; 恢复后重写转 enc
+//   J1  意外退出的判活那一发: 一跳、现拉、只解最高档, 拉到的新签名源随失败收尾种回续录; 真下播不留种子
 // ============================================================================
 import { createRequire } from 'module'
 import * as fs from 'fs'
@@ -62,9 +63,11 @@ const world = {
   play: { ok: true, m3u8: 'http://127.0.0.1:1/playlist.m3u8', variants: [{ url: 'http://127.0.0.1:1/720.m3u8' }], dlHeaders: {}, title: '', thumbUrl: '' },
   playDelayMs: 0,
   playCalls: [],
+  seeded: [],
   invalidated: [],
   // 伪 ffmpeg
   ffCalls: [],
+  ffChildren: [],
   concatLists: [],
   segments: 2,
   segBytes: 700,
@@ -139,6 +142,8 @@ function fakeSpawn(bin, args) {
     return child
   }
   if (kind === 'capture') {
+    // 常驻进程交回给场景: 有的测试要模拟"不是我们 kill 的那一次退出"(意外中断)
+    world.ffChildren.push(child)
     // 不分段(splitSeconds=0): 整场一个 TS 从头写到尾, 进程同样常驻, 收 'q' 才退
     fs.writeFileSync(child.out, Buffer.alloc(world.segBytes, 0x54))
     return child
@@ -228,8 +233,9 @@ const mocks = {
   './pandalive': { api: { fetchPlaylistDurationSec: async () => 0 } },
   './source': {
     sourceFor: () => ({
-      getPlayCached: async (userId, password) => {
-        world.playCalls.push({ userId, password })
+      // ㊕: 判活那一发带 forceFresh/fullVariants 两个入参, 替身必须照记, 否则"只解最高档"永远测不出来
+      getPlayCached: async (userId, password, forceFresh, fullVariants) => {
+        world.playCalls.push({ userId, password, forceFresh, fullVariants })
         if (world.playDelayMs) await settle(world.playDelayMs)
         return world.play
       },
@@ -237,6 +243,7 @@ const mocks = {
         world.playCalls.push({ userId, probe: true })
         return world.play
       },
+      seedPlay: (userId, pack) => world.seeded.push({ userId, ok: !!pack?.ok }),
       invalidatePlay: (userId) => world.invalidated.push(userId)
     })
   },
@@ -266,6 +273,8 @@ function loadTs(rel) {
   const localRequire = (id) => {
     if (Object.prototype.hasOwnProperty.call(mocks, id)) return mocks[id]
     if (id === '../../shared/types') return loadTs('src/shared/types.ts')
+    // ㊕ 车道挂真实现(不另写替身): 替身绿而真车道从未被跑过, 正是这套脚本此前踩过的坑
+    if (id === './netGate') return loadTs('src/main/services/netGate.ts')
     return require(id)
   }
   new Function('exports', 'require', 'module', '__filename', '__dirname', js)(m.exports, localRequire, m, file, path.dirname(file))
@@ -293,8 +302,10 @@ async function reset(over = {}) {
   world.play = { ok: true, m3u8: 'http://127.0.0.1:1/playlist.m3u8', variants: [{ url: 'http://127.0.0.1:1/720.m3u8' }], dlHeaders: {}, title: '', thumbUrl: '' }
   world.playDelayMs = 0
   world.playCalls.length = 0
+  world.seeded.length = 0
   world.invalidated.length = 0
   world.ffCalls.length = 0
+  world.ffChildren.length = 0
   world.concatLists.length = 0
   world.segments = 2
   world.segBytes = 700
@@ -615,6 +626,9 @@ console.log('\n--- G1/G2/G3 本地 HLS 代理访问面 ---')
     )
     delete world.upstreamStatus['https://live.sooplive.com/abc/720.m3u8']
     assert(p.inflightReads.size === 0, 'G5-6 合流表在每问落定后清空(长跑不留Promise 引用)')
+    // ㊕ 合流是"替上游省下一发", 省了多少过去没人知道: 计数分账 + 60 秒一句摘要
+    assert(p.mergedPlays + p.mergedSegs === 2 && p.mergedPlays === 1 && p.mergedSegs === 1, 'G5-7 合流计数分账累计(清单/分片各记各的, 首句之后的落进窗口)', JSON.stringify({ pl: p.mergedPlays, sg: p.mergedSegs }))
+    assert(world.logInfo.some((m) => /上游在途合流/.test(m)), 'G5-8 合流出声一句(过去这一省是静默的)', world.logInfo.join(' | '))
   }
   for (const pr of proxies) {
     pr.server.closeAllConnections?.()
@@ -707,6 +721,50 @@ console.log('\n--- I1 不分段(splitSeconds=0): 整场一个 TS, 不进 segment
   const r = await recorder.mergeTask(item2.id)
   assert(!r.ok && r.error === 'rec.mergeFew', 'I3-1 单文件条目拒合并并给出原因', JSON.stringify(r))
   assert(world.ffCalls.length === 0, 'I3-2 拒合并不再 spawn ffmpeg')
+}
+
+console.log('\n--- J1 意外退出的判活那一发: 现拉 + 只解最高档, 且这一发就是续录的种子 ---')
+{
+  // autoRetryRecord 开着才走得到"种回 + 退避"那一段(默认档是关的)
+  await reset({ splitSeconds: 0, autoRetryRecord: true })
+  // reset 的锤子是 stopAll(), 它顺带把"退出流程"旗立起来且永不复位(生产里 stopAll 只在退程序时调);
+  // 续录那一段第一件事就是问这面旗, 所以这里按生产语义把它放下 —— 否则测的是退出态
+  recorder.shuttingDown = false
+  await recorder.start({ platform: 'pandalive', userId: 'j1', nick: 'J1 Drop', title: '', auto: true })
+  await waitUntil(() => world.ffChildren.length >= 1)
+  world.playCalls.length = 0
+  world.ffChildren[0].emit('exit', 137) // 不是我们 kill 的那一次退出: 全程没有 stopping=true
+  await waitUntil(() => world.playCalls.length >= 1)
+  const jc = world.playCalls[0]
+  assert(world.playCalls.length === 1 && !jc?.probe, 'J1-1 判活只发一跳, 且走的是取源契约(不是 fetchPlay 那条没有缓存语义的裸链)')
+  assert(jc?.forceFresh === true, 'J1-2 判活绝不读缓存: 缓存里装着的就是正在死的那一条')
+  assert(jc?.fullVariants === false, 'J1-3 判活只解最高档: 录制用的从来只是那一路, 买整张菜单是白付 SOOP 4~8 发')
+  await waitUntil(() => recorder.list().length === 0)
+  const j1 = hist().find((h) => h.userId === 'j1')
+  assert(world.logInfo.some((l) => l.includes('(@j1) status=error')), 'J1-4 还在播=中断, 按错误态收尾(不谎报完成)', world.logInfo.join(' | '))
+  assert(!!j1, 'J1-4b 中断那一场的产物照样入库')
+  assert(world.invalidated.includes('j1'), 'J1-5 错误收尾即作废旧源')
+  assert(world.seeded.some((s) => s.userId === 'j1' && s.ok === true), 'J1-6 判活现拉到的新签名源随失败收尾种回续录(㊓②): 新任务命中缓存即不再打第二条完整链')
+  assert(world.logWarn.some((l) => l.includes('10s 后自动续录第 1 次')), 'J1-7 首次续录按退避延后, 不当场重打一条链', world.logWarn.join(' | '))
+  assert(recorder.retryTimers.size === 1, 'J1-8 退避计时器按房挂键在飞')
+  await recorder.stopAll()
+  assert(recorder.retryTimers.size === 0, 'J1-9 退出流程清空在等退避的计时器(撤不掉的退避就是幽灵起录)')
+
+  // J2: 真下播那一支(判活答"拉不出") —— 完成态收尾, 且那颗死源绝不许当种子
+  await reset({ splitSeconds: 0, autoRetryRecord: true })
+  recorder.shuttingDown = false
+  await recorder.start({ platform: 'pandalive', userId: 'j2', nick: 'J2 Ended', title: '', auto: true })
+  await waitUntil(() => world.ffChildren.length >= 1)
+  world.play = { ok: false, m3u8: '', variants: [], dlHeaders: {}, title: '', thumbUrl: '', error: 'sim: 已下播' }
+  world.playCalls.length = 0
+  world.ffChildren[0].emit('exit', 0)
+  await waitUntil(() => world.playCalls.length >= 1)
+  await waitUntil(() => recorder.list().length === 0)
+  assert(world.playCalls.length === 1 && world.playCalls[0].forceFresh === true && world.playCalls[0].fullVariants === false, 'J2-1 下播判定同样只一跳(现拉、只解最高档)')
+  assert(world.seeded.length === 0, 'J2-2 真下播不留种子: 留给缓存的东西就是一个死源', JSON.stringify(world.seeded))
+  assert(world.logInfo.some((l) => l.includes('(@j2) status=done')), 'J2-3 拉不出按下播论, 完成态收尾', world.logInfo.join(' | '))
+  assert(recorder.retryTimers.size === 0, 'J2-4 完成态不欠一次自动续录')
+  await recorder.stopAll()
 }
 
 console.log(`\n==== 结果: ${PASS} 通过 / ${FAIL} 失败 ====`)

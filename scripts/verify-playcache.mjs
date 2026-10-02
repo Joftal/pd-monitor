@@ -22,6 +22,8 @@
 //   T33 ㊓⑦ 预取补扫改到首轮之后、按真值过滤、跳过已有源的房
 //   T34 ㊔ Panda 门槛回执账(五码 15 分钟短路, 带密码/强刷/作废/换号即解除) + 密码房不进预取队列
 //   T35 ㊔ SOOP 预取那一发的形状: 只解最高档(fullVariants=false), 不强制重打(forceFresh=false)
+//   T36 ㊕ 预取泵的让路语义: 轮次在飞/停轮都不发, 让路是 break 不是清队, 停轮才两队一起清
+//   T10b ㊕ 间隙泵同一条 break 的直接取证(T10 那一发被共享限速队列顺带挡住, 撤掉 break 照样绿)
 // ============================================================================
 import { createRequire } from 'module'
 import * as fs from 'fs'
@@ -266,6 +268,8 @@ function loadTs(rel) {
   const localRequire = (id) => {
     if (id in mocks) return mocks[id]
     if (id === './pandalive') return loadTs('src/main/services/pandalive.ts')
+    // ㊕ 车道挂真实现(不另写替身): 替身绿而真车道从未被跑过, 正是这套脚本此前踩过的坑
+    if (id === './netGate') return loadTs('src/main/services/netGate.ts')
     if (id === './source') return loadTs('src/main/services/source.ts')
     if (id === '../../shared/types') return loadTs('src/shared/types.ts')
     return require(id)
@@ -547,6 +551,20 @@ world.inList = {}
   check('T10-1 g2 最终被扫到', got)
   check('T10-2 g2 的请求发出时刻 ≥ round2 结束时刻(让路生效)', g2At >= watcher.status.lastRoundAt,
     `g2.at=${g2At} round2End=${watcher.status.lastRoundAt}`)
+}
+await reset()
+console.log('\n■ T10b ㊕ 让路那条 break 本身要站得住: T10 那一发同时被共享限速队列挡着, 撤掉 break 它照样绿')
+db.anchors = ['h1', 'h2'].map((id) => mkAnchor(id, { isLive: false }))
+world.inList = {}
+{
+  watcher.loop.pandalive.inFlight = true // 直接摆"一轮正在打整表"这一态, 不靠时序撞
+  watcher.idleQueue = db.anchors.slice()
+  await watcher.pumpIdle()
+  check('T10b-1 轮次在飞时一房不扫(0 请求)', world.bjCalls.length === 0, `实发=${world.bjCalls.length}`)
+  check('T10b-2 让路是停脚不是作废: 两枚还在队里', watcher.idleQueue.length === 2, `队列=${watcher.idleQueue.length}`)
+  watcher.loop.pandalive.inFlight = false
+  await watcher.pumpIdle()
+  check('T10b-3 轮次落地后重新点泵: 排队的房照旧扫到(下播发现延迟不因此变大)', world.bjCalls.length === 2 && watcher.idleQueue.length === 0, `实发=${world.bjCalls.length}`)
 }
 
 console.log('\n■ T11 取关守卫: 快照内主播被取关 → 不再发请求 / 开播事件不落')
@@ -1091,8 +1109,11 @@ world.inList = { h1: true, h2: true }
   const t0 = watcher.status.discoveryAt
   await new Promise((r) => setTimeout(r, 3))
   await watcher.refreshDiscovery(true)
-  check('T27-G3 手动刷新强制越过复用窗口', world.liveCalls.length === 2)
-  check('T27-G3b 快照换了钟就跟着换(页头"拉取于"读的就是这一枚)', watcher.status.discoveryAt > t0)
+  check('T27-G3 8 秒下限之内连点: force 也不发(㊓ force 只豁免 60 秒复用窗口, 不豁免这条下限)', world.liveCalls.length === 1 && watcher.status.discoveryAt === t0)
+  watcher.status.discoveryAt = t0 - 8_100 // 把钟拨到下限之外: 真实场景就是"上一份大厅快照是 8 秒以前拉的"
+  await watcher.refreshDiscovery(true)
+  check('T27-G3b 过了下限, 手动刷新强制越过复用窗口', world.liveCalls.length === 2)
+  check('T27-G3c 快照换了钟就跟着换(页头"拉取于"读的就是这一枚)', watcher.status.discoveryAt > t0)
 }
 await reset()
 world.inList = { h1: true }
@@ -1433,6 +1454,38 @@ console.log('\n■ T35 ㊔ 预取的档位扇出: 后台那一发只买最高档
   check('T35-2 预取不带 forceFresh(泵不许把在途/缓存命中变成强制重打)', !!arg && arg.forceFresh === false, JSON.stringify(arg))
 }
 
+await reset()
+db.settings.monitor.pandalive.requestGapMs = 0
+console.log('\n■ T36 ㊕ 预取泵让路(与 pumpIdle 同规约): 轮次在飞/停轮都不发, 但让路是 break 不是清队')
+{
+  db.anchors = [mkAnchor('lv1', { isLive: true }), mkAnchor('lv2', { isLive: true })]
+  watcher.loop.pandalive.inFlight = true // 伪造"一轮正在打整表"
+  watcher.enqueuePrewarm('pandalive', 'lv1')
+  watcher.enqueuePrewarm('pandalive', 'lv2')
+  void watcher.pumpPrewarm('pandalive')
+  await sleep(300)
+  check('T36-1 轮次在飞时预取零发(单房 2~6 发不许叠在整表那一发上)', playCount('lv1') === 0 && playCount('lv2') === 0, `lv1=${playCount('lv1')} lv2=${playCount('lv2')}`)
+  check('T36-2 让路把两枚留在队里(清队等于把秒开的时效赔进去)', watcher.prewarmQueue.pandalive.length === 2, `队列=${watcher.prewarmQueue.pandalive.length}`)
+  watcher.loop.pandalive.inFlight = false
+  void watcher.pumpPrewarm('pandalive') // 生产里这一脚由 runRound 的 finally 补上(幂等)
+  const drained = await waitUntil(() => playCount('lv1') > 0 && playCount('lv2') > 0, 3000)
+  check('T36-3 轮次落地后重新点泵: 排队的房照旧秒开', drained, `lv1=${playCount('lv1')} lv2=${playCount('lv2')}`)
+}
+await reset()
+db.settings.monitor.pandalive.requestGapMs = 0
+{
+  watcher.running = false // 停轮: 生产里 stop() 第一件事就是立这面旗(入队会顺手点泵, 所以旗要先立)
+  db.anchors = [mkAnchor('lv3', { isLive: true })]
+  watcher.enqueuePrewarm('pandalive', 'lv3')
+  await sleep(300)
+  check('T36-4 停轮即停泵: 关掉监控以后这条泵不再逐房拉源', playCount('lv3') === 0, `实发=${playCount('lv3')}`)
+  watcher.running = true
+  watcher.prewarmQueue.pandalive = ['q1', 'q2']
+  watcher.idleQueue = [mkAnchor('q3')]
+  watcher.stop()
+  check('T36-5 停轮同时清队: 只清定时器会把"下一发要发真请求"的待办留在手里', watcher.prewarmQueue.pandalive.length === 0 && watcher.idleQueue.length === 0, `预取=${watcher.prewarmQueue.pandalive.length} 兜底=${watcher.idleQueue.length}`)
+}
+
 console.log('解读: T1/T2/T3 PASS ⇒ 「大厅轮询刷新会清源缓存」不成立(真实源码+可计数请求实证);')
 console.log('      T4 PASS ⇒ 列表内开播翻转的作废链路正常工作(对照);')
 console.log('      T17 PASS ⇒ 粉丝房 fanLive 专用通知+自录正常; T18 PASS ⇒ 下播 toast 单发, 重复判离线不重复;')
@@ -1443,6 +1496,8 @@ console.log('      T8 PASS ⇒ 方案A间隙泵: 发现延迟 ≈ N×gap(秒~分
 console.log('      T9/T13 PASS ⇒ 泵失败语义: RiskError 立即熔断停扫, 普通错误即停不熔断, 下轮新快照恢复;')
 console.log('      T15 PASS ⇒ 熔断闭环: 冷却零请求压制 → 过期恢复熔断复位 → 断档者补扫;')
 console.log('      T10 PASS ⇒ 让路语义: round 进行中泵不消费(loop.pandalive.inFlight), 轮后才继续;')
+console.log('      T10b PASS ⇒ 同一条 break 的直接取证(T10 那一发同时被共享限速队列挡着, 撤掉 break 也测不出差别):')
+console.log('                    在飞即零请求、队列原样留着、轮次落地后照扫.')
 console.log('      T11 PASS ⇒ 取关守卫: 快照内取关者不发请求, 飞行窗口开播事件不落(无幽灵 toast/自录), 预取队列残留同挡;')
 console.log('      T12 PASS ⇒ 模式切换: per-anchor 分支清 idleQueue, 泵无重复职责;')
 console.log('      T14 PASS ⇒ urgent 回归: 列表外在播主播仍轮内每轮全查, 不被泵重复;')
@@ -1466,4 +1521,6 @@ console.log('      T33 PASS ⇒ ㊓⑦ 预取补扫挪到首轮之后: 排队发
 console.log('      T34/T34b PASS ⇒ ㊔ 门槛回执记账: 那五个码 15 分钟内不再重打整链, 而带密码/强刷/作废/换号四种事件都即时重新问;'
   + ' 密码房根本不进预取队列(预取那一路永远没有密码).')
 console.log('      T35 PASS ⇒ ㊔ 预取那一发只解最高档(fullVariants=false)且不强制重打(forceFresh=false) —— 满档由用户真的进房那一次买.')
+console.log('      T36 PASS ⇒ ㊕ 预取泵与 pumpIdle 同规约: 一轮在飞时零发(单房 2~6 发不叠在整表那一发上)、停轮即停泵且两队一起清,'
+  + ' 而让路本身不清队 —— 轮次落地重新点泵, 排在后面的房照旧秒开.')
 process.exit(failures === 0 ? 0 : 1)

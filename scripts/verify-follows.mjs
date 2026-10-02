@@ -36,6 +36,9 @@
 //   F5  播放页微缓存: TTL 内复用 + 并发合流, fresh=true 必穿透(探针那一发要的是新读数)
 //   G1  ㊓① 作废纪元: invalidatePlay 之后在飞的那条链不复活缓存(带密那一格同摘), 换号清表同规则
 //   G4  ㊓② seedPlay: 续录复用中断探针那一发 = 下一次取流零请求; 坏源不种, 种子清判死计数
+//   K1  ㊕ 关注列表的在飞合流: 同一瞬时的两问共享一发整表, 落定后再问照发(不设 TTL)
+//   K2  ㊕ SOOP 源缓存的年龄收手: 回访客 10 分钟 / 下播 30 分钟出队, 在播长场次不掐, 全程零网络
+//   K3  ㊕ 兜底重发出声: 会话层失败 → Node 那一发不再静默, 但 60 秒只报一次(带累计次数)
 // ============================================================================
 import { createRequire } from 'module'
 import * as fs from 'fs'
@@ -65,6 +68,8 @@ const world = {
   /** myapi/favorite 的应答(状态码 + 文本), 由场景逐次改写 */
   favStatus: 200,
   favBody: '',
+  /** 关注列表那一发的应答延迟(㊕ K1: 在飞合流要有窗口让两问撞进同一次请求) */
+  favDelayMs: 0,
   /** 播放页探针应答: live=有场次号 / offline=页面明确 null / broken=两者都没有(风控页或改版) */
   pageMode: 'live',
   pageFail: false,
@@ -106,6 +111,7 @@ const fakeSession = {
   fetch: async (url, init = {}) => {
     world.fetches.push({ url, method: init.method || 'GET', headers: init.headers || {}, body: init.body ? String(init.body) : '' })
     if (String(url).includes('myapi.sooplive.com/api/favorite')) {
+      if (world.favDelayMs) await new Promise((r) => setTimeout(r, world.favDelayMs))
       return { status: world.favStatus, url, text: async () => world.favBody }
     }
     // Panda 站内关注(북마크): POST body 里的 offset 决定第几页(分页不发第三页由场景自己断言)
@@ -212,6 +218,7 @@ const mocks = {
     nodeHttpRequest: async (method, url, headers, body) => {
       world.fetches.push({ url, headers: headers || {}, node: true })
       if (String(url).includes('myapi.sooplive.com/api/favorite')) {
+        if (world.favDelayMs) await new Promise((r) => setTimeout(r, world.favDelayMs))
         return { status: world.favStatus, text: world.favBody, headers: {} }
       }
       return { status: 599, text: '', headers: {} }
@@ -351,6 +358,7 @@ const bodyOf = (rows, extra = {}) => JSON.stringify({ data: rows, pool_check: nu
 function reset() {
   world.favStatus = 200
   world.favBody = ''
+  world.favDelayMs = 0
   world.pageMode = 'live'
   world.pageFail = false
   world.pageBno = null
@@ -370,6 +378,9 @@ function reset() {
   watcher.soopFailStreak = 0
   watcher.soopOfflineStreak.clear()
   soopApi.invalidateCookieCache()
+  // ㊕ 兜底重发的出声窗口也是跨场景状态: 不清会让下一场的"第一句"永远出不来
+  soopApi.fallbackCnt = 0
+  soopApi.fallbackLogUntil = 0
   // ㊒④ 两处微缓存也是跨场景状态: 不清就会让下一场"读到"上一场的场次号/旧页, 断言变成继承
   soopApi.bnoCache.clear()
   soopApi.pageCache.clear()
@@ -1140,6 +1151,63 @@ await soopApi.fetchFavorites()
 {
   const r = await soopApi.getPlayCached('u1', '', true)
   assert(r.ok === true && apiHits('live') === 1, 'J3 冷却期内的手动取流照常成功(riskCooling 不在用户意图路径上)', `ok=${r.ok}`)
+}
+
+// ============ K: ㊕ 关注列表的在飞合流 + 源缓存的年龄收手 ============
+const favHits = () => world.fetches.filter((f) => String(f.url).includes('myapi')).length
+
+console.log('K1 同一瞬时的两问只发一发整表(轮询与「立即刷新」会撞在一起)')
+reset()
+world.favBody = bodyOf([LIVE_ROW, OFF_ROW])
+world.favDelayMs = 40
+{
+  const [k1a, k1b] = await Promise.all([soopApi.fetchFavorites(), soopApi.fetchFavorites()])
+  world.favDelayMs = 0
+  assert(favHits() === 1, 'K1a 在飞合流: 两问共享一发请求(整表 718 条那一发不便宜)', `发=${favHits()}`)
+  assert(k1a.length === 2 && k1b === k1a, 'K1b 合并的是同一次读数, 不是各解一遍')
+  await soopApi.fetchFavorites()
+  assert(favHits() === 2, 'K1c 落定之后再问照发新的一发: 这一发是"谁在播"的真值源, 给它加 TTL 是拿时效换请求数')
+}
+
+console.log('K2 源缓存的年龄收手: 回访客过宽限、下播房过时限出队; 在播源不限年龄; 这一趟零网络')
+reset()
+world.anchors = [anchor({ userId: 'sw1', isLive: true }), anchor({ userId: 'sw2', isLive: true }), anchor({ userId: 'sw5', isLive: true })]
+await soopApi.getPlayCached('sw1')
+await soopApi.getPlayCached('sw2')
+await soopApi.getPlayCached('sw5')
+await soopApi.getPlayCached('sw3') // 不在关注表的回访客
+await soopApi.getPlayCached('sw4')
+assert(soopApi.cachedSourceIds().length === 5, 'K2a 五间房各持一份源(对照起点)', soopApi.cachedSourceIds().join(','))
+soopApi.playCache.get('sw1').fetchedAt -= 90 * 60_000 // 在播 90 分钟的长场次
+soopApi.playCache.get('sw2').fetchedAt -= 31 * 60_000 // 下播(SOOP 列表那一路已把卡翻离线)
+soopApi.playCache.get('sw3').fetchedAt -= 11 * 60_000 // 回访客过 10 分钟宽限
+world.anchors.find((a) => a.userId === 'sw2').isLive = false
+world.anchors.find((a) => a.userId === 'sw5').isLive = false // 下播才 0 分钟
+world.fetches.length = 0
+{
+  const dropped = soopApi.sweepPlayCache()
+  assert(dropped === 2 && !soopApi.playCache.has('sw2') && !soopApi.playCache.has('sw3'), 'K2b 过时限的两枚出队(「已缓存」徽标随之熄灭)', `出队=${dropped}`)
+  assert(soopApi.playCache.has('sw1'), 'K2c 在播且仍在关注表的源不许被时限掐: 长场次的秒开不是牺牲品')
+  assert(soopApi.playCache.has('sw4') && soopApi.playCache.has('sw5'), 'K2d 没到时限的一律不动(回访客 10 分钟内、下播房 30 分钟内)')
+  assert(world.fetches.length === 0, 'K2e 收手这一趟零请求: 它只扫内存, 关掉保活与否都照跑')
+  const idsBefore = world.fetches.length
+  await soopApi.getPlayCached('sw2', '', false, true) // 出队之后再要 = 重新走整链(旧源不许复活)
+  assert(world.fetches.length > idsBefore, 'K2f 出队即纪元前移: 下一次取流必然重新打链(尸源不再外供)', `req=${world.fetches.length - idsBefore}`)
+}
+
+console.log('K3 兜底重发必须出声(㊕): 会话层失败 → Node 再打一遍, 这一跳过去是静默的')
+reset()
+world.pageFail = true
+{
+  await soopApi.fetchPageMeta('fb1').catch(() => {})
+  assert(world.fetches.length === 2, 'K3a 一次页面读在会话层失败后由 Node 重发(请求数翻倍是事实, 过去没痕迹)', `发=${world.fetches.length}`)
+  assert(world.logWarn.filter((m) => /Node 兜底重发 ×1/.test(m)).length === 1, 'K3b 重发出声一句: 带次数、原因与目标', world.logWarn.join(' | '))
+  world.fetches.length = 0
+  world.logWarn.length = 0
+  await soopApi.fetchPageMeta('fb2').catch(() => {})
+  await soopApi.fetchPageMeta('fb3').catch(() => {})
+  assert(world.logWarn.filter((m) => /Node 兜底重发/.test(m)).length === 0, 'K3c 60 秒窗口内不逐条刷屏(DNS 黑洞期那是每请求一次的形态)')
+  assert(soopApi.fallbackCnt === 2, 'K3d 窗口内的次数在累计, 等下一句一起报', `cnt=${soopApi.fallbackCnt}`)
 }
 
 // ---------- 汇总 ----------

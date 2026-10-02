@@ -70,6 +70,7 @@ function loadTs(rel) {
   const localRequire = (id) => {
     if (id in mocks) return mocks[id]
     if (id === './pandalive') return loadTs('src/main/services/pandalive.ts')
+    if (id === './netGate') return loadTs('src/main/services/netGate.ts') // ㊕ 车道挂真实现
     if (id === '../../shared/types') return loadTs('src/shared/types.ts')
     return require(id)
   }
@@ -94,7 +95,7 @@ for (const N of [10, 25, 50, 100, 200]) {
   const t0 = Date.now()
   await api.keepaliveTick()
   const ms = Date.now() - t0
-  const beats = N * VARIANTS
+  const beats = N * 1 // ㊕ 扇出收口: 每源一轮只读主档一发(旧写法 N × VARIANTS, 副档不靠心跳续命)
   const adaptiveWait = Math.min(120_000, Math.max(60_000, N * 400)) // 与 startKeepalive 自适应一致
   const effMs = Math.max(ms, adaptiveWait)
   const mbPerBeatKb = beats * 2.5 // 2.5KB/清单
