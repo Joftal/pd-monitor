@@ -1630,7 +1630,7 @@ checkWithAllowlist(
     const j = bodyEnd(wt, i)
     return wt.slice(i, j < 0 ? undefined : j)
   }
-  assert(/const riskHold = api\.riskCooling\(\)\s*\r?\n\s*const viaBookmark = await this\.roundByBookmark\(anchors, riskHold\)/.test(wt) && /if \(viaBookmark === null && riskHold\) \{[\s\S]{0,200}return\s*\r?\n\s*\}[\s\S]{0,60}if \(viaBookmark === null\) \{[\s\S]{0,200}this\.pandaLiveFound = await this\.roundByList\(anchors\)/.test(wt), 'D51a list 模式先问站内关注列表, 只有"读不到(null)"才回落全站榜 —— 绝不把没读到当成就没人播。㊘(R28-3) 回落那一支多一道风控闸: 这一站正拦着我(冷却账未到)时"读不到"不是"换个更贵的问法"的理由, 旧写法把它当扳机 ⇒ 同一轮改打 5 页全站榜 + 逐房复查 + 间隙泵约 100 发 = 现场量级 ≈110 发/轮')
+  assert(/const riskHold = api\.oracleRiskCooling\(\)\s*\r?\n\s*const viaBookmark = await this\.roundByBookmark\(anchors, riskHold\)/.test(wt) && /if \(viaBookmark === null && riskHold\) \{[\s\S]{0,340}return\s*\r?\n\s*\}[\s\S]{0,60}if \(viaBookmark === null\) \{[\s\S]{0,200}this\.pandaLiveFound = await this\.roundByList\(anchors\)/.test(wt), 'D51a list 模式先问站内关注列表, 只有"读不到(null)"才回落全站榜 —— 绝不把没读到当成就没人播。㊘(R28-3) 回落那一支多一道风控闸: 这一站正拦着我(冷却账未到)时"读不到"不是"换个更贵的问法"的理由, 旧写法把它当扳机 ⇒ 同一轮改打 5 页全站榜 + 逐房复查 + 间隙泵约 100 发 = 现场量级 ≈110 发/轮。㊙(R29-1) 这道闸读的是"整表那一发自己被拒"那一格, 不是总账')
   const bm = seg('private async roundByBookmark(')
   assert(bm.length > 0 && !/fetchLivePage|roundByList/.test(bm), 'D51b 预言机自己一页全站榜都不发(它只覆盖"我关注的人", 请求面与全站热度无关)', bm.slice(0, 60))
   assert(/if \(!api\.hasSession\(\)\) \{[\s\S]{0,120}return null/.test(bm), 'D51c 匿名(罐里没有会话)不发这一发(实测必回 result:false, 每轮白掷)')
@@ -1952,8 +1952,8 @@ checkWithAllowlist(
     const j = bodyEnd(s, i)
     return s.slice(i, j < 0 ? undefined : j)
   }
-  assert(/const presets = fullVariants \? allPresets : allPresets\.slice\(0, 1\)/.test(so) && (so.match(/allPresets\.slice\(/g) || []).length === 1, 'D62a 档位扇出只有一个闸口(菜单一次读全, 请求按档发): 别处再 slice 一次就是第二条取流链')
-  assert(/partial: !fullVariants && allPresets\.length > 1/.test(so), 'D62b partial 只在"真的还有档没解"时成立: 单档房的那份源是完整菜单, 不该被满档 caller 判成残缺而白重打整链')
+  assert(/const want = fullVariants \? allPresets : allPresets\.slice\(0, 1\)\s*\r?\n\s*const presets = want\.filter\(\(p\) => !reuse\.some\(\(b\) => b\.name === p\.name\)\)/.test(so) && (so.match(/allPresets\.slice\(/g) || []).length === 1, 'D62a 档位扇出只有一个闸口(菜单一次读全, 请求按档发): 别处再 slice 一次就是第二条取流链。㊙(R29-4) 闸口后面只减"同一场已经买过的档", 不许再开第二个 slice')
+  assert(/partial: allPresets\.length > 1 && variants\.length < allPresets\.length/.test(so), 'D62b partial 只在"真的还有档没解"时成立: 单档房的那份源是完整菜单, 不该被满档 caller 判成残缺而白重打整链。㊙(R29-4) 判据从此看"到手档数 vs 菜单档数"而不是看 caller 要哪一档 —— 接了复用账之后"其余档全买失败"不再会让整包为空, 旧写法会把缺档的包写成满档')
   assert(/档位=\$\{variants\.length\}\$\{fullVariants \? '' : '\(只解最高档\)'\}/.test(so), 'D62c 拉源日志带档位与档级(真机一眼分得清预取那一发与进房那一发)')
   const fp = seg(so, "async fetchPlay(channel: string, password = '', fullVariants = true)")
   assert(fp.includes('this.runPlayChain(channel, password, m, fullVariants)') && fp.includes('this.runPlayChain(channel, password, meta, fullVariants)'), 'D62d fullVariants 沿 fetchPlay 的两条重打分支一路传到底: 在 bno 复用那一跳上把它丢了, 预取就又变成整链')
@@ -2018,8 +2018,8 @@ checkWithAllowlist(
   assert(/if \(PandaApi\.GATE_CODES\.includes\(code\)\) this\.gates\.set\(userId, \{ until: Date\.now\(\) \+ PandaApi\.GATE_TTL_MS, pack: gate \}\)/.test(pa), 'D65f 记账点唯一且在受限码分支内: 门外的失败(网络/满员)混进账里 = 把可重试的当不可重试的挡 15 分钟')
   assert(/if \(g && g\.until > Date\.now\(\) && !password\) return \{ \.\.\.g\.pack \}/.test(pa), 'D65g 短路三条件(有账 + 没过期 + 没带密码)且返回的是拷贝: 复用的那句不许被调用方改一处就污染整本账')
   assert(/this\.gates\.delete\(userId\)/.test(seg(pa, 'invalidatePlay(userId: string): void {')) && /this\.gates\.clear\(\)/.test(seg(pa, 'clearPlayCache(): void {')), 'D65h 门槛账跟着事件走: 开播/作废清这一房, 换号清整本 —— 上一个账号的"爱心余额不足"对这一个账号毫无意义')
-  const ep = seg(wt, 'private enqueuePrewarm(platform: Platform, userId: string): void {')
-  assert(/if \(a\?\.tags\?\.isPw\) return/.test(ep) && ep.indexOf('isPw) return') < ep.indexOf('q.push(userId)'), 'D65i 密码房不进预取队列(门在入队上游): 预取这一路永远没有密码, 这一发注定换回一句"要密码" —— SOOP 那句"要密码"背后是整条取源链')
+  const ep = seg(wt, 'private enqueuePrewarm(platform: Platform, userId: string): boolean {')
+  assert(/if \(a\?\.tags\?\.isPw\) return false/.test(ep) && ep.indexOf('isPw) return false') < ep.indexOf('q.push(userId)'), 'D65i 密码房不进预取队列(门在入队上游): 预取这一路永远没有密码, 这一发注定换回一句"要密码" —— SOOP 那句"要密码"背后是整条取源链')
 }
 
 // ============================================================================
@@ -2280,10 +2280,10 @@ checkWithAllowlist(
     return pd.slice(i, j < 0 ? undefined : j)
   }
   assert(/private riskUntil = 0/.test(pd) && /private static RISK_COOL_MS = 5 \* 60_000/.test(pd) && /riskCooling\(\): boolean \{\s*return Date\.now\(\) < this\.riskUntil/.test(pd), 'D74a Panda 那本账与 SOOP 同语义同长度(读时间戳, 不自减计数): 两边各造一种冷却, 后台泵就要读两面钟')
-  assert((pd.match(/this\.noteRisk\(/g) || []).length === 5, 'D74b 五种风控形状全部记账(403/429、≥500、接口回 HTML、不回 JSON、整表 result=false): 漏一种就等于那条路上泵照旧失明 —— 旧写法正是只认 403 抛错、不认账', `实数=${(pd.match(/this\.noteRisk\(/g) || []).length}`)
-  assert((pd.match(/this\.noteRisk\([^)]*\)\s*\n\s*throw new RiskError/g) || []).length === 5, 'D74c 记账不许代替判决: 五处都必须在 noteRisk 之后照旧抛出 RiskError(熔断/轮次失败语义靠它, 只记不抛会把风控读成"没事")', `成对数=${(pd.match(/this\.noteRisk\([^)]*\)\s*\n\s*throw new RiskError/g) || []).length}`)
-  assert(!/noteRisk/.test(segP('async fetchBj(')), 'D74d 业务错误不记账: bj 的 result=false 是"这号不存在/无权限"那一类, 不是平台压力信号 —— 把它记进冷却会让一个查无此人的房闷掉全部后台泵 5 分钟')
-  assert((wt.match(/api\.riskCooling\(\)/g) || []).length === 3 && !/\.noteRisk\(/.test(wt), 'D74e watcher 里 Panda 这面钟恰好三处消费(轮次扇出面 / 间隙泵 / 预取泵), 且 watcher 一处记账都不写 —— ㊘(R28-3) 把消费面从一处扩到三处: 这本账只是读时间戳, 多读几处不会把同一个风控信号记两遍(记账全在 pandalive), 而只有一处在预取泵看它时, 轮次与间隙泵照旧在冷却期把整站吃满', `消费=${(wt.match(/api\.riskCooling\(\)/g) || []).length}`)
+  assert((pd.match(/this\.noteRisk\(/g) || []).length === 8, 'D74b 八种风控形状全部记账(403/429、≥500、接口回 HTML、不回 JSON、整表 result=false, ㊙R29-1 再加 bj/关注列表/play 三处业务码里的限流话术): 漏一种就等于那条路上泵照旧失明 —— 旧写法正是只认 403 抛错、不认账, 而现场那句「너무 많은 요청」配的正是 HTTP 200', `实数=${(pd.match(/this\.noteRisk\(/g) || []).length}`)
+  assert((pd.match(/this\.noteRisk\([^)]*\)\s*\n\s*throw new RiskError/g) || []).length === 6, 'D74c 记账不许代替判决: 六处抛错型的都在 noteRisk 之后照旧抛出 RiskError(熔断/轮次失败语义靠它, 只记不抛会把风控读成"没事"); 另外两处(关注列表降级/play 回包)按各自契约只记不抛 —— 它们要把"读不到"还给调用方, 抛出会把降级轮变成崩轮', `成对数=${(pd.match(/this\.noteRisk\([^)]*\)\s*\n\s*throw new RiskError/g) || []).length}`)
+  assert(/if \(PandaApi\.isRateLimitMsg\(j\.message \|\| ''\)\) this\.noteRisk\(/.test(segP('async fetchBj(')) && segP('async fetchBj(').indexOf('throw new BjNotFoundError') < segP('async fetchBj(').indexOf('isRateLimitMsg'), 'D74d 业务错误只在"限流话术"这一格记账(㊙R29-1 改判): bj 的 result=false 里"查无此人/无权限"那一类仍一条不记 —— 把它们记进冷却会让一个查无此人的房闷掉全部后台泵 5 分钟; 判据先走 BjNotFoundError 那条早退, 才轮到限流话术')
+  assert((wt.match(/api\.riskCooling\(\)/g) || []).length === 1 && (wt.match(/api\.oracleRiskCooling\(\)/g) || []).length === 2 && !/\.noteRisk\(/.test(wt), 'D74e watcher 里 Panda 那两格钟的分工(㊙R29-1): 总账只被预取泵读(它买的是秒开, 没有人在等), 整表那一格被轮次扇出面与间隙泵读(两条检测路要收一起收) —— 且 watcher 一处记账都不写', `总账=${(wt.match(/api\.riskCooling\(\)/g) || []).length} 整表格=${(wt.match(/api\.oracleRiskCooling\(\)/g) || []).length}`)
   assert(/if \(platform === 'pandalive' && api\.riskCooling\(\)\) \{\s*q\.length = 0\s*break\s*\}/.test(wt), 'D74f 预取泵看 Panda 的账整条收手且清队: 预取买的是 2~6 发链, 正是冷却期最不该重发的形状(与 SOOP 那一条同规约)')
   const er = segP('private enqueueRemint(userId: string): void {')
   assert(/if \(this\.riskCooling\(\)\) \{/.test(er) && /this\.remintTail = this\.remintTail\.then\(async \(\) => \{\s*\/\/ 链步内二次检查[\s\S]{0,80}if \(!this\.riskCooling\(\)\) \{/.test(er), 'D74g 重铸链头一道 + 链步内二次检查: 前序步刚把冷却立起来时, 已经排在链上的后续步也不许发问("冷却期零重铸"是结构保证, 不是时序运气)')
@@ -2305,12 +2305,12 @@ checkWithAllowlist(
   const i = wt.indexOf('private async roundSoop(')
   const rs = wt.slice(i, bodyEnd(wt, i))
   assert(!/soopProbeSkipUntil|SOOP_BLIND_MAX_MS|probeHeld/.test(wt), 'D76a 撤销要撤干净: 退避终点、封顶常量、让路标志三枚死字段一律不在(留着它们比留着 bug 更坏 —— 下一轮审计会照着它们再写一遍占空比)')
-  assert(!/if \([^)]*soopBlindStreak/.test(rs), 'D76b 失明轮数只喂日志, 不参与任何判定: 它一旦进了 if, 这条逐房整页就开始被压节奏, 而 rows===null 时它就是检测路径(全站榜对 SOOP 不存在, 站内列表又读不到)')
-  assert(/if \(sent\.length && rows === null && fail < sent\.length\)/.test(rs), 'D76c 留痕只在"列表失明且探针读得动"那一格出声: 常态轮它是噪声(列表覆盖时 probe 是个位数), 全灭轮那句 warn 已经在报同一件事(两句=重复读数面)')
-  assert(/降级探针回执: \$\{sent\.length\}\/\$\{probe\.length\} 发整页/.test(rs) && /关注列表已连续 \$\{this\.soopBlindStreak\} 轮不可用/.test(rs), 'D76d 回执报的是这一轮的账(发数/在播/下播/失败)并带连续失明轮数: 探针那一发走 quiet, 不写这一句就没人知道最贵的一发烧了多少')
+  assert(!/if \([^)]*soopBlindStreak/.test(rs), 'D76b 失明轮数只喂日志, 不参与任何判定: 它一旦进了 if, 这条逐房整页就开始被压节奏, 而 covered===0 时它就是检测路径(全站榜对 SOOP 不存在, 站内列表又读不到)')
+  assert(/if \(sent\.length && covered === 0 && fail < sent\.length\)/.test(rs), 'D76c 留痕只在"列表失明且探针读得动"那一格出声: 常态轮它是噪声(列表覆盖时 probe 是个位数), 全灭轮那句 warn 已经在报同一件事(两句=重复读数面)。㊙(R29-3) 判据 rows===null → covered===0: "整表读通了但我的关注一个都不在里面"也是失明')
+  assert(/降级探针回执: \$\{sent\.length\}\/\$\{probe\.length\} 发整页/.test(rs) && /关注列表已连续 \$\{this\.soopBlindStreak\} 轮没覆盖到我的关注/.test(rs), 'D76d 回执报的是这一轮的账(发数/在播/下播/失败)并带连续失明轮数: 探针那一发走 quiet, 不写这一句就没人知道最贵的一发烧了多少。㊙(R29-3) 那句话改口成"没覆盖到我的关注" —— 说"不可用"会在整表明明读通时撒谎')
   assert(/为什么不做占空比/.test(rs) && /要再减, 得先由用户认下时效那笔账/.test(rs), 'D76e 不改的理由写在代码里: 没有它, 下一份审计报告会把同一个"5.76 万发/天"再判一次, 而这一次的结论是"减发需授权"')
   assert(/const allFail = anchors\.length > 0 && covered === 0 && \(sent\.length > 0 \? fail === sent\.length : probe\.length > 0\)/.test(rs), 'D76f 失明判据与 ㊒② 一字不差(留痕不改变任何判据): 这一轮的改动只加了一句日志, 冷却/连败/提醒的触发条件全部原样')
-  assert(!/sent = \[\]/.test(rs.slice(rs.indexOf('let fail = 0'), rs.indexOf('const covered'))), 'D76g 探针循环与留痕之间不许再出现"把 sent 清空"那一格(只有风控冷却那一格有权这么做, 而它由 D64h 站岗)')
+  assert(!/sent = \[\]/.test(rs.slice(rs.indexOf('let fail = 0'), rs.indexOf('const allFail'))), 'D76g 探针循环与失明判据之间不许再出现"把 sent 清空"那一格(只有风控冷却那一格有权这么做, 而它由 D64h 站岗)。㊙(R29-3) 地标从 const covered 换成 const allFail —— covered 那一行上移到了探针之前, 再拿它当终点会切出一个空区间, 断言就变成白过')
 }
 
 // ============================================================================
@@ -2370,7 +2370,7 @@ checkWithAllowlist(
   assert(/loadPolicy/.test(hp2) && /const NET_RETRY_MAX = 3/.test(hp2), 'D82b 死字段撤了, 但"本层只管外层循环"这件事留在注释里, 且 NET_RETRY_MAX 那条真计数还在: 别让下一次审计再来装一遍这三个旋钮')
   // ---- D83 C8: 自录房排到预取队首 ----
   const ep2 = (() => {
-    const i = wt.indexOf('private enqueuePrewarm(platform: Platform, userId: string): void {')
+    const i = wt.indexOf('private enqueuePrewarm(platform: Platform, userId: string): boolean {')
     const j = bodyEnd(wt, i)
     return wt.slice(i, j < 0 ? undefined : j)
   })()
@@ -2412,7 +2412,7 @@ checkWithAllowlist(
   assert(/this\.pandaBlindStreak\+\+[\s\S]{0,200}风控冷却中: 本轮只发站内关注那一发/.test(seg(wt, 'private async roundPanda(')), 'D87a 冷却期读不到整表 = 收手而不是换问法, 且这一句必须出声: "被拦下"这件事在日志里过去完全隐形, 事后无人能解释那一轮为什么只有 1 发')
   assert(/降级轮留痕: 站内关注列表连续 \$\{this\.pandaBlindStreak\} 轮不可用, 本轮逐房复查 \$\{this\.pandaUrgentCnt\} 发 \+ 间隙泵快照 \$\{this\.idleQueue\.length\} 间在排队/.test(wt), 'D87b 降级轮的扇出面有数可核(连续轮数 + 两个扇出面的量): 口径抄 ㊖ 那句 SOOP 降级探针回执 —— 只留痕不减发, 减发要先谈时效那笔账')
   assert((wt.match(/this\.pandaUrgentCnt = urgent\.length/g) || []).length === 2, 'D87c 两条逐房复查路(bookmark 的 rest / roundByList)都落这一个数: 只写一处会让留痕报"0 发"而实际吃满 —— 留痕报错了比不报更坏', `实数=${(wt.match(/this\.pandaUrgentCnt = urgent\.length/g) || []).length}`)
-  assert(/if \(api\.riskCooling\(\)\) break\s*\r?\n\s*const a = this\.idleQueue\.shift\(\)!/.test(wt), 'D87d 间隙泵收手但不清队列: 熔断那一条清(它等的是整轮重排), 风控这一条等的只是 5 分钟, 把快照丢掉等于让恢复后的第一轮重新等一轮轮询')
+  assert(/if \(api\.oracleRiskCooling\(\)\) break\s*\r?\n\s*const a = this\.idleQueue\.shift\(\)!/.test(wt), 'D87d 间隙泵收手但不清队列: 熔断那一条清(它等的是整轮重排), 风控这一条等的只是 5 分钟, 把快照丢掉等于让恢复后的第一轮重新等一轮轮询。㊙(R29-1) 它读的是整表那一格 —— 与轮次扇出同一把闸, 两条检测路要停一起停, 后台拉源撞的限流不许把它们闷掉')
   // ---- D88 R28-4: SOOP 失明期的预取不为"没有号"买整页 ----
   const pp4 = seg(wt, 'private async pumpPrewarm(')
   assert(/if \(platform === 'soop' && this\.soopBlindStreak >= 3 && !soopApi\.hasBroadNo\(uid\)\) \{\s*q\.push\(uid\)/.test(pp4), 'D88a 门槛是"连续 3 轮整表失明"而不是"这一轮读不到": 一轮抖动就把预取关掉, 秒开要为它变慢一整场。跳过的写法是排回队尾(不作废)—— 检测面(每轮 ≤40 发整页)一发不少, 预取只是晚一场拿到号')
@@ -2427,6 +2427,52 @@ checkWithAllowlist(
   const flyIdx = gp.indexOf('this.playInflight.get(key)')
   assert(gateIdx > 0 && flyIdx > gateIdx && /if \(g && g\.until > Date\.now\(\) && !password\) return \{ \.\.\.g\.pack \}/.test(gp), 'D89d 短路放在在途合并之前、且带密码来与手动强刷一律绕开: 排在后面的房该立刻拿到那一句"这房要密码", 而不是再去撞一条注定被拒的 9~10 发链(改一次密码就重新问一次平台)')
   assert(/this\.dropGate\(channel\)/.test(seg(so, 'invalidatePlay(')) && /this\.gates\.clear\(\)/.test(seg(so, 'clearPlayCache(): void {')), 'D89e 事件解除两条都在: 开播/作废/换号各自把账抹掉 —— 门槛账只许活到下一个事件, 否则"他刚开播"会被上一场的"取不到源"遮掉')
+}
+
+// ============================================================================
+// ㊙ 轮29(R29-1~R29-5): 风控账收下业务码那句限流 · 账分两格 · 预取认"正在判下播" · 失明改口 covered===0 · 降级轮在界面上持续说话
+// ============================================================================
+{
+  const wt = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
+  const so = fs.readFileSync(R('src', 'main', 'services', 'soop.ts'), 'utf8')
+  const pd = fs.readFileSync(R('src', 'main', 'services', 'pandalive.ts'), 'utf8')
+  const ty = fs.readFileSync(R('src', 'shared', 'types.ts'), 'utf8')
+  const tn = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'TopNav.vue'), 'utf8')
+  const seg = (src, decl) => {
+    const i = src.indexOf(decl)
+    if (i < 0) return ''
+    const j = bodyEnd(src, i)
+    return src.slice(i, j < 0 ? undefined : j)
+  }
+  const segP2 = (decl) => seg(pd, decl)
+  // ---- D90 R29-1: 那句「请求太多」进门, 但只让它自己那一格说话 ----
+  assert(/private static isRateLimitMsg\(msg: string\): boolean/.test(pd) && (pd.match(/PandaApi\.isRateLimitMsg\(/g) || []).length === 3, 'D90a 限流话术的判据只定义一处、消费三处(bj / 关注列表 / play 三个 result=false 出口): 判据散开写就会有一处漏掉某种语言', `实数=${(pd.match(/PandaApi\.isRateLimitMsg\(/g) || []).length}`)
+  assert(/너무 많은 요청\|too many requests\|rate\.\?limit\|请求过多\|请求太频繁\|слишком много запросов/.test(pd), 'D90b 词表按现场样本起步并覆盖四语(韩/英/中/俄): 现场那句「너무 많은 요청이 발생했습니다」配的正是 HTTP 200, 旧账本只读状态码 ⇒ 平台亲口喊停的这一刻一条都不记')
+  assert(/private oracleRiskUntil = 0/.test(pd) && /oracleRiskCooling\(\): boolean \{\s*return Date\.now\(\) < this\.oracleRiskUntil/.test(pd) && /if \(PandaApi\.isOraclePath\(path\)\) this\.oracleRiskUntil = Date\.now\(\) \+ PandaApi\.RISK_COOL_MS/.test(segP2('private noteRisk(')), 'D90c 账分两格(㊙R29-1 的核心): 总账抬时间戳, 只有整表那一发的路径才顺带抬整表格 —— 一轮记账把两条检测路一起闷掉, 正是用户 2026-10-03 那笔拍板拒绝的那笔交易(「只把账说出来, 不减发」)')
+  assert(/return path === '\/v1\/live\/bookmark' \|\| path === '\/v1\/live' \|\| path\.startsWith\('\/v1\/live\?'\)/.test(pd), 'D90d 整表路径族的判据是三条精确式而不是 /v1/live 前缀: 前缀会把 /v1/live/play(逐房拉源)一起圈进来 —— 那正是这一格必须放过的那一发')
+  assert((pd.match(/this\.noteRisk\([^)]*\)\s*\n\s*throw new RiskError/g) || []).length === 6 && /if \(PandaApi\.isRateLimitMsg\(j\.message \|\| ''\)\) this\.noteRisk\(`关注列表限流话术/.test(segP2('async fetchBookmarks(')) && /if \(PandaApi\.isRateLimitMsg\(msg\)\) this\.noteRisk\(`拉源限流话术/.test(segP2('async fetchPlay(')), 'D90e 两处"降级而不抛"的出口(play 回一句话 / 关注列表回 null)也记账, 但各自仍按原契约返回: 记账不许改变调用方看到的东西 —— 关注列表那句连未登录都不记(死会话期的逐房复查是检测路径本身), 只有那句限流才记')
+  assert(/this\.riskUntil = 0/.test(segP2('clearPlayCache(): void {')) && /this\.oracleRiskUntil = 0/.test(segP2('clearPlayCache(): void {')), 'D90f 换号两格一起撤: 上一号的风控静默与"整表那一发被拒"对这一个账号都毫无意义(与 SOOP/D74i 同语义)')
+  assert(/if \(platform === 'pandalive' && api\.riskCooling\(\)\) \{\s*q\.length = 0/.test(seg(wt, 'private async pumpPrewarm(')), 'D90g 总账的消费端没被搬走: 预取泵(买 2~6 发链换"秒开", 没有人在等)继续读总账 —— 分家只把两条检测路挪去读整表格, 后台的便利面一格都没松')
+  // ---- D91 R29-2: 预取泵认"正在判下播"那张表 ----
+  assert(/private awaitingOffline\(platform: Platform, userId: string\): boolean \{\s*const key = roomKey\(platform, userId\)\s*return platform === 'soop' \? this\.soopOfflineStreak\.has\(key\) : this\.pandaOfflineStreak\.has\(key\)/.test(wt), 'D91a 判据直接借用两轮确认那两张既有的表, 不新造第三本账: 那两张表已经写着"平台这一轮说这一场散了", 预取要读的正是这一句')
+  assert((wt.match(/this\.awaitingOffline\(/g) || []).length === 2 && !/awaitingOffline/.test(seg(wt, 'private async pumpIdle(')) && !/awaitingOffline/.test(seg(wt, 'private async roundSoop(')), 'D91b 这一格只挡预取那两条(入队 + 出队), 检测面一处都不读: 间隙泵与探针要的就是"第二轮那发读数", 挡它等于把下播判定本身压慢一轮', `实数=${(wt.match(/this\.awaitingOffline\(/g) || []).length}`)
+  assert(/if \(this\.awaitingOffline\(platform, uid\)\) \{\s*q\.push\(uid\)[\s\S]{0,120}if \(\+\+skippedPending >= q\.length\) break/.test(seg(wt, 'private async pumpPrewarm(')), 'D91c 出队那一头是排回队尾而不是作废(与 D88a 同规约) + 独立计数出泵: 第二轮若真读回在播(瞬回离线的抖动), streak 一清下一趟泵照买 —— 秒开只是晚一场, 不会被一次抖动永久摘掉')
+  assert(/if \(this\.enqueuePrewarm\(platform, a\.userId\)\) queued\+\+/.test(seg(wt, 'private prewarmSweep(')), 'D91d 补扫那句「N 个在播房排队」按入队返回值计数: 上一版是无条件 ++, 于是被密码房/重复项挡下的也算进去了 —— 留痕报错了比不报更坏')
+  // ---- D92 R29-3: 失明判据从 rows===null 改口 covered===0 ----
+  assert((wt.match(/const covered = anchors\.length - probe\.length/g) || []).length === 1 && seg(wt, 'private async roundSoop(').indexOf('const covered =') < seg(wt, 'private async roundSoop(').indexOf('let fail = 0'), 'D92a covered 只算一次且早于探针循环: 失明判据、留痕、allFail 三处读同一个数 —— 两处各算一遍就是两本账(实数=' + (wt.match(/const covered = anchors\.length - probe\.length/g) || []).length + ')')
+  assert(/this\.soopBlindStreak = covered === 0 && anchors\.length/.test(wt), 'D92b 失明计数的判据换的是"列表对我覆盖了几房", 不是"接口有没有回东西": 现场那个形状(整表读通、我的关注一个不在)过去永远不记, 于是 ㊘(R28-4) 那道闸门从不落地')
+  assert(/const allFail = anchors\.length > 0 && covered === 0/.test(wt) && /if \(this\.soopFailStreak >= 2\) this\.soopCooldownUntil = Date\.now\(\) \+ Watcher\.SOOP_COOLDOWN_MS/.test(wt) && (wt.match(/rows === null/g) || []).length === 1, 'D92c 只改判据不碰收手面: allFail/连败/冷却三条一条没动, 而 SOOP 那两处 rows===null 都改了口(整本只剩 Panda 侧 roundByBookmark 那一处"有没有列表"的原始语义) —— 这一笔买到的不是减量, 是让 R28-4 那道既有闸门第一次真落地', `残留=${(wt.match(/rows === null/g) || []).length}`)
+  // ---- D93 R29-4: 已买档位的复用账 ----
+  assert(/private partialBuy = new Map<string, \{ bno: string; bought: \{ name: string; variant: VariantInfo \}\[\] \}>\(\)/.test(so) && (so.match(/this\.partialBuy\.set\(/g) || []).length === 1, 'D93a 复用账只有一个写入点(省发型链成功那一处), 且带密码的那一条不记: 预取泵永远没有密码, 而这一格按频道记账 —— 密码不同就是不同的房', `写入=${(so.match(/this\.partialBuy\.set\(/g) || []).length}`)
+  assert(/const e = this\.partialBuy\.get\(channel\)\s*\r?\n\s*if \(e && e\.bno === info\.broadNo\)/.test(so) && /if \(allPresets\.findIndex\(\(p\) => p\.name === b\.name\) !== reuse\.length\) break/.test(so), 'D93b 复用判据是场次而不是时间, 且只对"前缀对得上"的那一段负责: aid/签名地址在同一场内本来就长效(与 playCache"只认显式作废"同规约); 平台中途换菜单名字时对不上的那档就当没买过、照买')
+  assert(/if \(!fullVariants && !password && allPresets\.length > 1\) this\.partialBuy\.set\(channel, \{ bno: info\.broadNo, bought \}\)/.test(so) && /if \(fullVariants\) this\.partialBuy\.delete\(channel\)/.test(so), 'D93c 记账只记"真省下来的那几发", 满档链落地即摘账: 留着它下一场对不上号是必然, 而缓存此时已经不缺档 —— 一本只增不减的账早晚会骗人')
+  assert(/this\.partialBuy\.delete\(channel\)/.test(seg(so, 'invalidatePlay(')) && /this\.partialBuy\.clear\(\)/.test(seg(so, 'clearPlayCache(): void {')), 'D93d 事件解除两条都在(与门槛账 D89e 同规约): 开播/作废/收尸抹这一房, 换号抹整本 —— 上一号买过的档对这一个账号不成立')
+  assert(/const variants: VariantInfo\[\] = reuse\.map\(\(b\) => b\.variant\)/.test(so) && (so.match(/reuse\.length \? ` 复用已买档=/g) || []).length === 1, 'D93e 复用那份从数组头接起(菜单顺序即档位顺序, variants[0] 恒为最高档), 且省下的发数要写进成功日志: 事后数包的人必须能一眼看出"这一条链少打了 2 发"')
+  // ---- D94 R29-5: 降级轮在界面上持续说话(只报账, 不减发) ----
+  assert(/private pandaDegradeWhy\(\): string \{\s*if \(!api\.hasSession\(\)\) return mt\('watcher\.degradeNoLogin'\)\s*if \(!api\.cookieValid\) return mt\('watcher\.degradeSessionDead'\)/.test(wt) && !/await|this\.json|fetch/.test(seg(wt, 'private pandaDegradeWhy(')), 'D94a 归因三条各说一句(未登录 / 会话被服务端作废 / 风控·改版)且判据全是客户端已有的读数: 现场那句「cookie=30 枚 会话=有 官方校验=未登录」正是中间这一条 —— 为归因再发一发就是新增请求面')
+  assert(/degradeMsg = mt\('watcher\.degraded', \{[\s\S]{0,240}r: this\.pandaUrgentCnt,[\s\S]{0,60}q: this\.idleQueue\.length/.test(seg(wt, 'private async roundPanda(')) && /P\.message = degradeMsg/.test(wt), 'D94b 界面上那一行报的是刚刚这一轮的账(连续轮数 + 归因 + 两个扇出面的量): 日志里那句留痕只有翻日志的人看得见, 而这一面在现场挂了 40 分钟无人知情')
+  assert(/P\.degraded = Boolean\(degradeMsg\)/.test(wt) && /P\.degraded = true/.test(wt) && /P\.degraded = false/.test(wt), 'D94c 降级旗与那一行同一个来源(每轮重算 + 预言机读通当场摘): 顶栏那一格若停在上一场的状态, 就是"绿点骗人"的另一种写法')
+  assert(/degraded: boolean/.test(ty) && /w\.degraded\) return \{ tone: 'warn', text: t\('nav\.wDegraded'\)/.test(tn), 'D94d 读数面一条都不新增: 复用平台状态里那一个 message 字段所在的两处既有承载(工作区横幅 + 顶栏胶囊), 胶囊只为它换一个不撒谎的词(「本轮失败」是读不到的口径, 降级轮读得到)')
 }
 
 // ============================================================================

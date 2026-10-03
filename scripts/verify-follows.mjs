@@ -39,6 +39,12 @@
 //   K1  ㊕ 关注列表的在飞合流: 同一瞬时的两问共享一发整表, 落定后再问照发(不设 TTL)
 //   K2  ㊕ SOOP 源缓存的年龄收手: 回访客 10 分钟 / 下播 30 分钟出队, 在播长场次不掐, 全程零网络
 //   K3  ㊕ 兜底重发出声: 会话层失败 → Node 那一发不再静默, 但 60 秒只报一次(带累计次数)
+//   H1~H5 ㊔ 取源链的档位扇出: 后台只买最高档(1+1 发)、残缺包不外交、满档由进房那一次买、手动拉源不省发
+//   H6~H7 ㊙(R29-4) 差档复用: 满档 caller 只买没买过的那几档(已买的从复用账递出), 作废/换场/菜单错位三格各自摘账
+//   I1~I4 ㊔ 接口风控信号记账: 整页 HTML 与 515 不算风控, 403/429/5xx/接口回 HTML 各武装一次且只按时点解除
+//   J1~J3 ㊔ 静默期只收手后台泵: 探针整批收手而列表一发照发, 失明判据不被绕过, 用户进房取流不受牵连
+//   L1~L2 ㊗(C7) livePlay 手动刷新的 8 秒下限: 只闸强制位不闸档级, 失败/非强制/别房/对面平台都不立闸
+//   M1~M3 ㊘ 轮28 三笔: 添加那一发的真值当场用掉 · 复查吃十秒微缓存 · SOOP 门槛回执 15 分钟不再重打整链
 // ============================================================================
 import { createRequire } from 'module'
 import * as fs from 'fs'
@@ -221,6 +227,8 @@ const mocks = {
       // ㊘(R28-3) 替身必须同契约: 间隙泵/轮次现在都读这一面钟, 缺格会让 pumpIdle 一碰就 TypeError
       // (本套一律回"没在冷却", 需要演冷却的场景自己改这一格 —— 与 ㊓ 那一课同一个形状)
       riskCooling: () => false,
+      // ㊙(R29-1) 这本账分成两格之后, 轮次扇出与间隙泵读的是"整表那一发被拒"那一格: 缺格同样是一碰就 TypeError
+      oracleRiskCooling: () => false,
       // Panda 关注列表走真源码解析(realPandaApi), 替身只做转发, 让 IPC 处理器与客户端在同一条链上
       fetchBookmarks: async () => realPandaApi.fetchBookmarks(),
       // ㊘(R28-1) 手工添加那一条链也要能跑真客户端: 加房的 IPC 处理器与逐房那一发必须在同一条链上,
@@ -1080,12 +1088,16 @@ world.apiChannel = { VIEWPRESET: PRESETS2 }
   const again = await soopApi.getPlayCached('q1')
   assert(world.fetches.length === 0 && again.m3u8 === top.m3u8, 'H2a 命中同一条包 —— 最高档就在里面, 重打整链是纯浪费', `req=${world.fetches.length}`)
 
-  console.log('H3 用户真的进房(要满档菜单): 残缺包不许交出去, 重打整链补齐')
+  console.log('H3 用户真的进房(要满档菜单): 残缺包不许交出去, 差的那几档现买 —— ㊙(R29-4) 已买的最高档不再重买')
   world.fetches.length = 0
+  world.logInfo.length = 0
   const full = await soopApi.getPlayCached('q1', '', false, true)
-  assert(full.variants.length === 2 && full.partial === false, 'H3a 满档请求换回两档菜单且不再标残缺', `档=${full.variants.length} partial=${full.partial}`)
-  assert(apiHits('aid') === 2 && assignHits() === 2, 'H3b 补齐 = 每档两发(这一发只在进房时买)', `aid=${apiHits('aid')} assign=${assignHits()}`)
-  assert(world.logInfo.some((m) => /档位=2 bno=/.test(m)), 'H3c 满档那一发的日志不带"只解最高档"(两种形状在读数面上分得开)')
+  assert(full.variants.length === 2 && full.partial === false, 'H3a 满档请求换回两档菜单且不再标残缺(接上复用账之后"其余档一档没买到"不再是满档, 旧判据会把它写成缺档)', `档=${full.variants.length} partial=${full.partial}`)
+  assert(full.variants[0].url === top.variants[0].url, 'H3b 复用那一份是从头接起的: 最高档那格与预取买到的同一发(秒开的那一条地址没被换掉)', `${full.variants[0]?.url} vs ${top.variants[0]?.url}`)
+  // 旧写法: 满档 caller 认定"残缺包不能给", 于是整条链重打 —— 连最高档那 1+1 发也原样再买一遍(现场实拍 @ahfotlrp0675)
+  assert(apiHits('aid') === 1 && assignHits() === 1, 'H3c 补齐 = 只买差的那一档(每档两发), 已经买到的这一档从复用账里递出来', `aid=${apiHits('aid')} assign=${assignHits()}`)
+  assert(world.logInfo.some((m) => /复用已买档=1\(省 2 发\)/.test(m)), 'H3d 省下的发数写进成功日志: 事后数包的人要能一眼看出这一条链少打了 2 发')
+  assert(!world.logInfo.some((m) => /只解最高档/.test(m)), 'H3e 满档那一发的日志不带"只解最高档"(两种形状在读数面上仍分得开)')
 
   console.log('H4 切画质再切回: 满档包之后两种请求都不许再打链')
   world.fetches.length = 0
@@ -1101,6 +1113,44 @@ world.apiChannel = { VIEWPRESET: PRESETS2 }
   world.fetches.length = 0
   const raw = await soopApi.fetchPlay('q2')
   assert(raw.ok === true && raw.variants.length === 2 && raw.partial === false, 'H5 fetchPlay 不省发(播放页手动刷新要的本来就是完整菜单)')
+
+  console.log('H6 ㊙(R29-4) 事件一落地, 旧那一场买过的档就不再是"同一场"的档')
+  {
+    await soopApi.getPlayCached('q3', '', false, false) // 后台先买最高档, 留一格复用账
+    soopApi.invalidatePlay('q3') // 下播/收尸/手动强刷都会走到这里
+    world.fetches.length = 0
+    const after = await soopApi.getPlayCached('q3', '', false, true)
+    assert(after.variants.length === 2 && apiHits('aid') === 2, 'H6a 作废之后满档 caller 重打两档: 那一场的凭证跟着源一起废了, 复用账必须一起摘', `实买=${apiHits('aid')}`)
+    world.fetches.length = 0
+    await soopApi.getPlayCached('q3', '', false, true)
+    assert(world.fetches.length === 0, 'H6b 满档链落地即摘账(一本只增不减的账早晚会骗人): 缓存此时已不缺档, 不该再有"复用"这回事')
+
+    console.log('H6c 换号/登出那一条(clearPlayCache)同样摘账: 上一号买过的档对这一个账号不成立')
+    await soopApi.getPlayCached('q6', '', false, false) // 后台先买最高档并记账
+    assert(soopApi.partialBuy.has('q6'), 'H6c0 记账这一格先自证: 没记上账的话, 下面那条"重打两档"就永远是绿的(变异取证的教训写在 ㊘⑥)')
+    soopApi.clearPlayCache()
+    world.fetches.length = 0
+    const sw = await soopApi.getPlayCached('q6', '', false, true)
+    assert(sw.variants.length === 2 && apiHits('aid') === 2, 'H6c 摘账后满档 caller 重打两档(账号不同 ⇒ 能买的档与 aid 都不同, 旧那一份凭证不该递出来)', `实买=${apiHits('aid')}`)
+  }
+
+  console.log('H7 ㊙(R29-4) 换场与换菜单: 两格判据各自把关')
+  {
+    await soopApi.getPlayCached('q4', '', false, false) // 同一场: 先买最高档并记账(bno=12345678)
+    assert(soopApi.partialBuy.get('q4')?.bno === '12345678', 'H7a0 账里躺着的就是"上一场那一份": 下面那两发重买才归得出是号对不上, 而不是根本没账可复用')
+    world.apiChannel = { VIEWPRESET: PRESETS2, BNO: '88888888' } // 平台说这是新一场了
+    world.fetches.length = 0
+    const nb = await soopApi.getPlayCached('q4', '', false, true)
+    assert(apiHits('aid') === 2 && nb.variants.length === 2, 'H7a 复用判据是场次而不是时间: 号一变, 上一场买的那几档立刻不成立(整档重买, 不给旧凭证)', `实买=${apiHits('aid')}`)
+    world.apiChannel = { VIEWPRESET: PRESETS2 }
+    await soopApi.getPlayCached('q5', '', false, false) // 先按"hd 是最高档"那份菜单买一档并记账
+    assert(soopApi.partialBuy.get('q5')?.bought.map((b) => b.name).join(',') === 'hd', 'H7b0 记的那一档确实叫 hd(位置 0): 于是下面那两发重买是"位置对不上"造成的, 不是没账')
+    world.apiChannel = { VIEWPRESET: [{ label: 'SD', name: 'sd', label_resolution: 1080, bps: 9000 }, { label: 'HD', name: 'hd', label_resolution: 720, bps: 3000 }] }
+    world.fetches.length = 0 // 同一场、同一号, 只是菜单改了高低: 买过的那一档从第一格掉到了第二格
+    const pf = await soopApi.getPlayCached('q5', '', false, true)
+    assert(pf.variants[0].resolution === '1080p', 'H7b1 菜单换了高低(同名不同档)之后, 满档包的第一格必须是新的最高档 —— 从错位那一格接起就是交一份对不上菜单的源', `res=${pf.variants[0]?.resolution}`)
+    assert(apiHits('aid') === 2 && pf.variants.length === 2, 'H7b2 只对"前缀对得上"的那一段负责: 名字还在而位置不对 ⇒ 那一档当没买过、照买 —— 宁可多买也不交出错位的菜单', `实买=${apiHits('aid')}`)
+  }
 }
 
 // ============ I: ㊔ SOOP 接口风控信号记账(只记账不发火) ============
