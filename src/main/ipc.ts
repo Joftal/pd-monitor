@@ -243,12 +243,15 @@ export function registerIpc(): void {
 
   // 账号页「立即重新校验」: 绕过 30s/2min 结果缓存真实打一次官方接口。
   // 只在用户点击时发生, 不进轮询; 无会话时直接取态不发请求(匿名态压根没凭证可验)
+  // ㊚(R30-1): 这一发打用户级标记 —— 它过车道(㊕ 就把它管住了), 缺的是"用户亲自在等"那一格:
+  // 不打标记它就和后台泵排在同一条尾锁之后(最坏 MAX_WAIT_MS 8 秒), 而这一颗按钮的全部意义是"现在就问"。
+  // 后台那条登录探针(watcher.ts:512)照旧走慢道, 它不是用户点的
   ipcMain.handle(CH.authRecheck, async (_e, platform: Platform) => {
     const plat = isPlatform(platform) ? platform : DEFAULT_PLATFORM
     if (plat === 'soop') {
-      if (await soopApi.hasJarCookies()) await soopApi.verifyLogin(undefined, true)
+      if (await soopApi.hasJarCookies()) await asUser(() => soopApi.verifyLogin(undefined, true))
     } else if (api.hasSession()) {
-      await api.checkLoginInfo(undefined, true)
+      await asUser(() => api.checkLoginInfo(undefined, true))
     }
     return pushAccounts()
   })

@@ -406,7 +406,9 @@ watch(
       >
         <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4M12 17h.01M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
         <span class="truncate">{{ store.watcher.byPlatform[plat].message }}</span>
-        <button v-if="store.watcher.byPlatform[plat].circuitOpen" class="text-brand font-medium shrink-0" @click="router.push({ name: 'account' })">{{ t('ws.gotoLogin') }}</button>
+        <!-- ㊚(A): 「去登录」跟的是"这一轮需要你去修会话"的两种形状 —— 熔断(整轮被平台拒)与降级(预言机读不通、正逐房兜底)。
+             降级轮举的是 ㊙⑤ 那面新旗而不是熔断旗, 只跟 circuitOpen 时用户看得到那句归因, 看不到那条出路 -->
+        <button v-if="store.watcher.byPlatform[plat].circuitOpen || store.watcher.byPlatform[plat].degraded" class="text-brand font-medium shrink-0" @click="router.push({ name: 'account' })">{{ t('ws.gotoLogin') }}</button>
       </div>
     </div>
 
