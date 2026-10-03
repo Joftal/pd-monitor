@@ -558,6 +558,7 @@ assert(found === 2, '探针模式照常统计在播')
 
 console.log('B3 下播要连续两轮确认; 房间属性与场次属性分家')
 reset()
+// lastSeenAt=0 是"证明不了陈旧"那一支(旧库/没写过): 两轮防抖照旧 —— 陈旧基线第一轮翻的那一支见 B3b
 world.anchors = [anchor({ isLive: true, title: '在播标题', startTime: '2026-09-29 22:01:00', tags: { isAdult: false, isPw: true, type: '', liveType: 'live' } })]
 world.favBody = bodyOf([{ ...LIVE_ROW, is_live: false, broad_info: [] }])
 await runRound()
@@ -573,6 +574,36 @@ assert(offCard.tags !== null && offCard.tags?.isPw === false && offCard.tags?.li
 const pandaOff = watcher.offPatch({ tags: { isAdult: true, isPw: true, type: 'fan', liveType: 'live' } })
 assert(pandaOff.tags?.isAdult === true && pandaOff.tags?.type === 'fan', 'Panda 形状: 房间属性(19+/粉丝团)下播后保留, 它是房间的属性不是这一场的')
 assert(pandaOff.tags?.isPw === false && pandaOff.tags?.liveType === '', 'Panda 形状: 场次属性(密码房/回放)随场次结束清掉')
+
+console.log('B3b ㊛(轮31) 陈旧基线(冷启动/长停)第一轮就翻状态, 但不发那场"下播"')
+reset()
+// 现场形状: 应用停摆几小时后醒来, 卡上还挂着上一场的 isLive=true, 而 lastSeenAt 是两个轮距之前(阈值 2×120s)
+world.anchors = [anchor({ isLive: true, nick: '主播甲', title: '在播标题', startTime: '2026-09-29 22:01:00', lastSeenAt: Date.now() - 30 * 60_000 })]
+world.favBody = bodyOf([{ ...LIVE_ROW, is_live: false, broad_info: [] }])
+await runRound()
+assert(findAnchor('aaa111').isLive === false, 'B3b1 陈旧基线遇到第一轮离线读数即翻状态(旧写法要再等一个轮距才落地, 而平台那句读数本来就报的是离线)')
+assert(world.toasts.filter((t) => t.t.type === 'offline').length === 0, 'B3b2 不发下播通知: 那场散于应用停摆期间, 我们根本没在场, 报"刚刚下播"是把旧账当现值')
+assert(watcher.soopOfflineStreak.size === 0, 'B3b3 那张"待第二轮确认"的账当场清账(留着会让预取泵白挡一间)')
+assert(pageProbes() === 0, 'B3b4 判这一件事用的还是那一发整表: 零增量请求')
+reset()
+// 新基线(刚刚才被读过)同一句读数仍走两轮 —— 豁免只给"证明得了陈旧"的那一支
+world.anchors = [anchor({ isLive: true, title: '在播标题', startTime: '2026-09-29 22:01:00', lastSeenAt: Date.now() })]
+world.favBody = bodyOf([{ ...LIVE_ROW, is_live: false, broad_info: [] }])
+await runRound()
+assert(findAnchor('aaa111').isLive === true && watcher.soopOfflineStreak.size === 1, 'B3b5 新基线照旧两轮防抖(瞬回离线的抖动仍拦得住, 时效一点没让)')
+await runRound()
+assert(findAnchor('aaa111').isLive === false && world.toasts.filter((t) => t.t.type === 'offline').length === 1, 'B3b6 第二轮才翻, 且那一次通知照发(它真是我们看着散的那场)')
+
+console.log('B3c ㊛(轮31) 逐房探针那一发撞上旧账: 同样第一轮翻状态、不发那场下播')
+reset()
+world.anchors = [anchor({ userId: 'off-list', isLive: true, lastSeenAt: Date.now() - 30 * 60_000 })]
+world.favStatus = 515
+world.favBody = '{"code":-10000}' // 整表不接待 ⇒ 这一间走逐房播放页探针(另一条读数面)
+world.pageMode = 'offline'
+await runRound()
+assert(findAnchor('off-list').isLive === false, 'B3c1 探针报"明确未播" + 陈旧基线 = 第一轮就翻(与列表那一条同判据, 不看读数从哪条链来)')
+assert(world.toasts.filter((t) => t.t.type === 'offline').length === 0, 'B3c2 同样不发下播通知')
+assert(pageProbes() === 1, 'B3c3 用的还是那一发探针: 零增量请求', `实发=${pageProbes()}`)
 
 console.log('B4 已在播不重复通知; 离线房昵称跟进; 状态未知的房回落探针')
 reset()

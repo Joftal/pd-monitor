@@ -2162,6 +2162,170 @@ world.bmResultFalse = true
     P.degraded === false && P.message === '' && world.liCalls.length === li1, `msg=${P.message} degraded=${P.degraded}`)
 }
 
+// ============ T51 ㊛(轮31) 冷启动留下的旧账: 陈旧基线第一轮就翻状态, 但不发那场"下播" ============
+// 现场实拍 2026-10-03 14:05: 醒来第一轮读到 153 张 isLive=true 的卡, 而它们的 lastSeenAt 停在应用关掉的那一刻。
+// 旧写法每张都要走完两轮规则才肯翻假 ⇒ 真下播的读数要再等一个轮距(默认 120s)才落地,
+// 而多等的那一轮买不到任何新读数(平台这一发本来就报的是离线), 只买到一次把旧账当现值的下播通知。
+console.log('\n■ T51 陈旧基线第一轮翻离线: 状态翻/通知不发/一发不加, 而新基线的两轮防抖一条不减')
+await reset()
+db.settings.monitor.pandalive.pollIntervalSec = 60 // 阈值 = 2 个轮距 = 120 秒
+db.settings.monitor.pandalive.requestGapMs = 0
+login([bmOff('s1')])
+db.anchors = [mkAnchor('s1', { isLive: true, title: '旧标题', lastSeenAt: Date.now() - 30 * 60_000 })]
+{
+  await api.getPlayCached('s1') // 卡上挂着冷启动留下的"秒开"徽标
+  const play0 = playCount('s1')
+  const bm0 = world.bmCalls.length
+  await roundOne('pandalive')
+  check('T51-1 陈旧基线遇到第一轮离线读数即翻状态(旧写法要再等一个轮距)',
+    db.anchors[0].isLive === false && db.anchors[0].title === '' && db.anchors[0].lastSeenAt > 0, `isLive=${db.anchors[0].isLive}`)
+  check('T51-2 不发下播通知: 那场散于应用停摆期间, 我们根本没在场', world.toasts.filter((t) => t.type === 'offline').length === 0, JSON.stringify(world.toasts.map((t) => t.type)))
+  check('T51-3 旧源当场作废(留着死源骗徽标, 点播放必暴毙)', playCount('s1') === play0 + 0 && (await api.getPlayCached('s1'), playCount('s1') === play0 + 1), `play=${playCount('s1')}`)
+  check('T51-4 判这一件事用的还是那一发整表: 零增量请求', world.bmCalls.length - bm0 === 1 && world.bjCalls.length === 0, `bm+${world.bmCalls.length - bm0} bj=${world.bjCalls.length}`)
+  check('T51-5 那张"待第二轮确认"的账当场清账(翻了就不该再排第二轮, 预取泵也不为该房白挡)', watcher.pandaOfflineStreak.size === 0)
+  check('T51-6 留痕出声: 日志里那句要写明"不发下播通知"的原因', world.logs.some((l) => /陈旧基线首轮翻离线/.test(String(l))), JSON.stringify(world.logs.slice(-3)))
+}
+await reset()
+db.settings.monitor.pandalive.pollIntervalSec = 60
+db.settings.monitor.pandalive.requestGapMs = 0
+login([bmOff('s2')])
+db.anchors = [mkAnchor('s2', { isLive: true, lastSeenAt: Date.now() })]
+{
+  // 对照组(豁免只给"证明得了陈旧"那一支): 刚刚才被读过的卡, 同一句读数仍走两轮
+  await roundOne('pandalive')
+  check('T51-7 新基线照旧两轮防抖: 第一轮不动、只记账(瞬回离线的抖动仍拦得住)',
+    db.anchors[0].isLive === true && watcher.pandaOfflineStreak.size === 1 && world.toasts.filter((t) => t.type === 'offline').length === 0)
+  await roundOne('pandalive')
+  check('T51-8 第二轮才翻, 且那一次通知照发(它真是我们看着散的那场)',
+    db.anchors[0].isLive === false && world.toasts.filter((t) => t.type === 'offline').length === 1)
+}
+await reset()
+db.settings.monitor.pandalive.pollIntervalSec = 60
+db.settings.monitor.pandalive.requestGapMs = 0
+login([bmOff('s3')])
+db.anchors = [mkAnchor('s3', { isLive: true, lastSeenAt: 0 })]
+{
+  // 第三组: lastSeenAt=0(旧库/从没写过) 证不出"它旧", 于是不豁免 —— 走的仍是预言机那一条两轮规则
+  await roundOne('pandalive')
+  check('T51-9 lastSeenAt=0 不算陈旧: 证不出来就维持两轮, 宁可晚一轮也不凭猜静默摘掉一场',
+    db.anchors[0].isLive === true && watcher.pandaOfflineStreak.size === 1 && world.toasts.length === 0,
+    `isLive=${db.anchors[0].isLive} streak=${watcher.pandaOfflineStreak.size}`)
+}
+await reset()
+db.settings.monitor.pandalive.pollIntervalSec = 60
+db.settings.monitor.pandalive.requestGapMs = 0
+db.anchors = [mkAnchor('s4', { isLive: true, lastSeenAt: Date.now() - 30 * 60_000 })]
+world.bjMedia = { s4: null }
+{
+  // 第四条读数面(逐房 member/bj, applyBj 原本第一轮就宣判): 同样只免通知, 不免翻转
+  const live0 = world.liveCalls.length
+  await roundOne('pandalive')
+  check('T51-10 逐房那一发撞上旧账: 状态照翻、那场"下播"不报(与预言机那一条同判据, 不看读数从哪条链来)',
+    db.anchors[0].isLive === false && world.toasts.filter((t) => t.type === 'offline').length === 0)
+  check('T51-11 发数一字未改: 降级轮该发的分页与那一发复查照发', world.liveCalls.length > live0 && world.bjCalls.length === 1, `live=${world.liveCalls.length} bj=${world.bjCalls.length}`)
+}
+
+// ============ T52 ㊛(轮31) 预取队列改按观众数排队: 秒开排在最可能被人点的那一间前面(不砍量) ============
+// 队列排空要几分钟(实测 103 个房 ≈12 分钟), 而表序把大房排在尾巴上 —— 前面那些小观众房买到的秒开没人用,
+// 排在后面的大房还没排到就散场。这一笔改的是顺序, 不是发数。
+console.log('\n■ T52 首轮后补预取的排队顺序: 观众数从高到低, 自录房仍在最前')
+await reset()
+db.settings.monitor.pandalive.requestGapMs = 0
+db.anchors = [
+  mkAnchor('p1', { isLive: true, viewerCount: 5 }),
+  mkAnchor('p2', { isLive: true, viewerCount: 900 }),
+  mkAnchor('p3', { isLive: true, viewerCount: 60 })
+]
+{
+  watcher.prewarmPumping.pandalive = true // 举着泵看排队(与 T42 同一手法): 入队会顺手点泵, 不举就读不到顺序
+  watcher.prewarmSweep('pandalive')
+  check('T52-1 排队顺序 = 观众数降序(旧写法按库里加的先后排)', watcher.prewarmQueue.pandalive.join(',') === 'p2,p3,p1', watcher.prewarmQueue.pandalive.join(','))
+  check('T52-2 三间排三发: 这是排序不是砍量', watcher.prewarmQueue.pandalive.length === 3)
+  watcher.prewarmPumping.pandalive = false
+  void watcher.pumpPrewarm('pandalive')
+  const done = await waitUntil(() => world.playCalls.length === 3 && !watcher.prewarmPumping.pandalive, 5000)
+  const order = world.playCalls.map((c) => c.userId).join(',')
+  check('T52-3 泵照那个顺序发源(第一间就是 900 人那间), 总发数仍是 3', done && order === 'p2,p3,p1' && world.playCalls.length === 3, order)
+}
+await reset()
+db.settings.monitor.pandalive.requestGapMs = 0
+db.anchors = [
+  mkAnchor('q1', { isLive: true, viewerCount: 500 }),
+  mkAnchor('q2', { isLive: true, viewerCount: 1, autoRecord: true })
+]
+{
+  watcher.prewarmPumping.pandalive = true
+  watcher.prewarmSweep('pandalive')
+  check('T52-4 自录房仍插在最前(与 T42 同规约: 观众数排不到"开播就得有源"前面)', watcher.prewarmQueue.pandalive.join(',') === 'q2,q1', watcher.prewarmQueue.pandalive.join(','))
+  watcher.prewarmPumping.pandalive = false
+}
+await reset()
+db.settings.monitor.pandalive.requestGapMs = 0
+db.anchors = [
+  mkAnchor('t1', { isLive: true, viewerCount: 500 }),
+  mkAnchor('t2', { isLive: false, viewerCount: 900 }),
+  mkAnchor('t3', { isLive: true, viewerCount: 20 })
+]
+{
+  watcher.prewarmPumping.pandalive = true
+  watcher.prewarmSweep('pandalive')
+  check('T52-5 排序不放宽入围条件: 离线那间(哪怕 900 人)依旧不排, 在播的两间按高低排',
+    watcher.prewarmQueue.pandalive.join(',') === 't1,t3', watcher.prewarmQueue.pandalive.join(','))
+  watcher.prewarmPumping.pandalive = false
+  watcher.prewarmQueue.pandalive.length = 0
+}
+
+// ============ T53 ㊛(轮31) 那架退避阶梯现场到底长什么样(用户 2026-10-03 拍板: 维持现状不改, 这一节把现状钉成契约) ============
+// 机制: noteFailure 用 2^(streak-1) 分钟做指数退避, 而冷却期那一发预言机读通时把 errorStreak 一起清零 ——
+// 于是阶梯永远爬不过第二级: 被拦 → 退避 1 分钟 → 30 秒后探针读通(清零+解除) → 扇出恢复开火 → 再被拦 → 还是 1 分钟。
+// 现场两个样本相隔 141 秒(14:07:51 与 14:09:26), 正是这个循环走完一圈。
+console.log('\n■ T53 退避阶梯的现状: 预言机一发读通即清零 ⇒ 退避恒为一分钟级, 扇出在几十秒内恢复开火')
+await reset()
+db.settings.monitor.pandalive.requestGapMs = 0
+db.anchors = [mkAnchor('k1', { isLive: true })]
+world.bj403 = { k1: true }
+{
+  const P = watcher.status.byPlatform.pandalive
+  await roundOne('pandalive')
+  const cd1 = watcher.cooldownUntil - Date.now()
+  check('T53-1 一发 403 立即熔断并退避 1 分钟(streak=1 ⇒ 2^0 分钟)',
+    watcher.errorStreak === 1 && P.circuitOpen === true && cd1 > 55_000 && cd1 <= 60_000, `streak=${watcher.errorStreak} cd=${(cd1 / 1000).toFixed(0)}s`)
+  check('T53-2 熔断期的轮距被压到 30 秒(intervalFor 那一格: 为的是早点探到自己恢复)', watcher.intervalFor('pandalive') === 30_000)
+  watcher.cooldownUntil = Date.now() - 1 // 等价于等满这一分钟(下面要的是"第二次失败"这个状态)
+  await roundOne('pandalive')
+  const cd2 = watcher.cooldownUntil - Date.now()
+  check('T53-3 阶梯本身确实会爬: 中间没有成功读数时, 第二次失败退避 2 分钟',
+    watcher.errorStreak === 2 && cd2 > 110_000 && cd2 <= 120_000, `streak=${watcher.errorStreak} cd=${(cd2 / 1000).toFixed(0)}s`)
+  watcher.cooldownUntil = Date.now() - 1
+  await roundOne('pandalive')
+  const cd3 = watcher.cooldownUntil - Date.now()
+  check('T53-4 第三次 4 分钟(指数段 2^(streak-1) 在, 上限 15 分钟由 D 段契约守着)',
+    watcher.errorStreak === 3 && cd3 > 230_000 && cd3 <= 240_000, `cd=${(cd3 / 1000).toFixed(0)}s`)
+
+  // 现场那一步: 退避还没到期, 冷却期那一轮只发站内关注那一发 —— 而它读通了
+  watcher.cooldownUntil = Date.now() + 50_000
+  login([bmOff('k1')])
+  const bj0 = world.bjCalls.length
+  const live0 = world.liveCalls.length
+  const bm0 = world.bmCalls.length
+  await roundOne('pandalive')
+  check('T53-5 冷却期那一轮只发预言机一发(逐房与全站榜的扇出面一条不碰)',
+    world.bmCalls.length - bm0 === 1 && world.bjCalls.length === bj0 && world.liveCalls.length === live0,
+    `bm+${world.bmCalls.length - bm0} bj+${world.bjCalls.length - bj0} live+${world.liveCalls.length - live0}`)
+  check('T53-6 读通即三格一起清零: cooldownUntil=0 / errorStreak=0 / circuitOpen=false(日志那句"退避提前解除"就是这一格)',
+    watcher.cooldownUntil === 0 && watcher.errorStreak === 0 && P.circuitOpen === false && world.logs.some((l) => /冷却期预言机读通/.test(String(l))))
+
+  // 于是清零之后的下一次失败又回到 1 分钟 —— 这一条就是"限流后几十秒恢复开火、约两分钟再被拦"的根
+  world.bm = null // 整表重新不接待 ⇒ 落回降级那条链(逐房复查照发)
+  const bj1 = world.bjCalls.length
+  await roundOne('pandalive')
+  const cd4 = watcher.cooldownUntil - Date.now()
+  check('T53-7 扇出面在读通那一轮之后就恢复开火(逐房复查照发)', world.bjCalls.length > bj1, `bj+${world.bjCalls.length - bj1}`)
+  check('T53-8 再来一发 403 退避仍是 1 分钟而不是 4 分钟: 阶梯被清零顶在第二级(现状, 本轮不改)',
+    watcher.errorStreak === 1 && cd4 > 55_000 && cd4 <= 60_000, `streak=${watcher.errorStreak} cd=${(cd4 / 1000).toFixed(0)}s`)
+  check('T53-9 一圈的时长量级与现场样本对得上(1 分钟退避 + 30 秒轮距 ⇒ ≈90~150 秒, 现场实测 141 秒)', cd4 > 55_000 && cd4 <= 60_000 && watcher.intervalFor('pandalive') === 30_000)
+}
+
 console.log('解读: T1/T2/T3 PASS ⇒ 「大厅轮询刷新会清源缓存」不成立(真实源码+可计数请求实证);')
 console.log('      T4 PASS ⇒ 列表内开播翻转的作废链路正常工作(对照);')
 console.log('      T17 PASS ⇒ 粉丝房 fanLive 专用通知+自录正常; T18 PASS ⇒ 下播 toast 单发, 重复判离线不重复;')

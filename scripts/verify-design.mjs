@@ -1872,8 +1872,8 @@ checkWithAllowlist(
     'D59j 被挡下的那一下有出声(节流不能长成"按钮坏了"), 且挡下即从节流那一格里 continue, 不再排程'
   )
   const ps = seg('private prewarmSweep(platform: Platform)')
-  assert(/const cached = new Set\(sourceFor\(platform\)\.cachedSourceIds\(\)\)/.test(ps) && /if \(cached\.has\(roomKey\(platform, a\.userId\)\)\) continue/.test(ps), 'D59k 补扫跳过手上已有有效源的房(事实源就是卡片徽标那一枚, 不另立一本账)')
-  assert(/if \(!store\.getSettings\(\)\.monitor\[platform\]\.prefetchStream\) return/.test(ps) && /!a\.isLive \|\| this\.isGone\(a\)/.test(ps), 'D59l 补扫读的是本平台那一格, 且只认真值: 库里 isLive 而本轮已判离线/查无此人的房一枚不排(㊓⑦ 开机群发那一段就是这么废掉的)')
+  assert(/const cached = new Set\(sourceFor\(platform\)\.cachedSourceIds\(\)\)/.test(ps) && /!cached\.has\(roomKey\(platform, a\.userId\)\)/.test(ps), 'D59k 补扫跳过手上已有有效源的房(事实源就是卡片徽标那一枚, 不另立一本账)')
+  assert(/if \(!store\.getSettings\(\)\.monitor\[platform\]\.prefetchStream\) return/.test(ps) && /a\.platform === platform && a\.isLive && !this\.isGone\(a\)/.test(ps), 'D59l 补扫读的是本平台那一格, 且只认真值: 库里 isLive 而本轮已判离线/查无此人的房一枚不排(㊓⑦ 开机群发那一段就是这么废掉的)')
   assert(!/prewarmNow\(a\.platform/.test(mi), 'D59m index.ts 里那段"按库态逐个 prewarm"已连循环一起撤(改由首轮后的补扫做), 不留第二处开机预取')
 }
 {
@@ -2490,6 +2490,44 @@ checkWithAllowlist(
   assert((wv.match(/t\('ws\.gotoLogin'\)/g) || []).length === 2 && /v-if="store\.watcher\?\.byPlatform\?\.\[plat\]\?\.message"/.test(wv), 'D95c 出路仍只有既有那两颗(没会话的空态 + 本平台那一行横幅), 本轮只改了横幅这一颗的触发条件: 新增一面旗不该再多长出一个读数面(㊙⑤ 的"读数面一条都不新增"在这一笔里继续成立)', `实数=${(wv.match(/t\('ws\.gotoLogin'\)/g) || []).length}`)
   assert(/:class="store\.watcher\.byPlatform\[plat\]\.circuitOpen \? 'text-liveink' : 'text-warnink'"/.test(wv), 'D95d 颜色口径不动: 熔断是被拒答(红), 降级仍在逐房读得到(琥珀)—— 只有"要不要给出路"这一格跟着 degraded 走, 严重度不许被一次按钮改动顺带抹平')
   assert(/gotoLogin:/.test(zh) && /gotoLogin:/.test(en), 'D95e 文案零新增(zh/en 沿用既有那一条「去登录」): 一颗按钮两种触发不需要两句话')
+}
+
+// ============================================================================
+// ㊛ 轮31: 冷启动留下的旧账 · 登录态核对那两行的缓存标记 · 预取队列的排序
+// ============================================================================
+{
+  const wt = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
+  const so = fs.readFileSync(R('src', 'main', 'services', 'soop.ts'), 'utf8')
+  const pd = fs.readFileSync(R('src', 'main', 'services', 'pandalive.ts'), 'utf8')
+  const ip = fs.readFileSync(R('src', 'main', 'ipc.ts'), 'utf8')
+  const ty = fs.readFileSync(R('src', 'shared', 'types.ts'), 'utf8')
+  const seg = (src, decl) => {
+    const i = src.indexOf(decl)
+    if (i < 0) return ''
+    const j = bodyEnd(src, i)
+    return src.slice(i, j < 0 ? undefined : j)
+  }
+  const bs = seg(wt, 'private baselineStale(')
+  const st = seg(wt, 'private settleStaleOffline(')
+  // ---- D96 陈旧基线: 豁免的只有"那场下播的通知", 翻转/作废/两轮防抖一条不动 ----
+  assert(/return a\.lastSeenAt > 0 && Date\.now\(\) - a\.lastSeenAt > 2 \* this\.intervalFor\(platform\)/.test(bs), 'D96a 判据两格都在: 阈值跟着 intervalFor(熔断期 30s / 常态 pollIntervalSec)走而不是钉常量, 且 lastSeenAt=0 不算陈旧 —— 这一格判的是"证明它旧", "没记过"证明不了任何事, 证不出来就维持两轮')
+  assert(!/await|fetch|sourceFor\(|api\./.test(bs), 'D96b 判这一件事不发任何请求: 读的全是卡片上已有的 lastSeenAt —— 为"要不要免掉一次通知"再发一发, 就把这一笔做成了新增请求面')
+  assert((wt.match(/this\.baselineStale\(/g) || []).length === 4, 'D96c 四条会读"报离线"的面都在(预言机整表 / 逐房 applyBj / SOOP 整表 / SOOP 整页探针): 只免一条就是同一份旧账在两条链上两种说法(实数=' + (wt.match(/this\.baselineStale\(/g) || []).length + ')')
+  assert(/store\.updateAnchor\(a\.platform, a\.userId, this\.offPatch\(a, \{ lastSeenAt: now \}\)\)\s*sourceFor\(a\.platform\)\.invalidatePlay\(a\.userId\)/.test(st) && !/onLiveEnd/.test(st), 'D96d 状态照翻、旧源照作废、只有那场"下播"不报: offPatch 保留房态/场次的分档口径, 留着死源只会挂着「秒开」徽标骗人')
+  assert((wt.match(/if \(n < 2\) \{/g) || []).length === 3, 'D96e 新基线的两轮防抖一条不减(三处判定点仍在): 这一笔豁免的是"那场结束时我们根本没在场", 不是"离线的抖动不拦了"', `实数=${(wt.match(/if \(n < 2\) \{/g) || []).length}`)
+  assert(/if \(this\.baselineStale\(a, a\.platform\)\) \{\s*this\.pandaOfflineStreak\.delete\(key\)/.test(wt) && /if \(this\.baselineStale\(a, 'soop'\)\) \{\s*this\.soopOfflineStreak\.delete\(key\)/.test(wt), 'D96f 走豁免那一支时把"待第二轮确认"的账当场清掉: 翻了状态就不该再排第二轮, 否则预取泵会为一个已经判完的房白挡一场')
+  assert(/const minutes = Math\.min\(15, 2 \*\* Math\.min\(4, this\.errorStreak - 1\)\)/.test(wt) && /this\.cooldownUntil = 0\s*this\.errorStreak = 0\s*P\.circuitOpen = false/.test(wt) && /冷却期预言机读通: 退避提前解除/.test(wt), 'D96g P0 退避阶梯的现状钉在源码上(用户 2026-10-03 拍板: 维持现状不改): 指数段与 15 分钟上限都在, 而冷却期那一发预言机读通时把三格一起清零 ⇒ 阶梯顶在第二级。清零那一句按它们在源码里的相邻形状锁(旧写法只查"roundPanda 里有 errorStreak = 0", 而那个函数里本来就有两处, 砍掉这一句照样绿), 行为取证在 verify-playcache T53, 这一格守的是"改它必须是有意的"')
+  // ---- D97 登录态核对那两行: 把"这一句是真发的还是缓存里读的"写进留痕 ----
+  assert(/fromCache\?: boolean/.test(pd) && /fromCache\?: boolean/.test(so), 'D97a 两站的 login_info 应答契约各加这一格(可选): 缺席 = 真发, 老调用点不必改也能读对 —— 这一行日志每取一次态就落一行, 不吃掉缓存就会把 2 发数成 6 发')
+  assert(/return \{ \.\.\.hit\.info, fromCache: true \}/.test(seg(so, 'async verifyLogin(')) && /return \{ \.\.\.this\.loginInfoCache\.info, fromCache: true \}/.test(seg(pd, 'async checkLoginInfo(')), 'D97b 缓存命中那两条出口只多挂一面旗, 内容原样展开: 加标记不许改变调用方读到的任何一格(与 D90e"记账不许改变返回契约"同规约)')
+  assert((ip.match(/官方校验\[\$\{verify\}\]/g) || []).length === 2 && /let verify: '真发' \| '缓存' \| '未问' = '未问'/.test(ip) && /const verify = !hasCookies \? '未问' : v\.fromCache \? '缓存' : '真发'/.test(ip), 'D97c 两行日志各带这一格, 且"没问"(匿名态压根不发那一发)与"缓存"(问了但没出门)是分开的两种: 合并成一格就分不清"这一行没有真发"和"这一行根本没人答"')
+  assert((ip.match(/api\.checkLoginInfo\(\)/g) || []).length === 1 && (ip.match(/soopApi\.verifyLogin\(\)/g) || []).length === 1 && !/fromCache/.test(ty), 'D97d 发数一字未改(两处调用点各一个, 没有为标记补第二问), 且缓存标记不进 IPC 契约: 它只是日志的自证, 界面读的是 lastVerifyAt 那一格')
+  // ---- D98 预取队列按观众数排队: 改的是顺序, 不是发数 ----
+  const ps = seg(wt, 'private prewarmSweep(')
+  assert(/\.sort\(\(x, y\) => \(y\.viewerCount \|\| 0\) - \(x\.viewerCount \|\| 0\)\)/.test(ps), 'D98a 排队顺序 = 观众数降序(队首那间就是最可能被人点的那间): 队列排空要几分钟(实测 103 房 ≈12 分钟), 旧写法按库里加的先后排 ⇒ 大房还没排到就散场')
+  assert(/\.filter\(\(a\) => a\.platform === platform && a\.isLive && !this\.isGone\(a\) && !cached\.has\(roomKey\(platform, a\.userId\)\)\)/.test(ps), 'D98b 入围条件与排序写在同一句里且一条没放宽: 平台/在播/未判死/手上已有有效源四条还是那四条 —— 排序若顺手改了过滤, 这一笔就变成拿秒开换发数')
+  assert(!/\.sort\(/.test(seg(wt, 'private async pumpPrewarm(')) && /if \(a\?\.autoRecord\) q\.unshift\(userId\)/.test(seg(wt, 'private enqueuePrewarm(')), 'D98c 排序只住在补扫这一处(泵按 shift 消费, 顺序由入队定), 且自录房那条插队仍在最前: 观众数排不到"开播就得有源"前面(㊗ C8 的规约不被这一笔覆盖)')
+  assert(/首轮后补预取: \$\{queued\} 个在播房排队\(按观众数从高到低\)/.test(ps), 'D98d 留痕写明这一批是按什么排的: 事后数包的人看见 22 发整页时, 必须能一眼看出这是顺序策略而不是又一批重复请求')
 }
 
 // ============================================================================
