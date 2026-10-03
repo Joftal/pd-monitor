@@ -19,7 +19,8 @@
 //   N6 用户级照样落笔: 它发过以后, 紧随的后台自己让开一个间隔
 //   N7 接线: api 站真过车道, 媒体/CDN 那一面(fetchText)不过
 //   N8 车道按主机名建
-//   N9 源码接线: 用户级标记只在"用户亲自在等"的两处, 后台一处都不标
+//   N9 源码接线: 用户级标记只在"用户亲自在等"的三处, 后台一处都不标
+//   N10 ㊚(R30-1) 账号页那颗「立即重新校验」真不买等待: 同站被后台占着时用户级立刻放行、后台级照排
 // ============================================================================
 import { createRequire } from 'module'
 import * as fs from 'fs'
@@ -243,7 +244,7 @@ console.log('\n■ N8 车道按主机名建')
   check('N8-3 每个主机各占一条道', ['n1-bg.invalid', 'n8-x.invalid', 'n8-y.invalid', 'api.pandalive.co.kr'].every((h) => gate.laneHosts().includes(h)), gate.laneHosts().join(','))
 }
 
-console.log('\n■ N9 源码接线: 用户级标记只在"用户亲自在等"的两处')
+console.log('\n■ N9 源码接线: 用户级标记只在"用户亲自在等"的三处')
 {
   const ipc = src('src/main/ipc.ts')
   const rec = src('src/main/services/recorder.ts')
@@ -253,11 +254,38 @@ console.log('\n■ N9 源码接线: 用户级标记只在"用户亲自在等"的
   const ng = src('src/main/services/netGate.ts')
   check('N9-1 播放器取流打用户级(且 force 位过 8 秒下限的收敛结果, ㊗ C7)', /r = await asUser\(\(\) => sourceFor\(platform\)\.getPlayCached\(userId, safePwd\(password\), freshNow, true\)\)/.test(ipc))
   check('N9-2 录制首发改用户级, 断线后的判活那一发仍是后台级', (rec.match(/asUser\(\(\) => sourceFor/g) || []).length === 1)
-  check('N9-3 watcher(探针/预取/保活重铸)一处都不标记 = 全在车道里', !/asUser/.test(wt))
+  check('N9-3 watcher(探针/预取/保活重铸)一处都不标记 = 全在车道里: ㊚(R30-1) 只把用户点出来的那一发搬去快速道, 探针那一发一个字没动(它排在车道尾等一个间隔是既有语义)', !/asUser/.test(wt))
   check('N9-4 SOOP 每一发都走 req → laneRun, 间隔取自己的那一格', /return laneRun\(hostOf\(url\), store\.getSettings\(\)\.monitor\.soop\.requestGapMs, \(\) => this\.sendReq\(url, init, timeoutMs\)\)/.test(so))
   check('N9-5 Panda api 站走 rawFetch → laneRun', /return laneRun\(hostOf\(API\), store\.getSettings\(\)\.monitor\.pandalive\.requestGapMs/.test(pd))
   check('N9-6 标记沿异步链传递(AsyncLocalStorage, 不逐层加参数)', /new AsyncLocalStorage<boolean>\(\)/.test(ng))
   check('N9-7 全程没有触顶告警: 这些场景的排队都在上限内', logs.filter((l) => /车道/.test(l[2] || '')).length === 0, logs.map((l) => l[2]).join(' | '))
+  // ㊚(R30-1): 复核把上一轮报告那句「登录/校验绕过车道与风控账」顶回去了 —— 这一发从来就在车道里(N9-4/N9-5),
+  // 撞 403/429/5xx/HTML 也照常记账(pandalive sendRaw 五形状 / soop sendReq 每一发都过 noteRisk)。
+  // 真的缺的只有"用户亲自在等"那一格: 点下去最坏要等排队上限, 而这颗按钮的全部意义是"现在就问"
+  check('N9-8 账号页「立即重新校验」两平台的校验那一发都打用户级, 且仍带 force(标记不改请求, 只改等待)', /await asUser\(\(\) => soopApi\.verifyLogin\(undefined, true\)\)/.test(ipc) && /await asUser\(\(\) => api\.checkLoginInfo\(undefined, true\)\)/.test(ipc), `ipc 里 asUser 实数=${(ipc.match(/asUser\(\(\) =>/g) || []).length}`)
+  check('N9-9 快速道只有三处: 取流 / 录制首发 / 登录复检 —— pushAccounts 与 authWin 都没搬(前者多数时候读缓存零请求, 后者是登录窗自己那一条链)', (ipc.match(/asUser\(\(\) =>/g) || []).length === 3)
+}
+
+console.log('\n■ N10 ㊚(R30-1) 那颗按钮买到的不是标记, 是时间: 真车道 + 真 Panda 客户端两侧各量一次')
+{
+  // 上一节只证明"标了", 这一节证明"标了确实不等 / 没标确实要等"。
+  // 间隔取 300ms 而不是真设置的 1200ms: 断言要的是两发之间那个量级差, 而脚本不该为一句话真等两秒
+  db.settings.monitor.pandalive.requestGapMs = 300
+  const HOST = 'api.pandalive.co.kr' // rawFetch 的键是 hostOf(API), 占道那一发必须撞同一个键
+  const timed = async (fn) => {
+    const t0 = Date.now()
+    const r = await fn()
+    return { ms: Date.now() - t0, r }
+  }
+  const sent0 = world.total
+  void laneRun(HOST, 300, occupy(60)) // 后台正占着这一站
+  const bg = await timed(() => api.checkLoginInfo(undefined, true)) // 后台级 = 探针/authState 那条既有路
+  void laneRun(HOST, 300, occupy(60))
+  const user = await timed(() => asUser(() => api.checkLoginInfo(undefined, true))) // 用户点出来的那一发
+  check('N10-1 前提自证: 两发都真的打到了官方接口(标记不减发, 也不替它编答案)', world.total === sent0 + 2 && bg.r.isLogin === false && user.r.isLogin === false && bg.r.netFail === false, `新增=${world.total - sent0} bg=${JSON.stringify(bg.r)} user=${JSON.stringify(user.r)}`)
+  check('N10-2 后台级那一发照旧排队(等占道那一发落定 + 一个间隔): 这一条语义本轮没动, 动的是下面那一发', bg.ms >= 180, `实等=${bg.ms}ms`)
+  check('N10-3 用户级那一发不等: 同一条站被后台占着也当场飞出去(旧写法这颗按钮和后台挤在同一条尾锁之后, 最坏 MAX_WAIT_MS=8 秒)', user.ms < 100, `实等=${user.ms}ms`)
+  db.settings.monitor.pandalive.requestGapMs = 0
 }
 
 console.log('\n' + '─'.repeat(72))
@@ -265,5 +293,6 @@ check('N0 反空转下限: 替身网络全程真的收到 ≥8 发', world.total
 console.log('\n' + '─'.repeat(72))
 console.log(`结果: ${failures === 0 ? '全部按预期' : failures + ' 条与预期不符'}`)
 console.log('解读: N1~N2 ⇒ 串行只在站内发生, 不跨站扩散;N3~N4 ⇒ 间隔取自 requestGapMs, 车道不另发明节奏;')
-console.log('      N5~N6 ⇒ 用户那一路永远不等, 但它身后的小间隔由它自己算进去;N7~N9 ⇒ 三处接线各在其位。')
+console.log('      N5~N6 ⇒ 用户那一路永远不等, 但它身后的小间隔由它自己算进去;N7~N9 ⇒ 三处接线各在其位;')
+console.log('      N10 ⇒ 那颗「立即重新校验」在快速道上量到 31ms, 同一站同一时刻的后台级那一发等的是几百毫秒 —— 标记买到的就是这个差。')
 process.exit(failures === 0 ? 0 : 1)

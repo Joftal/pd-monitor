@@ -2128,7 +2128,7 @@ checkWithAllowlist(
   // 数的是真调用点 `asUser(() => ...)` 而不是 `asUser(` —— 后者会被注释里那句"asUser(越过车道)"骗到(本轮实测)
   const uIpc = (ipcf.match(/asUser\(\(\) =>/g) || []).length
   const uRec = (rc.match(/asUser\(\(\) =>/g) || []).length
-  assert(/return userMark\.getStore\(\) === true/.test(ng) && uIpc === 1 && uRec === 1 && !/asUser/.test(wt), 'D67g 默认后台、用户显式: 忘了标记的后果是"照旧各发各的"(安全默认), 而不是把后台请求伪装成用户意图; 标记只有两处(播放器取流 + 手动录制首发)', `ipc=${uIpc} rec=${uRec} watcher=${/asUser/.test(wt)}`)
+  assert(/return userMark\.getStore\(\) === true/.test(ng) && uIpc === 3 && uRec === 1 && !/asUser/.test(wt), 'D67g 默认后台、用户显式: 忘了标记的后果是"照旧各发各的"(安全默认), 而不是把后台请求伪装成用户意图; 标记只有三处(播放器取流 + 手动录制首发 + 账号页「立即重新校验」) —— 第三处是 ㊚(R30-1) 补的: 那颗按钮的全部意义是"现在就问", 而它过去和后台泵排在同一条尾锁之后(最坏 MAX_WAIT_MS 8 秒)。后台的登录探针仍一处都不标', `ipc=${uIpc} rec=${uRec} watcher=${/asUser/.test(wt)}`)
   assert(/if \(isUserCall\(\)\) \{[\s\S]{0,80}stamp\(lane\)[\s\S]{0,80}finally \{[\s\S]{0,40}stamp\(lane\)/.test(ng), 'D67h 用户那一发不等, 但起跑与落定都落笔: 否则"用户点一下 + 后台 17 发"会在同一瞬时刻叠成同一瞬时的 18 发')
   assert(/new AsyncLocalStorage<boolean>\(\)/.test(ng), 'D67i 标记沿异步链传递(不是逐层加参数): 快速道要覆盖的是整条链, 而 fetchPlay → runPlayChain → fetchAid → req 中间隔着四个私有函数')
   assert(/verify-netgate\.mjs/.test(pkg), 'D67j 车道套在 npm run verify 链里: 不在链里的脚本等于没写(它会与实现悄悄分家)')
@@ -2473,6 +2473,23 @@ checkWithAllowlist(
   assert(/degradeMsg = mt\('watcher\.degraded', \{[\s\S]{0,240}r: this\.pandaUrgentCnt,[\s\S]{0,60}q: this\.idleQueue\.length/.test(seg(wt, 'private async roundPanda(')) && /P\.message = degradeMsg/.test(wt), 'D94b 界面上那一行报的是刚刚这一轮的账(连续轮数 + 归因 + 两个扇出面的量): 日志里那句留痕只有翻日志的人看得见, 而这一面在现场挂了 40 分钟无人知情')
   assert(/P\.degraded = Boolean\(degradeMsg\)/.test(wt) && /P\.degraded = true/.test(wt) && /P\.degraded = false/.test(wt), 'D94c 降级旗与那一行同一个来源(每轮重算 + 预言机读通当场摘): 顶栏那一格若停在上一场的状态, 就是"绿点骗人"的另一种写法')
   assert(/degraded: boolean/.test(ty) && /w\.degraded\) return \{ tone: 'warn', text: t\('nav\.wDegraded'\)/.test(tn), 'D94d 读数面一条都不新增: 复用平台状态里那一个 message 字段所在的两处既有承载(工作区横幅 + 顶栏胶囊), 胶囊只为它换一个不撒谎的词(「本轮失败」是读不到的口径, 降级轮读得到)')
+}
+
+// ============================================================================
+// ㊚ 轮30(A): 降级轮在工作区也给一条出路 —— 「去登录」不再只跟熔断旗
+// ============================================================================
+{
+  const wv = fs.readFileSync(R('src', 'renderer', 'src', 'views', 'WorkspaceView.vue'), 'utf8')
+  const wt = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
+  const ty = fs.readFileSync(R('src', 'shared', 'types.ts'), 'utf8')
+  const zh = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'zh-CN.ts'), 'utf8')
+  const en = fs.readFileSync(R('src', 'renderer', 'src', 'i18n', 'locales', 'en-US.ts'), 'utf8')
+  // ---- D95 那颗按钮的口径 = 「这一轮要你去修会话」的两种形状, 而不是只有熔断那一种 ----
+  assert(/v-if="store\.watcher\.byPlatform\[plat\]\.circuitOpen \|\| store\.watcher\.byPlatform\[plat\]\.degraded"/.test(wv), 'D95a 「去登录」跟 circuitOpen 或 degraded: ㊙⑤ 新举的那面旗讲的正是"预言机读不通、正在逐房兜底"—— 那句归因当时看得到, 那条出路却按旧口径藏着, 死会话的 40 分钟里用户被留在"只有一句话"的界面上')
+  assert(/P\.degraded = true/.test(wt) && /degraded: boolean/.test(ty), 'D95b 前提自证: 这一面旗真的有人举、类型里真的有这一格 —— 否则 D95a 锁的是任何构建都走不到的条件(负向断言恒绿的同一课, ㊙⑥)')
+  assert((wv.match(/t\('ws\.gotoLogin'\)/g) || []).length === 2 && /v-if="store\.watcher\?\.byPlatform\?\.\[plat\]\?\.message"/.test(wv), 'D95c 出路仍只有既有那两颗(没会话的空态 + 本平台那一行横幅), 本轮只改了横幅这一颗的触发条件: 新增一面旗不该再多长出一个读数面(㊙⑤ 的"读数面一条都不新增"在这一笔里继续成立)', `实数=${(wv.match(/t\('ws\.gotoLogin'\)/g) || []).length}`)
+  assert(/:class="store\.watcher\.byPlatform\[plat\]\.circuitOpen \? 'text-liveink' : 'text-warnink'"/.test(wv), 'D95d 颜色口径不动: 熔断是被拒答(红), 降级仍在逐房读得到(琥珀)—— 只有"要不要给出路"这一格跟着 degraded 走, 严重度不许被一次按钮改动顺带抹平')
+  assert(/gotoLogin:/.test(zh) && /gotoLogin:/.test(en), 'D95e 文案零新增(zh/en 沿用既有那一条「去登录」): 一颗按钮两种触发不需要两句话')
 }
 
 // ============================================================================
