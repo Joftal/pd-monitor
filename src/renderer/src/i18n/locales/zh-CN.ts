@@ -32,6 +32,7 @@ export default {
     // 首轮还没落地: 那一格里只有间隔是真值, 耗时那半截省略(把初值 0 报成「上次耗时」就是撒谎)
     wHeartFirst: '{sec} 秒',
     wFailed: '本轮失败',
+    wDegraded: '逐房兜底',
     wTip: '每 {sec} 秒向平台拉取一次数据 · 上次拉取耗时 {cost} 秒',
     wTipFirst: '每 {sec} 秒向平台拉取一次数据 · 首轮尚未完成'
   },

@@ -29,6 +29,7 @@ export default {
     // Until the first round lands only the interval is a fact; the cost half is dropped (the initial 0 is not "what the last round took")
     wHeartFirst: '{sec}s',
     wFailed: 'Round failed',
+    wDegraded: 'Room-by-room',
     wTip: 'Pulls site data every {sec}s · last round took {cost}s',
     wTipFirst: 'Pulls site data every {sec}s · first round not finished yet'
   },

@@ -344,6 +344,9 @@ export interface PlatformStatus {
   roundFailed: number
   /** 本平台自己的异常正文, 空串=健康; 不再与另一平台抢同一个字段 */
   message: string
+  /** ㊙(R29-5) 降级轮: 整表那一发读不到, 本轮改由逐房那一条问 —— 站还在跑、数还在读, 但发数从 1 发涨成一堆。
+   *  这一格存在的理由就是"把账说出来": 顶栏胶囊不能因为它就写「本轮失败」(那是读不到的口径), 也不能照旧画绿点 */
+  degraded: boolean
 }
 
 export interface WatcherStatus {

@@ -574,17 +574,17 @@ class PandaApi {
     }
     if (status === 403 || status === 429) {
       logger.warn('api', `疑似风控: HTTP ${status} ${method} ${path}`)
-      this.noteRisk(`HTTP ${status} ${method} ${path}`)
+      this.noteRisk(`HTTP ${status} ${method} ${path}`, path)
       throw new RiskError(mt('api.riskHttp', { status }), status)
     }
     if (status >= 500) {
       logger.warn('api', `服务器错误: HTTP ${status} ${method} ${path}`)
-      this.noteRisk(`HTTP ${status} ${method} ${path}`)
+      this.noteRisk(`HTTP ${status} ${method} ${path}`, path)
       throw new RiskError(mt('api.riskServer', { status }), status)
     }
     if (text.trimStart().startsWith('<')) {
       logger.warn('api', `返回HTML疑似风控验证页: ${method} ${path} (HTTP ${status})`)
-      this.noteRisk(`接口回 HTML ${method} ${path}`)
+      this.noteRisk(`接口回 HTML ${method} ${path}`, path)
       throw new RiskError(mt('api.riskHtml'), status)
     }
     return { status, text }
@@ -699,7 +699,7 @@ class PandaApi {
       `/v1/live?hotyn=Y&adultShowAdModeYN=Y&offset=${offset}&limit=${limit}`
     )
     if ((j as { result?: boolean })?.result === false) {
-      this.noteRisk('整表接口 result=false')
+      this.noteRisk('整表接口 result=false', '/v1/live')
       throw new RiskError(`live list result=false: ${(j as { message?: string })?.message || ''}`)
     }
     return { list: j.list ?? [], loginInfo: j.loginInfo }
@@ -718,6 +718,9 @@ class PandaApi {
       const msg = j.message || mt('api.bjFail')
       // "유저 정보가 없습니다(查无此人)"类业务错误: 非风控 —— 抛 BjNotFoundError 由 watcher 单点处置
       if (/유저|없습|not[\s_-]?found/i.test(msg)) throw new BjNotFoundError(msg, userId)
+      // ㊙(R29-1) 业务码里的限流话术(HTTP 仍 200, 旧账本完全看不见): 记总账让三条后台收手。
+      // 不记整表那一格 —— 逐房这一发正是死会话期的检测路径本身, 轮次扇出走用户 2026-10-03 那笔拍板(只报账, 不减发)
+      if (PandaApi.isRateLimitMsg(j.message || '')) this.noteRisk(`bj 限流话术 @${userId}: ${j.message}`, '/v1/member/bj')
       throw new RiskError(`@${userId}: ${msg}`)
     }
     const media = j.media ?? null
@@ -740,12 +743,15 @@ class PandaApi {
     let dropped = 0
     try {
       for (let page = 0; page < 10; page++) {
-        const j = await this.json<{ list?: unknown; page?: { total?: number }; result?: boolean }>('POST', '/v1/live/bookmark', {
+        const j = await this.json<{ list?: unknown; page?: { total?: number }; result?: boolean; message?: string }>('POST', '/v1/live/bookmark', {
           offset: String(page * limit),
           limit: String(limit)
         })
         if (j.result === false || !Array.isArray(j.list)) {
           logger.warn('api', `关注列表不可用(result=${String(j.result)}, list=${Array.isArray(j.list) ? 'ok' : typeof j.list})`)
+          // ㊙(R29-1) 限流话术要记账, 但只有这一句才记: 未登录/改版是这一站正常的"读不到",
+          // 把轮次扇出闷掉就是拿时效换流量 —— 死会话那一案的改判是"只把账说出来, 不减发"
+          if (PandaApi.isRateLimitMsg(j.message || '')) this.noteRisk(`关注列表限流话术: ${j.message}`, '/v1/live/bookmark')
           return null
         }
         collected += j.list.length
@@ -820,18 +826,45 @@ class PandaApi {
   // 熔断开着仍按 1.2s 一发逐房拉源(单房 2~6 发), 冷却期最不该重发的形状恰恰是它俩在发。
   // 与 SOOP 的 riskCooling() 同语义 —— 任何风控形状(403/429/≥500/接口回 HTML/非 JSON)一落地即静默 5 分钟,
   // 只让后台的泵收手; 用户那一条(进房、手动拉源、登录探针)照走, 不受牵连。
+  // ㊙(R29-1) 两处补: ① 业务码里那句「请求太多」(HTTP 仍 200)进门, bj/关注列表/play 三个 result=false 出口都记;
+  // ② 这本账分成两格 —— 总账只管后台的秒开与补源, 轮次/间隙那两条检测路只认"整表那一发自己被拒"。
   private riskUntil = 0
+  /** 整表那一发被拒的单独一格(㊙ R29-1): 只有它能拨动轮次的扇出闸。
+   *  与总账分家的理由来自用户 2026-10-03 那笔拍板(死会话 ≈5 万发/天 那一案「只把账说出来, 不减发」):
+   *  逐房那一条(fetchBj/fetchPlay)的失败常常是"这一号会话已死"或"这一个房受限", 它们既是检测路径本身,
+   *  又不代表平台在拒答整表 —— 让它们顶掉轮次扇出, 就是把时效换成了流量。
+   *  真正会吞掉读数的只有"整表那一发亲口被拦": 那时 5 页全站榜 + 逐房复查 + 间隙快照一起发出去也换不回一行字。 */
+  private oracleRiskUntil = 0
   private static RISK_COOL_MS = 5 * 60_000
 
-  private noteRisk(why: string): void {
+  /** 整表那一发的路径族: 全站榜(/v1/live, 带查询串)与站内关注(/v1/live/bookmark)。
+   *  写成两个分支而不是 `/v1/live` 前缀, 因为前缀会把 `/v1/live/play`(逐房拉源)一起圈进来 */
+  private static isOraclePath(path: string): boolean {
+    return path === '/v1/live/bookmark' || path === '/v1/live' || path.startsWith('/v1/live?')
+  }
+
+  /** 平台不改 HTTP 状态、只在 message 里说"请求太多"的那一类业务码(㊙ R29-1)。
+   *  现场样本: bj 与 play 双双回 HTTP 200 + 「너무 많은 요청이 발생했습니다」, 而旧账本只认 403/429/≥500/HTML/非 JSON
+   *  ⇒ 这一站在高压的时刻, 客户端的自闭环完全看不见, 三条后台照旧按 gap 一路打到底 */
+  private static isRateLimitMsg(msg: string): boolean {
+    return /너무 많은 요청|too many requests|rate.?limit|请求过多|请求太频繁|слишком много запросов/i.test(msg)
+  }
+
+  private noteRisk(why: string, path = ''): void {
     // 每个静默窗口只报一次: 高压期成串命中时, 每一发都念一遍只是刷屏
     if (!this.riskCooling()) logger.warn('api', `疑似风控信号(${why}), 后台泵收手 ${PandaApi.RISK_COOL_MS / 60_000} 分钟`)
     this.riskUntil = Date.now() + PandaApi.RISK_COOL_MS
+    if (PandaApi.isOraclePath(path)) this.oracleRiskUntil = Date.now() + PandaApi.RISK_COOL_MS
   }
 
-  /** 后台的泵读这一格(预取、重铸): 冷却期内一律收手; 用户请求与整表轮次不看它 */
+  /** 后台的泵读这一格(预取、重铸): 冷却期内一律收手; 用户请求不看它 */
   riskCooling(): boolean {
     return Date.now() < this.riskUntil
+  }
+
+  /** 轮次的扇出闸只读这一格(㊙ R29-1): 逐房那一发的失败不许把整表轮次闷掉 */
+  oracleRiskCooling(): boolean {
+    return Date.now() < this.oracleRiskUntil
   }
 
   private remintCoolLogged = false
@@ -997,6 +1030,7 @@ class PandaApi {
     this.gates.clear() // 上一个账号的"爱心余额不足/粉丝门槛"对这一个账号毫无意义
     this.playInflight.clear()
     this.riskUntil = 0 // 上一号的风控静默不该闷住新账号的泵(与 SOOP 换号清账同语义, ㊖)
+    this.oracleRiskUntil = 0 // ㊙(R29-1) 整表那一格同批清: 换号后的第一发整表问到答没答, 与上一号无关
     this.pushSrcCache()
   }
 
@@ -1108,6 +1142,9 @@ class PandaApi {
     if (j?.result === false) {
       const msg = j.message || ''
       if (/비밀번호|password/i.test(msg)) return { ok: false, needPassword: true, error: mt('api.needPw') }
+      // ㊙(R29-1): 现场实拍撞到的正是这一句(「너무 많은 요청이 발생했습니다」配 HTTP 200), 而旧账本只认
+      // 403/429/≥500/HTML/非 JSON —— 平台亲口喊停的这一刻, 预取泵与重铸链照旧按 gap 一路打到底
+      if (PandaApi.isRateLimitMsg(msg)) this.noteRisk(`拉源限流话术 @${userId}: ${msg}`, '/v1/live/play')
       logger.warn('api', `拉源失败 @${userId}: ${msg || '(无 message)'}`)
       return { ok: false, error: msg || mt('api.playFail') }
     }

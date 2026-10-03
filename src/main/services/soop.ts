@@ -315,6 +315,10 @@ class SoopApi {
    *  取流第一步原本只为拿这个号码就发一整页 HTML, 列表那一发既然给了就不该再买一次(㊒④)。
    *  与 playCache 互不牵连: 源作废 ≠ 场次号作废 —— 它只随 TTL 与失败回落失效 */
   private bnoCache = new Map<string, { bno: string; at: number }>()
+  /** ㊙(R29-4) 已买档位的复用账: 频道 → { 为哪一场次买的, 买到了哪几档 }。
+   *  判据是场次而不是时间: aid/签名地址在同一场内本来就是长效的, 与 playCache"只认显式作废"同规约。
+   *  满档 caller 过去只能整条链重打(连最高档那 2 发也重买一遍), 这一格把已经买到的那几档递出来, 只补差档 */
+  private partialBuy = new Map<string, { bno: string; bought: { name: string; variant: VariantInfo }[] }>()
   /** 只比一轮轮询长一点: 过期就当没读到过, 回到读页那条既有链路(下播判定要的是页/路径这句话, 不是这里) */
   private static BNO_TTL = 90_000
   /** 播放页 HTML 的微缓存: 只给"连击型"调用方复用(录制启动前先取真名 → 紧接着拉整链, 同一页两发)。
@@ -947,8 +951,24 @@ class SoopApi {
     if (!proxy) return { ok: false, error: mt('soop.proxyFail') }
     const allPresets = this.sortPresets(info.presets).filter((p) => p.name && p.name.toLowerCase() !== 'auto')
     // ㊔: 省发型只解最高档 —— 清晰度菜单上的其余档位是"没人点就不必买"的(每档 2 发)
-    const presets = fullVariants ? allPresets : allPresets.slice(0, 1)
-    const variants: VariantInfo[] = []
+    // ㊙(R29-4): 要满档的这一条先接上"同一场已经买过的档"(预取那条省发型链留下的), 只补差档。
+    // 现场实拍 @ahfotlrp0675: 14:05:07 预取 bno=297557133 档位=1, 14:07:26 用户进房 ⇒ 旧规则认定那份
+    // partial 不能给满档 caller(判得对), 于是整条链重打, 连最高档那 2 发也原样重买了一遍
+    const reuse: { name: string; variant: VariantInfo }[] = []
+    if (fullVariants && !password) {
+      const e = this.partialBuy.get(channel)
+      if (e && e.bno === info.broadNo) {
+        for (const b of e.bought) {
+          // 只对"前缀对得上"的那一段负责: 平台中途换了菜单名字, 对不上的那档就当没买过、照买
+          if (allPresets.findIndex((p) => p.name === b.name) !== reuse.length) break
+          reuse.push(b)
+        }
+      }
+    }
+    const want = fullVariants ? allPresets : allPresets.slice(0, 1)
+    const presets = want.filter((p) => !reuse.some((b) => b.name === p.name))
+    const variants: VariantInfo[] = reuse.map((b) => b.variant)
+    const bought: { name: string; variant: VariantInfo }[] = []
     for (const p of presets) {
       try {
         let { aid, result } = await this.fetchAid(channel, info.broadNo, p.name, password)
@@ -965,12 +985,14 @@ class SoopApi {
         const viewUrl = await this.fetchViewURL(info.rmd, info.cdn, info.broadNo, p.name)
         const up = new URL(viewUrl)
         up.searchParams.set('aid', aid)
-        variants.push({
+        const variant: VariantInfo = {
           url: proxy.playlistUrl(up.href),
           bandwidth: p.bps * 1000,
           resolution: p.height ? `${p.height}p` : p.name,
           label: p.label || p.name
-        })
+        }
+        variants.push(variant)
+        bought.push({ name: p.name, variant })
       } catch (e) {
         logger.warn('soop', `清晰度取流失败 @${channel} quality=${p.name}: ${String((e as Error).message || e)}`)
       }
@@ -981,7 +1003,14 @@ class SoopApi {
       return { ok: false, error: mt('soop.noStream') }
     }
 
-    logger.info('soop', `拉源成功 @${channel}: 档位=${variants.length}${fullVariants ? '' : '(只解最高档)'} bno=${info.broadNo} cdn=${info.cdn}`)
+    // ㊙(R29-4) 省发型链买到的档记进复用账(带密码的那一条不记: 预取泵永远没有密码, 而这一格只按频道记账);
+    // 满档链一旦落地, 缓存从此不缺档 ⇒ 摘账
+    if (!fullVariants && !password && allPresets.length > 1) this.partialBuy.set(channel, { bno: info.broadNo, bought })
+    if (fullVariants) this.partialBuy.delete(channel)
+    logger.info(
+      'soop',
+      `拉源成功 @${channel}: 档位=${variants.length}${fullVariants ? '' : '(只解最高档)'}${reuse.length ? ` 复用已买档=${reuse.length}(省 ${reuse.length * 2} 发)` : ''} bno=${info.broadNo} cdn=${info.cdn}`
+    )
     // 开播时刻: 播放页整页没有任何时间串, 列表接口才有 broad_start —— 这里用 CHANNEL.BTIME(已播秒数)反推,
     // 零额外请求(这一发本来就要打)。取不到就留空, 不写臆造值
     const startTime = info.btime > 0 ? kstClock(Date.now() - info.btime * 1000) : ''
@@ -990,7 +1019,8 @@ class SoopApi {
       m3u8: variants[0].url,
       variants,
       // 只解了最高档 ⇒ 这份源包不完整(卡片照算有源, 清晰度菜单等真进房补齐); 平台本来就只给一档时不算残缺
-      partial: !fullVariants && allPresets.length > 1,
+      // ㊙(R29-4): 满档链也要说实话 —— 接上复用账之后"其余档一档没买到"不再会让整包为空, 旧判据会把它写成满档
+      partial: allPresets.length > 1 && variants.length < allPresets.length,
       // 分段与清单都由本地代理带头, ffmpeg 侧不再需要注入 SOOP 头
       dlHeaders: {},
       title: info.roomName || meta.roomName,
@@ -1083,6 +1113,7 @@ class SoopApi {
     // 在飞的几条(带密/不带密 × 全档/只最高档, ㊔)一并摘掉: 留着等于让新 caller 合进一条注定作废的链, 复活走后门
     for (const pw of ['', '#pw']) for (const fan of ['', '#top']) this.playInflight.delete(`${channel}${pw}${fan}`)
     this.deadStreak.delete(channel)
+    this.partialBuy.delete(channel) // ㊙(R29-4): 事件一落地, 旧那一场买过的档就不再是"同一场"的档
     broadcastSrcCache()
   }
 
@@ -1113,6 +1144,7 @@ class SoopApi {
     this.playCache.clear()
     this.playInflight.clear()
     this.deadStreak.clear()
+    this.partialBuy.clear() // ㊙(R29-4): 上一号买过的档对这一个账号不成立(账号不同 ⇒ 能买的档与 aid 都不同)
     this.gates.clear() // ㊘: 上一个账号的"要登录/要密码"对这一个账号毫无意义(与 Panda 换号清账同语义)
     this.riskUntil = 0 // 上一号的风控静默不该闷住新账号的泵(与 Panda 熔断随换号撤退同语义)
     broadcastSrcCache()

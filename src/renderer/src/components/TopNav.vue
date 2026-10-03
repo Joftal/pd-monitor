@@ -80,6 +80,9 @@ const watcherState = computed(() => {
   if (w.circuitOpen) return { tone: 'bad', text: t('nav.wCooling'), tip: `${w.message} · ${heartbeat}` }
   if (!w.running) return { tone: 'idle', text: t('nav.wStopped'), tip: t('nav.wStoppedTip') }
   if (!w.monitored) return { tone: 'idle', text: t('nav.wIdle'), tip: t('nav.wIdleTip') }
+  // ㊙(R29-5) 降级轮: 整表那一发读不到, 本轮改逐房问 —— 数还在读, 所以既不是绿点(那一发的便宜没了),
+  // 也不是「本轮失败」(那是读不到的口径); 完整那一句在 tooltip 与工作区横幅里
+  if (w.degraded) return { tone: 'warn', text: t('nav.wDegraded'), tip: `${w.message} · ${heartbeat}` }
   // message 非空但没熔断 = 这一站在跑但整轮看不见(拉取连续失败): 绿点继续呼吸就是骗人。
   // 胶囊只写「本轮失败」四字: 完整错误码既读不完也会把顶栏撑破最小窗宽
   if (w.message) return { tone: 'warn', text: t('nav.wFailed'), tip: `${w.message} · ${heartbeat}` }

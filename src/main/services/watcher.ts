@@ -111,8 +111,8 @@ class Watcher {
     circuitOpen: false,
     message: '',
     byPlatform: {
-      pandalive: { running: false, lastRoundAt: null, roundMs: 0, monitored: 0, liveFound: 0, circuitOpen: false, roundFailed: 0, message: '' },
-      soop: { running: false, lastRoundAt: null, roundMs: 0, monitored: 0, liveFound: 0, circuitOpen: false, roundFailed: 0, message: '' }
+      pandalive: { running: false, lastRoundAt: null, roundMs: 0, monitored: 0, liveFound: 0, circuitOpen: false, roundFailed: 0, message: '', degraded: false },
+      soop: { running: false, lastRoundAt: null, roundMs: 0, monitored: 0, liveFound: 0, circuitOpen: false, roundFailed: 0, message: '', degraded: false }
     }
   }
 
@@ -290,6 +290,7 @@ class Watcher {
             this.errorStreak = 0
             P.circuitOpen = false
             P.message = ''
+            P.degraded = false // ㊙(R29-5) 预言机读通 = 整表又能一发覆盖全关注, 降级那一句当场收回
             logger.info('watcher', `冷却期预言机读通: 退避提前解除(关注=${anchors.length} 在播=${found})`)
             return
           }
@@ -299,6 +300,9 @@ class Watcher {
         return
       }
       sent = true
+      // ㊙(R29-5) 降级轮的账要在界面上持续说话(用户拍板: 只把账说出来, 不减发): 现场实拍那一轮 158 个关注
+      // 靠 10 发逐房复查 + 155 间间隙泵快照来问, 而界面上一个字都没有 —— 只有事后翻日志才知道在烧什么
+      let degradeMsg = ''
       if (cfg.watchMode === 'list') {
         // 站内关注列表优先(1 发覆盖全部关注, 实测 158 条/90KB): 它直接对"我关注的人"发言,
         // 请求数与全站热度无关, 是这一站的风控面下限
@@ -309,10 +313,14 @@ class Watcher {
         // ⇒ 现场量级 ≈110 发/轮, 轮距 120s 就是 ≈8 万发/天, 而健康的一轮只有 1 发。收手窗口 ≤5 分钟, 期间平台在拒答,
         // 那些请求一发也换不回读数 —— 与 SOOP 的探针收手(:847)同语义, 不是拿时效换流量。
         // 预言机那一发照发: 它读通了就是"这一站还在答话", 当场把整表真值落进卡里, 一分钟时效都不丢。
-        const riskHold = api.riskCooling()
+        // ㊙(R29-1) 这一格换成"整表那一发自己被拒"而不是总账: 逐房那一发(bj/play)报的限流话术属于
+        // 死会话期的检测路径本身, 由它顶掉轮次扇出就是拿时效换流量 —— 用户 2026-10-03 拍板「只把账说出来, 不减发」。
+        const riskHold = api.oracleRiskCooling()
         const viaBookmark = await this.roundByBookmark(anchors, riskHold)
         if (viaBookmark === null && riskHold) {
           this.pandaBlindStreak++
+          P.message = mt('watcher.degradeHold', { n: this.pandaBlindStreak, why: this.pandaDegradeWhy() })
+          P.degraded = true
           logger.info('watcher', `风控冷却中: 本轮只发站内关注那一发, 全站榜与逐房复查收手(连续 ${this.pandaBlindStreak} 轮列表不可用)`)
           return
         }
@@ -328,6 +336,14 @@ class Watcher {
               `降级轮留痕: 站内关注列表连续 ${this.pandaBlindStreak} 轮不可用, 本轮逐房复查 ${this.pandaUrgentCnt} 发 + 间隙泵快照 ${this.idleQueue.length} 间在排队`
             )
           }
+          // ㊙(R29-5): 同一句话落进界面那一行(工作区本平台横幅 + 顶栏胶囊提示), 数字取的是刚刚这一轮的账 ——
+          // roundByList 已经把 rest 快照灌进 idleQueue, 这里读到的是这一轮排上的量
+          degradeMsg = mt('watcher.degraded', {
+            n: this.pandaBlindStreak,
+            why: this.pandaDegradeWhy(),
+            r: this.pandaUrgentCnt,
+            q: this.idleQueue.length
+          })
         } else {
           this.pandaBlindStreak = 0
           this.pandaLiveFound = viaBookmark
@@ -340,7 +356,8 @@ class Watcher {
       }
       this.errorStreak = 0
       P.circuitOpen = false
-      P.message = ''
+      P.message = degradeMsg
+      P.degraded = Boolean(degradeMsg)
     } finally {
       // 真发了请求才记时: 冷却期里那一轮什么都没发(连那句"还在退避"都不刷新时间戳),
       // 顶栏「上次拉取耗时」不许被空转轮刷成刚刚
@@ -350,6 +367,16 @@ class Watcher {
         P.lastRoundAt = Date.now()
       }
     }
+  }
+
+  /** ㊙(R29-5) 降级轮的归因: 界面上那一行要说清"为什么这一轮在逐房问", 而不是只报在逐房问。
+   *  三条真值全来自 Panda 客户端自己, 零额外请求: jar 里有没有 sessKey(没登录)、官方 login_info 认不认
+   *  这枚 cookie(被服务端作废 —— 现场实拍那种"cookie=30 枚 会话=有 官方校验=未登录")、都不是=平台在拒答或改了版。
+   *  这一格只负责把那三种情况分开说一句人话, 不据此减任何一发 */
+  private pandaDegradeWhy(): string {
+    if (!api.hasSession()) return mt('watcher.degradeNoLogin')
+    if (!api.cookieValid) return mt('watcher.degradeSessionDead')
+    return mt('watcher.degradeRefused')
   }
 
   /** SOOP 一轮: 一发站内关注列表(myapi/favorite)覆盖全部站内关注, 列表覆盖不到的房才逐发播放页探针。
@@ -863,6 +890,13 @@ class Watcher {
       }
     }
 
+    // ㊙(R29-3) 列表给了可读判据的房数, 提前算好: 失明判据过去读的是 rows===null, 而现场更常见的形状是
+    // "列表读通了, 但我的关注一个都不在里面"(应用内关注 ≠ 站内关注 / 整表只覆盖了别人)。
+    // 那种轮次 rows 不是 null ⇒ soopBlindStreak 永远归零, ㊘(R28-4) 那道"失明期预取不再为没有场次号的房
+    // 买整页"的闸门从不落地(实测 22 发整页全回 offline=true, 连续多轮 blind=0)。
+    // covered===0 才是"列表这一轮对我等于没有"的原本那句话 —— 只改判据, 不减一发
+    const covered = anchors.length - probe.length
+
     // 每轮预算 + 游标轮转(㊒②): 只在真的超预算时才切刀, 于是"少数几个房不在列表里"这一常态一字不改
     const budget = Watcher.SOOP_PROBE_BUDGET
     let sent: Anchor[] = probe
@@ -898,13 +932,15 @@ class Watcher {
     // 于是"这一轮烧了多少发最贵的整页"在日志里看不见。只在列表失明的轮次出声, 并把连续失明的轮数带上
     // —— 列表正常时 probe 是个位数的常态, 每轮一行会把日志刷成计数器。
     // 全灭那一轮不重复出声: 下面 allFail 那句 warn 报的正是同一件事(两句是重复读数面)。
-    // 为什么不做占空比: rows===null 时这条逐房整页【就是】检测路径(全站榜对 SOOP 不存在, 站内列表又读不到),
+    // 为什么不做占空比: covered===0 时这条逐房整页【就是】检测路径(全站榜对 SOOP 不存在, 站内列表又读不到),
     // 压它的节奏等于压开播发现延迟; 而 ㊒② 的每轮 40 发已经是这一面的上限。要再减, 得先由用户认下时效那笔账。
-    this.soopBlindStreak = rows === null && anchors.length ? this.soopBlindStreak + 1 : 0
-    if (sent.length && rows === null && fail < sent.length) {
+    // ㊙(R29-3): 判据从 rows===null 换成 covered===0 —— "列表这一轮对我一个房都没说清"就是失明,
+    // 不管它是整表不可用还是整表里没有我关注的人
+    this.soopBlindStreak = covered === 0 && anchors.length ? this.soopBlindStreak + 1 : 0
+    if (sent.length && covered === 0 && fail < sent.length) {
       logger.info(
         'soop',
-        `降级探针回执: ${sent.length}/${probe.length} 发整页(在播=${probeLive} 未读到/下播=${sent.length - probeLive - fail} 失败=${fail}; 关注列表已连续 ${this.soopBlindStreak} 轮不可用)`
+        `降级探针回执: ${sent.length}/${probe.length} 发整页(在播=${probeLive} 未读到/下播=${sent.length - probeLive - fail} 失败=${fail}; 关注列表已连续 ${this.soopBlindStreak} 轮没覆盖到我的关注)`
       )
     }
 
@@ -913,7 +949,7 @@ class Watcher {
     // 那条老判据会从"平台瞎了"悄悄退化成"永远不会瞎"
     // ㊔(A4): 冷却收手时 sent 被清空, 这一发都没出去 ≠ 没瞎 —— 此时"覆盖 0 且有房待读"本身就是全灭,
     // 不能让风控冷却反过来把连坐提醒(discovery 第 2 轮弹的那句)绕过去
-    const covered = anchors.length - probe.length // 列表给了可读判据的房数
+    // ㊙(R29-3): covered 的算法上移到了探针之前(失明判据与留痕都要读它), 这里直接沿用
     const allFail = anchors.length > 0 && covered === 0 && (sent.length > 0 ? fail === sent.length : probe.length > 0)
     // 「未读到状态」的口径随预算一起改口(㊒②): 发出去且失败的 + 本轮被预算挡下的 = 这一轮没读到的房数,
     // 顶栏/工作区那句「本轮 N 个房间未读到状态, 卡片保留上次读数」据此仍然成立, 不新增读数面
@@ -1077,7 +1113,9 @@ class Watcher {
         }
         // ㊘(R28-3): 风控冷却期这条泵也收手 —— 它吃的正是同一站同凭证的逐房那一发, 而轮次收手若只收一半,
         // 间隙里它照样把车道填满。与熔断那一条不同: 不清队列(下一轮 setIdleQueue 会换上新快照)
-        if (api.riskCooling()) break
+        // ㊙(R29-1): 读的是整表那一格而不是总账 —— 这一泵发的是逐房状态读数(检测路径), 让它被
+        // "某个后台拉源撞了限流"顶掉, 就是把开播发现延迟算进了风控的账; 与轮次同一格才收得齐整
+        if (api.oracleRiskCooling()) break
         const a = this.idleQueue.shift()!
         // 消费计数(㊖): 换快照时游标要续到"这一窗口实际看过几间"之后 —— 被守卫跳过的那几间也算看过
         this.idleDrained++
@@ -1112,18 +1150,29 @@ class Watcher {
   private prewarmQueue: Record<Platform, string[]> = { pandalive: [], soop: [] }
   private prewarmPumping: Record<Platform, boolean> = { pandalive: false, soop: false }
 
-  private enqueuePrewarm(platform: Platform, userId: string): void {
+  /** ㊙(R29-2) 这一间正等"第二轮确认下播": 预言机这一轮已亲口报它不在播, 只是单轮读数不翻转状态。
+   *  检测面照旧按原节奏走(两轮规则要的就是第二发读数, 这里一发都不减), 但预取泵不该再为它买一整条取源链 ——
+   *  那一串买的是"秒开", 而平台说这一场已经散了。现场实拍: 首轮后补扫 22 发整页, 读数全部 offline=true */
+  private awaitingOffline(platform: Platform, userId: string): boolean {
+    const key = roomKey(platform, userId)
+    return platform === 'soop' ? this.soopOfflineStreak.has(key) : this.pandaOfflineStreak.has(key)
+  }
+
+  private enqueuePrewarm(platform: Platform, userId: string): boolean {
     // 密码房不预取(㊔): 预取这一路永远没有密码, 这一发注定换回一句"要密码"
     // —— 而 SOOP 那句"要密码"背后是整条取源链(实测每多一档多两发)。用户带着密码进房的那一条不受影响。
     const a = store.listAnchors().find((x) => x.platform === platform && x.userId === userId)
-    if (a?.tags?.isPw) return
+    if (a?.tags?.isPw) return false
+    // ㊙(R29-2): 正等第二轮确认下播的房不排队
+    if (this.awaitingOffline(platform, userId)) return false
     const q = this.prewarmQueue[platform]
-    if (q.includes(userId)) return
+    if (q.includes(userId)) return false
     // ㊗(C8) 自录房排到队首: 队列排空要几分钟(实测 103 个房 ≈12 分钟), 而自录那一头是"开播就得有源",
     // 排在尾巴上等于让录制自己等一整轮泵。请求数一字不减, 只是把同一批发出的活排得更早
     if (a?.autoRecord) q.unshift(userId)
     else q.push(userId)
     void this.pumpPrewarm(platform)
+    return true
   }
 
   /** ㊗(C4) 手工添加的离线房当场进间隙泵: 旧写法它要等下一轮才被 setIdleQueue 收进快照
@@ -1153,8 +1202,8 @@ class Watcher {
     for (const a of store.listAnchors()) {
       if (a.platform !== platform || !a.isLive || this.isGone(a)) continue
       if (cached.has(roomKey(platform, a.userId))) continue
-      this.enqueuePrewarm(platform, a.userId)
-      queued++
+      // ㊙(R29-2): 排队与否由 enqueuePrewarm 定(正等第二轮确认下播的房不买), 这里的计数只报真排上的
+      if (this.enqueuePrewarm(platform, a.userId)) queued++
     }
     if (queued) logger.info('watcher', `${platformName(platform)} 首轮后补预取: ${queued} 个在播房排队`)
   }
@@ -1164,6 +1213,7 @@ class Watcher {
     this.prewarmPumping[platform] = true
     const q = this.prewarmQueue[platform]
     let skippedNoBno = 0
+    let skippedPending = 0
     try {
       while (q.length) {
         // 让路(㊕): 停轮即停泵、轮次在飞时先不发预取 —— 与 pumpIdle 同规约。
@@ -1199,6 +1249,14 @@ class Watcher {
         // 掉线的那一间下一场开播会由 onLiveStart 重新排队, 这里跳过不亏时效
         const a = store.listAnchors().find((x) => x.platform === platform && x.userId === uid)
         if (!a || !a.isLive) continue
+        // ㊙(R29-2): 排队之后才被预言机报"这一场散了"(正等第二轮确认)的房, 出队这一头同样不买。
+        // P2-1 那一格管"已经判死", 这一格管"正在判" —— 队列是排队那一刻的快照, 泵排空要几分钟, 中间会变。
+        // 排回队尾不作废: 第二轮真读回在播(瞬回离线的抖动)时 streak 一清, 下一趟泵就照买
+        if (this.awaitingOffline(platform, uid)) {
+          q.push(uid)
+          if (++skippedPending >= q.length) break // 整条队列都在等确认 = 这一趟无事可做, 出泵等下一轮读数
+          continue
+        }
         // ㊘(R28-4): 关注列表连续失明的那一段, 预取不再为"手上没有场次号"的房间买那一整页。
         // 整页在这段是逐房检测路径(每轮 ≤40 发, 由探针预算与环形游标管着)—— 那一面照旧一发不少;
         // 预取再买一份就是同一页两遍, 而它买的是"秒开", 没有人在等。排回队尾不作废:
