@@ -285,6 +285,10 @@ export interface SoopLoginInfo {
   nick: string
   /** 请求层失败(网络/风控), 与"服务端明确未登录"语义不同, 调用方不得据此判死会话 */
   netFail: boolean
+  /** ㊛(轮31) 这一份读数是 TTL 缓存里的旧答案还是刚刚真发的 get_private_info:
+   *  顶栏/账号页每次取态都走这里, 而真发只有一小部分 —— 日志不带这一格, 事后按行数复请求数会成倍虚高
+   *  (实测 6 行「登录态核对」≈ 2 发真请求)。缺席 = 真发 */
+  fromCache?: boolean
 }
 
 /** "k=v; k=v" → 凭证 map(浏览器 document.cookie 与 Set-Cookie 首段同构) */
@@ -417,7 +421,7 @@ class SoopApi {
     if (!cookie) return { isLogin: false, loginId: '', nick: '', netFail: false } // 一点凭证都没有就别打官方接口
     const key = createHash('sha256').update(cookie).digest('hex')
     const hit = this.loginCache.get(key)
-    if (!force && hit && Date.now() - hit.at < LOGIN_TTL) return hit.info
+    if (!force && hit && Date.now() - hit.at < LOGIN_TTL) return { ...hit.info, fromCache: true }
     const flying = this.loginInflight.get(key)
     if (flying) return flying
     const p = (async (): Promise<SoopLoginInfo> => {

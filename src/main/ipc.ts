@@ -28,12 +28,16 @@ async function pandaAccount(): Promise<AccountState> {
   let isAdult = false
   let userIdx: number | null = null
   let netFail = false
+  // ㊛(轮31) 这行日志每取一次态就落一行, 而真发只有少数(30 秒结果缓存 + 在途合并):
+  // 事后照行数复请求数会把 2 发数成 6 发 —— 把"真发/缓存/未问"写进那一行, 账才自证
+  let verify: '真发' | '缓存' | '未问' = '未问'
   if (api.hasSession()) {
     const info = await api.checkLoginInfo()
     realLogin = info.isLogin
     isAdult = info.isAdult
     userIdx = info.idx
     netFail = info.netFail
+    verify = info.fromCache ? '缓存' : '真发'
   }
   const state: AccountState = {
     loggedIn: api.hasSession(),
@@ -49,7 +53,7 @@ async function pandaAccount(): Promise<AccountState> {
   logger.info(
     'auth',
     `Panda 登录态核对: cookie=${api.cookieCount}枚 会话=${api.hasSession() ? '有' : '无'} ` +
-      `官方校验=${netFail ? '请求失败(网络/风控)' : realLogin ? `已登录${isAdult ? ' +成人认证' : ' 无成人认证'}` : api.hasSession() ? '未登录(cookie已被服务端作废)' : '未登录'}`
+      `官方校验[${verify}]=${netFail ? '请求失败(网络/风控)' : realLogin ? `已登录${isAdult ? ' +成人认证' : ' 无成人认证'}` : api.hasSession() ? '未登录(cookie已被服务端作废)' : '未登录'}`
   )
   return state
 }
@@ -67,6 +71,8 @@ async function soopAccount(): Promise<SoopAccountState> {
     logger.info('auth', `SOOP 无 Cookie + 有托管账密: 自动重登成功(${maskLoginId(cred.username)})`)
   }
   const v = hasCookies ? await soopApi.verifyLogin() : { isLogin: false, loginId: '', nick: '', netFail: false }
+  // ㊛(轮31) 同 Panda 那一行: 2 分钟结果缓存吃掉了大多数取态, 行数 ≠ 发数
+  const verify = !hasCookies ? '未问' : v.fromCache ? '缓存' : '真发'
   const state: SoopAccountState = {
     hasCookies,
     realLogin: v.isLogin,
@@ -79,7 +85,7 @@ async function soopAccount(): Promise<SoopAccountState> {
   logger.info(
     'auth',
     `SOOP 登录态核对: cookie=${hasCookies ? '有' : '无'} ` +
-      `官方校验=${v.netFail ? '请求失败(网络/风控)' : v.isLogin ? `已登录 ${maskLoginId(v.loginId)}` : '未登录'} ` +
+      `官方校验[${verify}]=${v.netFail ? '请求失败(网络/风控)' : v.isLogin ? `已登录 ${maskLoginId(v.loginId)}` : '未登录'} ` +
       `托管账密=${cred.username ? maskLoginId(cred.username) : '无'}`
   )
   return state

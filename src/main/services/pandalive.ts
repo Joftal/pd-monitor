@@ -171,6 +171,9 @@ interface LoginInfoResult {
   isAdult: boolean
   idx: number | null
   netFail: boolean
+  /** ㊛(轮31) 这一份是 30 秒结果缓存里的旧答案(本轮没向官方发问): 缺席 = 真发。
+   *  「登录态核对」那行日志每次都落, 不带这一格就没法按行数复请求数(实测 6 行 ≈ 2 发) */
+  fromCache?: boolean
 }
 
 interface QueueJob<T> {
@@ -632,7 +635,7 @@ class PandaApi {
     if (jarOverride) return this.fetchLoginInfo(jarOverride)
     const header = this.cookieHeader
     if (!force && this.loginInfoCache && this.loginInfoCache.header === header && Date.now() - this.loginInfoCache.at < 30_000) {
-      return this.loginInfoCache.info
+      return { ...this.loginInfoCache.info, fromCache: true }
     }
     if (!force && this.loginInfoInflight && this.loginInfoInflight.header === header) return this.loginInfoInflight.p
     const p = this.fetchLoginInfo().finally(() => {

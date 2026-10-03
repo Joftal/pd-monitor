@@ -695,10 +695,37 @@ class Watcher {
     return p
   }
 
-  /** 预言机报"没在播": 单轮读数不翻转状态(瞬回离线/改版丢字段都可能), 连续两轮才判下播 */
+  /** ㊛(轮31) 这张卡的"在播"还是不是现值: lastSeenAt 老于两个轮距 = 中间没有任何一轮读数替它说话过
+   *  (应用关了几小时/隔夜醒来), 那上面的 isLive 记的是"上一场我们最后一次看见它在播", 不是"现在在播"。
+   *  现场实拍 2026-10-03 14:05 冷启动: 153 张这样的陈旧在播卡要靠两轮规则各走两轮才肯翻假,
+   *  于是"这一场其实几小时前就散了"这件事要等第二个轮距(默认 120s)才落地 —— 而平台那一发本来就报的是离线,
+   *  多等的一轮买不到任何新读数, 只买到一次误报的下播通知。
+   *  lastSeenAt 为 0(旧库/从没写过) 不算陈旧: 这一格判的是"证明它旧", 而"没记过"证明不了任何事 ——
+   *  证不出来就维持两轮防抖, 宁可晚一轮报下播, 也不凭猜把一场可能真在播的场静默摘掉 */
+  private baselineStale(a: Anchor, platform: Platform): boolean {
+    return a.lastSeenAt > 0 && Date.now() - a.lastSeenAt > 2 * this.intervalFor(platform)
+  }
+
+  /** ㊛(轮31) 陈旧基线遇到"报离线"的第一轮读数: 只翻状态, 不发下播事件。
+   *  新基线的两轮防抖一条不减(抖动照样要两轮), 这里豁免的只是"那场结束我们根本没在场"的那一次通知 ——
+   *  onLiveEnd 会发吐司/TG 并作废旧源, 前两者把一个几小时前的散场报成刚刚的下播, 是拿旧账冒充现值;
+   *  源作废与卡片落库照做(留着只会挂着「秒开」徽标骗人) */
+  private settleStaleOffline(a: Anchor, now: number): void {
+    store.updateAnchor(a.platform, a.userId, this.offPatch(a, { lastSeenAt: now }))
+    sourceFor(a.platform).invalidatePlay(a.userId)
+    logger.info('watcher', `陈旧基线首轮翻离线(那场散于应用停摆期间, 不发下播通知): ${a.nick}(@${a.userId})`)
+  }
+
+  /** 预言机报"没在播": 单轮读数不翻转状态(瞬回离线/改版丢字段都可能), 连续两轮才判下播。
+   *  ㊛(轮31) 例外: 基线本身是陈旧的(冷启动/长停), 第一轮就翻状态但不报下播 */
   private markPandaOffline(a: Anchor, wasLive: boolean, now: number): void {
     const key = roomKey(a.platform, a.userId)
     if (!wasLive) return
+    if (this.baselineStale(a, a.platform)) {
+      this.pandaOfflineStreak.delete(key)
+      this.settleStaleOffline(a, now)
+      return
+    }
     const n = (this.pandaOfflineStreak.get(key) || 0) + 1
     this.pandaOfflineStreak.set(key, n)
     if (n < 2) {
@@ -826,6 +853,12 @@ class Watcher {
       return 1
     }
     if (wasLive) {
+      // ㊛(轮31) 逐房这一发同样会撞见冷启动留下的旧账: 散场发生在应用停摆期间,
+      // 这里翻状态但不发那场"下播"(它在两轮规则之外, 本来是第一轮就宣判的)
+      if (this.baselineStale(a, 'pandalive')) {
+        this.settleStaleOffline(a, now)
+        return 0
+      }
       store.updateAnchor(a.platform, a.userId, this.offPatch(a))
       this.onLiveEnd(a)
     }
@@ -1006,6 +1039,12 @@ class Watcher {
     }
     if (wasLive) {
       // 单轮读数不翻转状态: 列表瞬回离线/改版丢字段都可能, 而这一翻要发通知+停自录
+      // ㊛(轮31) 例外同 Panda 侧: 基线是冷启动留下的旧账, 第一轮就翻状态、只不发那场散场的通知
+      if (this.baselineStale(a, 'soop')) {
+        this.soopOfflineStreak.delete(key)
+        this.settleStaleOffline(a, now)
+        return 0
+      }
       const n = (this.soopOfflineStreak.get(key) || 0) + 1
       this.soopOfflineStreak.set(key, n)
       if (n < 2) {
@@ -1055,6 +1094,12 @@ class Watcher {
           // 单轮读数不翻转状态: 播放页改版/风控插页都可能瞬回"无场次", 而这一翻要发通知+停自录。
           // 与 Panda 侧"列表缺失→轮内 member/bj 复查再判"同规约, 代价是下播提醒晚一轮
           const key = roomKey(a.platform, a.userId)
+          // ㊛(轮31) 陈旧基线例外(见 baselineStale): 冷启动第一轮读到散场 = 翻状态, 不报那场下播
+          if (this.baselineStale(a, 'soop')) {
+            this.soopOfflineStreak.delete(key)
+            this.settleStaleOffline(a, now)
+            return 'other'
+          }
           const n = (this.soopOfflineStreak.get(key) || 0) + 1
           this.soopOfflineStreak.set(key, n)
           if (n < 2) {
@@ -1194,18 +1239,24 @@ class Watcher {
   }
 
   /** 首轮之后的预取补扫(㊓⑦): 只认首轮刚落地的真值, 且跳过手上已有有效源的房。
-   *  泵本身按 gap 逐个节流, 所以这里只负责"该不该排队", 不负责速率 */
+   *  泵本身按 gap 逐个节流, 所以这里只负责"该不该排队", 不负责速率。
+   *  ㊛(轮31) 排队顺序按观众数降序(自录房仍由 enqueuePrewarm 顶到队首): 队列排空要几分钟
+   *  (实测 103 个房 ≈12 分钟, 现场那 30 间就是按库里加的先后排), 表序把"用户最可能点的那一间"
+   *  排到了尾巴上 —— 排在前面的小观众房买到的秒开没人用, 排在后面的大房还没排到就散场。
+   *  这是排序, 不是砍量: 发数一字不变 */
   private prewarmSweep(platform: Platform): void {
     if (!store.getSettings().monitor[platform].prefetchStream) return
     const cached = new Set(sourceFor(platform).cachedSourceIds())
+    const candidates = store
+      .listAnchors()
+      .filter((a) => a.platform === platform && a.isLive && !this.isGone(a) && !cached.has(roomKey(platform, a.userId)))
+      .sort((x, y) => (y.viewerCount || 0) - (x.viewerCount || 0))
     let queued = 0
-    for (const a of store.listAnchors()) {
-      if (a.platform !== platform || !a.isLive || this.isGone(a)) continue
-      if (cached.has(roomKey(platform, a.userId))) continue
+    for (const a of candidates) {
       // ㊙(R29-2): 排队与否由 enqueuePrewarm 定(正等第二轮确认下播的房不买), 这里的计数只报真排上的
       if (this.enqueuePrewarm(platform, a.userId)) queued++
     }
-    if (queued) logger.info('watcher', `${platformName(platform)} 首轮后补预取: ${queued} 个在播房排队`)
+    if (queued) logger.info('watcher', `${platformName(platform)} 首轮后补预取: ${queued} 个在播房排队(按观众数从高到低)`)
   }
 
   private async pumpPrewarm(platform: Platform): Promise<void> {
