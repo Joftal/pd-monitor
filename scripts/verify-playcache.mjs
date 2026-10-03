@@ -82,6 +82,7 @@ const world = {
   soopFresh: [],   // 以 fresh=true 发出的取页(㊒④: 探针那一发必须是新页, 微缓存不许拦它)
   soopCached: [],  // 替身手上"已有有效源"的频道(㊓⑦ 首轮补扫要跳过它们)
   soopPlayArgs: [], // 落到 SOOP 取源的调用参数(㊔: 断言"预取只解最高档 / 进房解满档")
+  soopBno: {},      // ㊘(R28-4) SOOP 替身手上那本"场次号"账: channel -> 记入时刻(hasBroadNo 读它)
   recStarts: [],   // recorder.start 记录
   recStops: [],    // recorder.stop 记录
   recStartThrow: false, // true 时 recorder.start 抛错(T21 自录失败不伤链路)
@@ -241,7 +242,10 @@ const mocks = {
       seedPlay: (channel) => world.soopCalls.push('seedPlay:' + channel),
       cachedSourceIds: () => (world.soopCached || []).map((c) => `soop:${c}`),
       // ㊔ 风控静默台账: 本脚本一律回"没在冷却", 需要演冷却的场景改 world.soopRiskCooling
-      riskCooling: () => !!world.soopRiskCooling
+      riskCooling: () => !!world.soopRiskCooling,
+      // ㊘(R28-4): 预取泵问"这一间手上有没有场次号"再决定要不要买整页。真源码里这本账由列表整表(soop.ts:718)
+      // 与任何一次真读到的页面(soop.ts:770)共同维护, 本脚本的 SOOP 是替身 ⇒ 账目由场景自己摆(world.soopBno)
+      hasBroadNo: (channel) => Boolean(world.soopBno[channel])
     }
   },
   './recorder': {
@@ -329,6 +333,9 @@ async function reset() {
   watcher.soopProbeCursor = 0
   // ㊖ 失明连败账本同属这一类: 上一场"整表不可用"留下的轮数必须当场作废(留痕的那句"连续 N 轮"只读本会话)
   watcher.soopBlindStreak = 0
+  // ㊘(R28-3) Panda 那一侧同一本账(降级轮留痕说"连续 N 轮"时读的就是它) + 本轮逐房复查的计数
+  watcher.pandaBlindStreak = 0
+  watcher.pandaUrgentCnt = 0
   // ㊖ 间隙泵的续扫游标: 上面那句 idleQueue=[] 是绕过 setIdleQueue 的硬清, 游标得跟着归零
   watcher.idleCursor = 0
   watcher.idleDrained = 0
@@ -354,6 +361,7 @@ async function reset() {
   world.soopMeta = {}; world.soopThrow = {}; world.soopCalls.length = 0; world.soopFresh.length = 0
   world.soopCached = [] // ㊓⑦ 替身那份"已有源"清单同样一场一份
   world.soopPlayArgs.length = 0
+  world.soopBno = {} // ㊘ 替身那本场次号账同样一场一份
   world.liThrow = false; world.liveLoginInfo = true // ㊓⑤ 探针答案复位
   world.soopFavorites = null // ㊒ 默认"列表整条不接待": 想要预言机那场的场景自己摆行; world.soopFresh.length = 0
   // ㊑ 预言机场景隔离: 默认 bm=null(端点不接待) + 无会话罐(匿名) → 每一场都从"走全站榜那条链"起步,
@@ -551,6 +559,9 @@ console.log('\n■ T15 熔断闭环(承接 T9): 冷却压制 → 过期恢复 �
     world.bjCalls.length === bjN0 && world.liveCalls.length === liveN0 && world.bmCalls.length === bmN0,
     `bj=${world.bjCalls.length}/${bjN0} live=${world.liveCalls.length}/${liveN0} bm=${world.bmCalls.length}/${bmN0}`)
   watcher.cooldownUntil = Date.now() - 1000 // 伪造冷却过期
+  // ㊘(R28-3) 风控账也要跟着到期: T9 那一发 403 把 api.riskUntil 点到了 +5 分钟, 而恢复轮现在认这本账
+  // (冷却期只发预言机那一发, 逐房复查与间隙泵收手) —— 这里要断的是"两本账都过了"之后的补扫, 不是"只过了一本"
+  api.riskUntil = 0
   world.bj403 = {}                           // 撤掉风控源
   await round()                              // 恢复轮: 成功 → 熔断复位 + idleQueue 新快照
   check('T15-3 恢复后熔断复位(errorStreak 清零)', watcher.status.circuitOpen === false && watcher.errorStreak === 0)
@@ -1811,6 +1822,107 @@ db.anchors = [mkAnchor('s43', { platform: 'soop', isLive: false })] // 只有 SO
     world.bmCalls.length === 0 && world.liveCalls.length === 0 && world.liCalls.length === 0)
 }
 
+// ============ T44 ㊘(R28-3) Panda 风控冷却期的扇出面: 只发那一发预言机, 其余收手且出声 ============
+console.log('\n■ T44-A 风控冷却中且列表读不到: 一轮恰好一发, 全站榜/逐房复查一条不发')
+await reset()
+db.settings.monitor.pandalive.requestGapMs = 0
+login([bmOff('r1')])
+world.bmResultFalse = true // 这一站在拦着: bookmark 那一发回 result:false ⇒ fetchBookmarks 收敛为 null
+db.anchors = [mkAnchor('r1', { isLive: true }), mkAnchor('r2', { isLive: true })] // 两间都"在播而列表覆盖不到" = 旧写法的 urgent 源头
+{
+  api.riskUntil = Date.now() + 60_000
+  const log0 = world.logs.length
+  await roundOne('pandalive')
+  await waitUntil(() => !watcher.idlePumping, 3000)
+  check('T44-A1 冷却轮恰好一发(站内关注列表), 全站榜 0 页', world.bmCalls.length === 1 && world.liveCalls.length === 0, `bm=${world.bmCalls.length} live=${world.liveCalls.length}`)
+  check('T44-A2 逐房 member/bj 一发不发(旧写法这一轮改打 5 页全站榜 + 逐房复查 + 间隙泵约 100 发快照 = 现场量级 ≈110 发/轮)', world.bjCalls.length === 0, `bj=${world.bjCalls.length}`)
+  check('T44-A3 "被拦下"这件事从此有留痕, 且带上连续失明的轮数', world.logs.slice(log0).some((l) => /风控冷却中: 本轮只发站内关注那一发[\s\S]*连续 1 轮列表不可用/.test(l)))
+  check('T44-A4 冷却轮不武装熔断、不刷退避(它只是收手, 不是失败)', watcher.errorStreak === 0 && watcher.cooldownUntil === 0 && watcher.status.byPlatform.pandalive.circuitOpen === false)
+  const log1 = world.logs.length
+  await roundOne('pandalive')
+  check('T44-A5 第二轮照旧一发且轮数累加(5 分钟窗口内每一轮都只问这一发, 不是只收手一轮)',
+    world.bmCalls.length === 2 && world.liveCalls.length === 0 && world.logs.slice(log1).some((l) => /连续 2 轮列表不可用/.test(l)))
+  api.riskUntil = 0 // 撤账: 冷却窗口过了
+  world.bjMedia = { r1: liveItem({ userId: 'r1' }), r2: liveItem({ userId: 'r2' }) }
+  const log2 = world.logs.length
+  await roundOne('pandalive')
+  await waitUntil(() => !watcher.idlePumping, 3000)
+  check('T44-A6 撤账当轮立刻回落全站榜那条链(5 页 + 两间逐房复查), 时效不因收手而变慢',
+    world.liveCalls.length > 0 && world.bjCalls.length >= 2, `live=${world.liveCalls.length} bj=${world.bjCalls.length}`)
+  check('T44-A7 降级轮的扇出面有数可核: 连续轮数 + 逐房发数 + 间隙泵快照量都在那一格里',
+    world.logs.slice(log2).some((l) => /降级轮留痕: 站内关注列表连续 3 轮不可用, 本轮逐房复查 2 发/.test(l)),
+    world.logs.slice(log2).filter((l) => /降级轮/.test(l)).join(' | '))
+  world.bmResultFalse = false // 列表读通了
+  const log3 = world.logs.length
+  await roundOne('pandalive')
+  check('T44-A8 读通当轮失明账本归零(那句"连续 N 轮"必须是本会话的真实长度)', watcher.pandaBlindStreak === 0)
+  check('T44-A9 常态轮不出降级留痕, 也不报风控冷却: 两句都只在各自的形状里出声',
+    !world.logs.slice(log3).some((l) => /降级轮留痕|风控冷却中/.test(l)))
+}
+
+console.log('\n■ T44-B 间隙泵同看这一本账, 但只停脚不清队')
+await reset()
+db.settings.monitor.pandalive.requestGapMs = 0
+db.anchors = [mkAnchor('i1', { isLive: false }), mkAnchor('i2', { isLive: false })]
+{
+  watcher.idleQueue = db.anchors.slice()
+  api.riskUntil = Date.now() + 60_000
+  await watcher.pumpIdle()
+  check('T44-B1 冷却期间隙泵零请求(轮次收手而它照发 = 只收了一半)', world.bjCalls.length === 0, `实发=${world.bjCalls.length}`)
+  check('T44-B2 快照原样留着: 等的只是 5 分钟, 不是整轮重排(与熔断那条清队不同)', watcher.idleQueue.length === 2)
+  api.riskUntil = 0
+  await watcher.pumpIdle()
+  check('T44-B3 撤账后同一份快照照扫到(收手不是永久哑火)', world.bjCalls.length === 2 && watcher.idleQueue.length === 0, `实发=${world.bjCalls.length}`)
+}
+
+// ============ T45 ㊘(R28-4) SOOP 连续失明第 3 轮起: 预取不为"手上没有场次号"的房买整页 ============
+console.log('\n■ T45-A 失明第 3 轮: 有号的房照旧秒开, 没号的房排回队尾不作废')
+await reset()
+db.settings.monitor.soop.requestGapMs = 0
+db.anchors = [mkAnchor('b1', { platform: 'soop', isLive: true }), mkAnchor('b2', { platform: 'soop', isLive: true })]
+{
+  watcher.soopBlindStreak = 3
+  world.soopBno = { b2: Date.now() } // b2 的号在账上(列表整表或某一次真读到的页面写过)
+  watcher.prewarmQueue.soop = ['b1', 'b2']
+  await watcher.pumpPrewarm('soop')
+  const got = world.soopCalls.filter((c) => c.startsWith('getPlayCached:'))
+  check('T45-A1 有号的 b2 照常预取, 没号的 b1 一发没买(它要的那一发是整页 HTML, 而这正与检测面同一页)',
+    got.join(',') === 'getPlayCached:b2', got.join(','))
+  check('T45-A2 跳过=排回队尾而不是作废: 探针读到号以后它照拿秒开, 只是晚一场', watcher.prewarmQueue.soop.join(',') === 'b1', watcher.prewarmQueue.soop.join(','))
+  check('T45-A3 泵自己放下标志(不留下跨场死锁)', watcher.prewarmPumping.soop === false)
+
+  await reset()
+  db.settings.monitor.soop.requestGapMs = 0
+  db.anchors = [mkAnchor('b1', { platform: 'soop', isLive: true }), mkAnchor('b2', { platform: 'soop', isLive: true })]
+  watcher.soopBlindStreak = 2 // 未到门槛: 一轮抖动不该把秒开关掉一整场
+  watcher.prewarmQueue.soop = ['b1', 'b2']
+  await watcher.pumpPrewarm('soop')
+  check('T45-A4 失明未到 3 轮时两间都预取(闸只看连续轮数这一格)',
+    world.soopCalls.filter((c) => c.startsWith('getPlayCached:')).length === 2, `实发=${world.soopCalls.filter((c) => c.startsWith('getPlayCached:')).length}`)
+}
+
+console.log('\n■ T45-B 检测面一发不少 + 整条队列都没号时出泵')
+await reset()
+db.settings.monitor.soop.requestGapMs = 0
+world.soopFavorites = null // 列表整条不接待 = 失明那一形状
+db.anchors = [mkAnchor('c1', { platform: 'soop', isLive: false }), mkAnchor('c2', { platform: 'soop', isLive: false })]
+for (const a of db.anchors) world.soopMeta[a.userId] = { living: false, explicitOffline: true }
+{
+  watcher.soopBlindStreak = 3
+  const sent0 = soopSent().length
+  await roundOne('soop')
+  check('T45-B1 逐房整页探针仍两间各一发: 这一面就是检测路径, 压它等于拿开播时效换流量(㊖ 的判据, 本轮一字不动)',
+    soopSent().length - sent0 === 2, `实发=${soopSent().length - sent0}`)
+  await reset()
+  db.settings.monitor.soop.requestGapMs = 0
+  db.anchors = [mkAnchor('c1', { platform: 'soop', isLive: true })]
+  watcher.soopBlindStreak = 3
+  watcher.prewarmQueue.soop = ['c1'] // 整条队列都是"没号"这一形状
+  const done = await Promise.race([watcher.pumpPrewarm('soop').then(() => true), sleep(4000).then(() => false)])
+  check('T45-B2 队列里没有一件可买时出泵而不是原地空转(shift/push 会把这一趟变成死循环)', done === true)
+  check('T45-B3 仍然不作废: 那一间还在队里等下一趟', watcher.prewarmQueue.soop.join(',') === 'c1')
+}
+
 console.log('解读: T1/T2/T3 PASS ⇒ 「大厅轮询刷新会清源缓存」不成立(真实源码+可计数请求实证);')
 console.log('      T4 PASS ⇒ 列表内开播翻转的作废链路正常工作(对照);')
 console.log('      T17 PASS ⇒ 粉丝房 fanLive 专用通知+自录正常; T18 PASS ⇒ 下播 toast 单发, 重复判离线不重复;')
@@ -1862,4 +1974,9 @@ console.log('      T41 PASS ⇒ ㊗(C4) 手工添加的离线房当场进间隙�
 console.log('      T42 PASS ⇒ ㊗(C8) 自录房插到预取队首(队列排空要几分钟, 录制不该自己等一整轮泵); 请求数一字不减, 去重与密码房守卫不变.')
 console.log('      T43 PASS ⇒ ㊗(C2) 零关注的 Panda 一轮整轮零请求(旧写法照样翻满全站榜页, 一个读数都不为谁而读), 且退避账一并作废 ——'
   + ' 日后加回关注不会被上一场的旧冷却闷住; 早退在预言机上游, 登录态也不为空表发那一发.')
+console.log('      T44 PASS ⇒ ㊘(R28-3) 风控账管到轮次扇出面: 冷却期读不到整表时只发站内关注那一发, 全站榜/逐房复查/间隙泵一起收手'
+  + ' (旧写法把"被拦下"当换更贵问法的扳机 ⇒ 现场量级 ≈110 发/轮、轮距 120s ≈8 万发/天, 而那段请求一发也换不回读数);'
+  + ' 撤账当轮立刻回落那条链(时效没被换掉), 间隙泵收手不清队, 且这两面在日志里第一次有了数(连续轮数+逐房发数+快照量).')
+console.log('      T45 PASS ⇒ ㊘(R28-4) SOOP 连续失明第 3 轮起, 预取不再为"手上没有场次号"的房买那一整页(有号的照旧秒开);'
+  + ' 跳过=排回队尾不作废, 整条队列都是这一形状时出泵不空转; 检测面那两间各一发一字不少 —— 那是开播发现路径, 压它就是拿时效换流量(㊖ 的判据).')
 process.exit(failures === 0 ? 0 : 1)

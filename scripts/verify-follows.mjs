@@ -82,6 +82,8 @@ const world = {
   /** api.pandalive.co.kr/v1/live/bookmark 的逐页应答数组(按 offset/200 取); bmStatus 覆盖 HTTP 码 */
   bmPages: [],
   bmStatus: 200,
+  /** ㊘(R28-1) api.pandalive.co.kr/v1/member/bj 的应答体(null=服务端不给这一格 → 走 Node 兜底那条路) */
+  bjBody: null,
   /** 观测点 */
   fetches: [],
   cookieWrites: [],
@@ -124,6 +126,11 @@ const fakeSession = {
       const page = world.bmPages[offset / 200]
       const text = page === undefined ? '{"result":false,"message":"no page seeded"}' : typeof page === 'string' ? page : JSON.stringify(page)
       return { status: world.bmStatus, url, text: async () => text, headers: { getSetCookie: () => [] } }
+    }
+    // ㊘(R28-1) 逐房 member/bj: 手工添加那一发与降级复查都走这里, 应答体由场景自己摆
+    if (String(url).includes('api.pandalive.co.kr/v1/member/bj')) {
+      const text = JSON.stringify(world.bjBody ?? { result: false, message: 'no bj seeded' })
+      return { status: 200, url, text: async () => text, headers: { getSetCookie: () => [] } }
     }
     // 播放页探针: soop.ts 的 fetchPageMeta 走同一 req 通道
     if (world.pageFail) throw new Error('ERR_FAILED(sim)')
@@ -211,11 +218,14 @@ const mocks = {
       hasSession: () => false,
       cookieValid: false,
       fetchLivePage: async () => ({ list: [], loginInfo: null }),
+      // ㊘(R28-3) 替身必须同契约: 间隙泵/轮次现在都读这一面钟, 缺格会让 pumpIdle 一碰就 TypeError
+      // (本套一律回"没在冷却", 需要演冷却的场景自己改这一格 —— 与 ㊓ 那一课同一个形状)
+      riskCooling: () => false,
       // Panda 关注列表走真源码解析(realPandaApi), 替身只做转发, 让 IPC 处理器与客户端在同一条链上
       fetchBookmarks: async () => realPandaApi.fetchBookmarks(),
-      fetchBj: async () => {
-        throw new Error('本脚本不验单房添加')
-      }
+      // ㊘(R28-1) 手工添加那一条链也要能跑真客户端: 加房的 IPC 处理器与逐房那一发必须在同一条链上,
+      // 否则"同一房 1.2 秒内两发 member/bj"这一种形状在本套里根本测不出来(替身吞掉参数照样绿 —— ㊖ 那一课)
+      fetchBj: async (userId) => realPandaApi.fetchBj(userId)
     },
     RiskError,
     BjNotFoundError,
@@ -380,6 +390,7 @@ function reset() {
   world.assign = 'https://livecast.sooplive.com/12345678-common-hd-1000.ts?limit=0&sid=x'
   world.bmPages = []
   world.bmStatus = 200
+  world.bjBody = null // ㊘(R28-1) member/bj 那一格的应答同样一场一份
   world.fetches.length = 0
   world.cookieWrites.length = 0
   world.jar.length = 0
@@ -395,6 +406,8 @@ function reset() {
   watcher.soopFailStreak = 0
   watcher.soopOfflineStreak.clear()
   soopApi.invalidateCookieCache()
+  // ㊘(R28-5) 托管账密那两格也是跨场景状态: 留着上一场那双账号, 下一场"没托管所以记门槛账"那一格就测不出来
+  mocks['src/main/services/secrets.ts'].secrets.map.clear()
   // ㊕ 兜底重发的出声窗口也是跨场景状态: 不清会让下一场的"第一句"永远出不来
   soopApi.fallbackCnt = 0
   soopApi.fallbackLogUntil = 0
@@ -1268,6 +1281,127 @@ console.log('L2 只有真强制取到源才落账: 失败、非强制、别的�
   assert(forces().endsWith(',true') && world.playCalls.at(-1).force === true, 'L2e 对面平台的同号不共享这一格账(roomKey 复合键): 裸 userId 建表会让 SOOP 的节流把 Panda 那一发也闸掉', forces())
   await playH({}, 'soop', 'thr004', '', true)
   assert(world.playCalls.at(-1).force === true, 'L2f 同平台的别的房同理(闸是逐房的, 不是全站一刀)', forces())
+}
+
+// ============ M: ㊘ 轮28 的三笔(加房那一发的真值 / 复查那一页 / 门槛回执的账) ============
+// 这一节的三条都落在"同一件事被打了两遍"上, 而两遍之间隔着的往往是几秒: 只有让 IPC 处理器与真客户端、
+// 真取流链在同一条链上才数得出来(替身把第二遍吞掉, 断言就会绿得毫无意义)。
+const bjHits = () => world.fetches.filter((f) => String(f.url).includes('/v1/member/bj')).length
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms))
+/** 等一个异步副作用落地(本套原来全是同步驱动, M 段要数的是"泵在添加链返回之后发出的那一发") */
+const until = async (fn, ms = 4000) => {
+  for (let i = 0; i < ms / 50; i++) {
+    if (fn()) return true
+    await sleepMs(50)
+  }
+  return fn()
+}
+
+console.log('M1 ㊘(R28-1) 手工添加 Panda 房: member/bj 买回来的在播真值当场用掉')
+{
+  const addH = world.ipc[CH.anchorsAdd]
+  assert(typeof addH === 'function', 'M1a anchorsAdd 已注册')
+  reset()
+  world.bjBody = { result: true, bjInfo: { id: 'mayonz', nick: '점핑', img: '' }, media: BM_LIVE.media }
+  const idle0 = watcher.idleQueue.length
+  const card = await addH({}, 'https://www.pandalive.co.kr/play/mayonz', 'pandalive')
+  assert(bjHits() === 1, 'M1b 添加这一条链上 member/bj 恰好一发(旧写法这一发只取昵称/头像, media 整包丢掉 ⇒ 卡片按离线落库, 间隙泵 1.2 秒后为同一件事再发一次)', `实发=${bjHits()}`)
+  assert(card.isLive === true && card.title === BM_LIVE.media.title && card.viewerCount === 28 && card.likes === 88 && card.fans === 9 && card.startTime === BM_LIVE.media.startTime,
+    'M1c 卡片按第一发买回的真值落库(在播/标题/观众/点赞/粉丝/开播时刻), 不等第二轮', JSON.stringify({ l: card.isLive, t: card.title, v: card.viewerCount }))
+  assert(card.tags && card.tags.isAdult === true && card.tags.isPw === false && card.tags.type === 'free' && card.tags.liveType === 'live', 'M1d 房态标签同样落地(19+ 与密码房旗不必等大也不会被写成 false)')
+  assert(card.lastSeenAt > 0 && card.lastLiveAt === BM_LIVE.media.startTime, 'M1e 已知道在播的房不留 lastSeenAt=0(离线口径不该套在它身上)')
+  assert(watcher.idleQueue.length === idle0, 'M1f 在播房没有进间隙泵: trackIdle 那条守卫拦得住, 拦不住的是旧写法把卡片写成了离线')
+  watcher.running = true
+  await watcher.pumpIdle() // 真点一次泵: M1b 那一发数要有这一句才不是空断言 —— 旧写法在这一步发出第二发
+  assert(bjHits() === 1, 'M1f2 间隙泵跑一趟也仍是 0 第二发(旧写法: 卡片离线落库 → 排进泵 → 1.2 秒后同一 userId 第二次打到 /v1/member/bj)', `实发=${bjHits()}`)
+  reset()
+  world.bjBody = { result: true, bjInfo: { id: 'off1', nick: '오프', img: '' }, media: null }
+  watcher.idleQueue.length = 0
+  const off = await addH({}, 'off1', 'pandalive')
+  assert(off.isLive === false && off.tags === null, 'M1g media 真没有 = 仍按离线落库(新读法不替平台编造在播)')
+  // trackIdle 那句 void pumpIdle() 是立刻开扫的, 所以"补扫那一发"要等它落地才数得到(不在添加链的同步段里)
+  const pumped = await until(() => bjHits() >= 2, 5000)
+  assert(pumped, 'M1h 真无数据才走 ㊗(C4) 那条补洞: 添加那一发之外, 间隙泵照旧为"它到底在不在播"补发一发 —— 2 发 = 已知答案的那一问没重复, 未知的那一问一发不少', `bj=${bjHits()} 队列=${watcher.idleQueue.length}`)
+  assert(watcher.idleQueue.length === 0, 'M1h2 补扫是队列被消费掉(不是添加链自己叠发)', `队列=${watcher.idleQueue.length}`)
+  reset()
+  watcher.discovery = [{ userId: 'mayonz', nick: '大厅昵称', userIdx: 1, userImg: '', title: '大厅标题', isAdult: false, isPw: false, type: 'free', liveType: 'live', startTime: '', viewers: 1, likes: 0, fans: 0, thumbUrl: '' }]
+  const fromDisc = await addH({}, 'mayonz', 'pandalive')
+  assert(fromDisc.isLive === true && bjHits() === 0, 'M1i 大厅快照命中仍零 bj: 那条既有省发路径没被新读法顶掉(两条路各归各, 不叠发)')
+  assert(fromDisc.nick === '大厅昵称' && fromDisc.title === '大厅标题', 'M1j 大厅优先于 bj 的取值顺序不变(近一分钟的全站读数比一次单房问答更该采信)')
+}
+
+console.log('M2 ㊘(R28-2) 取流复查吃微缓存: 十秒内刚读过的那一页不再重买')
+{
+  reset()
+  await soopApi.fetchPageMeta('aaa111', true, true, '探针') // 探针要新读数: 这一页是真买回来的
+  assert(pageHits('aaa111') === 1, 'M2a 先让探针付一页(它在微缓存里, 且号也入了账)', `页=${pageHits('aaa111')}`)
+  soopApi.bnoCache.set('aaa111', { bno: '12345678', at: Date.now() })
+  world.apiChannel = { RESULT: -3 }
+  world.fetches.length = 0
+  const r = await soopApi.fetchPlay('aaa111')
+  assert(r.ok === false && String(r.error).startsWith('soop.playResult'), 'M2b 号对得上而链失败 → 原样回报那一句(与 F4 同判据)', r.error)
+  assert(pageHits('aaa111') === 0, 'M2c 复查复用探针那一页: 0 新页(旧写法 fresh=true 把微缓存与在途合并一并绕过, 几秒前刚买过的那一页在这里原样重买)', `页=${pageHits('aaa111')}`)
+  assert(apiHits('live') === 1, 'M2d 省掉的是页不是判据: 主信息仍一发', `api=${apiHits('live')}`)
+  const hit = soopApi.pageCache.get('aaa111')
+  if (hit) hit.at = Date.now() - 11_000
+  soopApi.bnoCache.set('aaa111', { bno: '12345678', at: Date.now() })
+  world.fetches.length = 0
+  await soopApi.fetchPlay('aaa111')
+  assert(pageHits('aaa111') === 1, 'M2e 过了十秒窗口照样真读一页: 复查要的"这一页怎么说"不由旧页供成永久(F4 那条既有语义没被顶掉)')
+}
+
+console.log('M3 ㊘(R28-5) SOOP 门槛回执账: 只记两类不会自己好的回答')
+{
+  reset()
+  world.apiChannel = { RESULT: -6 } // 会话缺失/过期
+  const a = await soopApi.getPlayCached('gate1')
+  assert(a.ok === false && a.needLogin === true, 'M3a 第一次问照实回报"要登录"(账不改写答案, 只改写第二次要不要去问)')
+  const n0 = world.fetches.length
+  const b = await soopApi.getPlayCached('gate1')
+  assert(b.needLogin === true && world.fetches.length === n0, 'M3b 15 分钟内不再为同一间重打整链(旧写法只缓存 r.ok ⇒ 被拒那一句从没落进任何账, 每点一次重打 9~10 发)', `新增=${world.fetches.length - n0}`)
+  assert(b !== a, 'M3c 短路还给的是副本: 调用方就地改这一个对象不许污染账里那一份(否则"要密码"能被改成"要登录")')
+  world.fetches.length = 0
+  const c = await soopApi.getPlayCached('gate1', 'pw999')
+  assert(world.fetches.length > 0 && c.needLogin === true, 'M3d 带密码那一发不看账: 密码本身就是新信息')
+  world.fetches.length = 0
+  const d = await soopApi.getPlayCached('gate1', '', true)
+  assert(world.fetches.length > 0 && d.needLogin === true, 'M3e 手动强刷绕账: 用户明确要一次新答案时不该拿旧账挡(冷却只归后台的泵消费 —— D74h 同一条纪律)')
+  soopApi.invalidatePlay('gate1')
+  world.fetches.length = 0
+  await soopApi.getPlayCached('gate1')
+  assert(world.fetches.length > 0, 'M3f 事件解除: 作废(下播收尸/换号/重开播)之后重新问一次平台, 门槛账只许活到下一个事件')
+  // 要密码的那一类: 预取那一路永远没有密码 ⇒ 记账
+  reset()
+  world.apiChannel = { BPWD: 'Y' }
+  const p1 = await soopApi.getPlayCached('gate2')
+  assert(p1.ok === false && p1.needPassword === true, 'M3g 密码房 + 没密码 → 报"要密码"')
+  const n1 = world.fetches.length
+  const p2 = await soopApi.getPlayCached('gate2')
+  assert(p2.needPassword === true && world.fetches.length === n1, 'M3h 同一间第二次不再重打整链(这一类的代价实测 9~10 发, 而预取泵永远不给密码 ⇒ 每次预取都白付)', `新增=${world.fetches.length - n1}`)
+  // 密码不对的那一类不记账: 下一次可能改对
+  reset()
+  world.apiChannel = { BPWD: 'Y', RESULT: 0 }
+  const w1 = await soopApi.getPlayCached('gate3', 'wrong')
+  assert(w1.ok === false && w1.needPassword === true && String(w1.error).startsWith('soop.pwWrong'), 'M3i 交了密码而平台仍不给源 = 密码不对, 报"可重填"那句', w1.error)
+  const n2 = world.fetches.length
+  const w2 = await soopApi.getPlayCached('gate3', 'wrong')
+  assert(world.fetches.length > n2, 'M3j 密码不对不记账: 再问一次是"用户改了密码"这条路的必经一步, 把它锁 15 分钟就是把纠错锁死', `新增=${world.fetches.length - n2}`)
+  // 带密码那一发本来就不看账(M3d), 所以"记没记账"只能由没有密码的那条路读出 —— 预取泵正是这一形状
+  const n2b = world.fetches.length
+  const w3 = await soopApi.getPlayCached('gate3')
+  assert(world.fetches.length > n2b, 'M3j2 密码不对后无密码那一问照样打平台: 账本里若混进 pwWrong, 预取泵会拿着"密码不对"去问一间它从没交过密码的房', `新增=${world.fetches.length - n2b}`)
+  assert(String(w3.error).startsWith('soop.pwRequired'), 'M3j3 报的是"这房要密码"而不是"密码不对": 这一路没交过密码, 无从知道对不对', w3.error)
+  // 托管了账密时"要登录"不是终局: 后台 60 秒就能自愈 ⇒ 不记账
+  reset()
+  mocks['src/main/services/secrets.ts'].secrets.map.set('soop.user', 'me')
+  mocks['src/main/services/secrets.ts'].secrets.map.set('soop.pass', 'pw')
+  world.apiChannel = { RESULT: -6 }
+  const q1 = await soopApi.getPlayCached('gate4')
+  assert(q1.ok === false && q1.needLogin === true, 'M3k 托管账密在场时照样报"要登录"(重登没成功就是没成功, 账不许把失败刷成成功)')
+  const n3 = world.fetches.length
+  const q2 = await soopApi.getPlayCached('gate4')
+  assert(world.fetches.length > n3, 'M3l 有托管账密就不记门槛账: 会话过期这一类能在后台自愈, 记账等于把它锁死在墙上(60 秒重登节流才是它该有的节奏)', `新增=${world.fetches.length - n3}`)
+  assert(soopApi.gates.size === 0, 'M3m 这一场账本里一格都没有(四类判定各归各: 只有"要登录且没托管"与"要密码且没密码"进账)', `size=${soopApi.gates.size}`)
 }
 
 // ---------- 汇总 ----------

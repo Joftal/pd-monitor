@@ -1630,7 +1630,7 @@ checkWithAllowlist(
     const j = bodyEnd(wt, i)
     return wt.slice(i, j < 0 ? undefined : j)
   }
-  assert(/const viaBookmark = await this\.roundByBookmark\(anchors\)/.test(wt) && /viaBookmark === null \? await this\.roundByList\(anchors\) : viaBookmark/.test(wt), 'D51a list 模式先问站内关注列表, 只有"读不到(null)"才回落全站榜 —— 绝不把没读到当成就没人播')
+  assert(/const riskHold = api\.riskCooling\(\)\s*\r?\n\s*const viaBookmark = await this\.roundByBookmark\(anchors, riskHold\)/.test(wt) && /if \(viaBookmark === null && riskHold\) \{[\s\S]{0,200}return\s*\r?\n\s*\}[\s\S]{0,60}if \(viaBookmark === null\) \{[\s\S]{0,200}this\.pandaLiveFound = await this\.roundByList\(anchors\)/.test(wt), 'D51a list 模式先问站内关注列表, 只有"读不到(null)"才回落全站榜 —— 绝不把没读到当成就没人播。㊘(R28-3) 回落那一支多一道风控闸: 这一站正拦着我(冷却账未到)时"读不到"不是"换个更贵的问法"的理由, 旧写法把它当扳机 ⇒ 同一轮改打 5 页全站榜 + 逐房复查 + 间隙泵约 100 发 = 现场量级 ≈110 发/轮')
   const bm = seg('private async roundByBookmark(')
   assert(bm.length > 0 && !/fetchLivePage|roundByList/.test(bm), 'D51b 预言机自己一页全站榜都不发(它只覆盖"我关注的人", 请求面与全站热度无关)', bm.slice(0, 60))
   assert(/if \(!api\.hasSession\(\)\) \{[\s\S]{0,120}return null/.test(bm), 'D51c 匿名(罐里没有会话)不发这一发(实测必回 result:false, 每轮白掷)')
@@ -1746,7 +1746,7 @@ checkWithAllowlist(
   assert(/Date\.now\(\) - hit\.at >= SoopApi\.BNO_TTL/.test(fb) && /this\.bnoCache\.delete\(channel\)/.test(fb), 'D56c 号过期=当没读到过并删掉(不供成永久, 也不带着旧号白撞整链)')
   assert(/const meta = await this\.fetchPageMeta\(channel\)\s*return this\.runPlayChain\(channel, password, meta(, fullVariants)?\)/.test(fp), 'D56d 手里没号才读整页: 既有那条链路一字不动地留着(降级路径没被换掉, 只是不再是唯一路径; ㊔ 只多带一个档级参数)')
   assert(/if \(r\.ok \|\| r\.needPassword \|\| r\.needLogin\) return r/.test(fp), 'D56e 成功/要密码/要登录三类答案与场次号无关 → 原样回报, 不为它们多读一页')
-  assert(/this\.bnoCache\.delete\(channel\)[\s\S]{0,80}this\.fetchPageMeta\(channel, false, true, '取流复查'\)/.test(fp), 'D56f 只有真失败才回读整页定性, 且那一发必须 fresh(拿缓存页给旧号定性=自己骗自己)')
+  assert(/this\.bnoCache\.delete\(channel\)[\s\S]{0,250}this\.fetchPageMeta\(channel, false, false, '取流复查'\)/.test(fp), 'D56f 只有真失败才回读整页定性。㊘(R28-2) 改判: 那一发不再是 fresh —— 它问的是"这一页怎么说", 而十秒内刚读过的那一页(pageCache 由探针/上一条链写入)就是最新读数, 旧写法把微缓存与在途合并一并绕过 ⇒ 同一间房几秒内被买两页整页 HTML')
   assert(/if \(!m\.living \|\| m\.broadNo !== known\) return this\.runPlayChain\(channel, password, m(, fullVariants)?\)\s*return r/.test(fp), 'D56g 页面说没在播或给了新号才重走一次, 号还对得上就原样回报 —— 复用的代价上界恒为 1 页 + 1 次整链, 不会滚成三次五步(㊔ 重走时档级沿用 caller 要的那一份)')
   assert(/soopApi\.fetchPageMeta\(a\.userId, true, true, '探针'\)/.test(wt), 'D56h 轮询探针以 fresh 取页: 它就是"这房现在怎么样"的裁判, 而最短一档 5 秒比页面 TTL 还小, 缓存会把两轮读成同一份页')
   assert(/if \(!fresh\) \{[\s\S]{0,120}const hit = this\.pageCache\.get\(channel\)/.test(fm) && /if \(!fresh\) this\.pageInflight\.set\(channel, p\)/.test(fm), 'D56i fresh 同时绕过微缓存与在飞合并: 探针既不该拿旧页, 也不该把自己并进别人那一发的结果里')
@@ -2194,7 +2194,7 @@ checkWithAllowlist(
   assert((so.match(/this\.noteFallback\(/g) || []).length === 1 && (pd.match(/this\.noteFallback\(/g) || []).length === 2, 'D70b 三个"同一个请求打了第二遍"的现场全部留痕(SOOP req 一处 + Panda json 与 fetchText 两处), 一个都不许多也不许少: HTTP 状态码错误按 M3 绝不重发, 给它们记账会把纪律读歪', `soop=${(so.match(/this\.noteFallback\(/g) || []).length} panda=${(pd.match(/this\.noteFallback\(/g) || []).length}`)
   assert(/if \(flying\) \{\s*this\.noteMerge\(kind\)/.test(hp) && /上游在途合流/.test(hp), 'D70c 代理合流要出声: 省下的请求数是这一项唯一的成果, 没有读数就没人知道它有没有在工作(同样 60 秒一句、按清单/分片分开计)')
   assert(/async fetchPageMeta\(channel: string, quiet = false, fresh = false, why = '取流'\)/.test(so) && /页面元信息\(来源=\$\{why\}\)/.test(so), 'D70d 页面读那一发的日志带来源标签: 探针/取流/添加/录制取名四种形状混在同一句里, 审计就只能靠猜(默认值 = 取流, 漏标不会新增读数面)')
-  assert(/soopApi\.fetchPageMeta\(a\.userId, true, true, '探针'\)/.test(wt) && /soopApi\.fetchPageMeta\(userId, false, false, '添加'\)/.test(ipcf) && /soopApi\.fetchPageMeta\(userId, true, false, '录制取名'\)/.test(ipcf) && /this\.fetchPageMeta\(channel, false, true, '取流复查'\)/.test(so), 'D70e 四个调用点各自带标签: 一处漏标就少一种可分派的形状, 而"谁在读这一页"正是请求面审计要回答的第一问')
+  assert(/soopApi\.fetchPageMeta\(a\.userId, true, true, '探针'\)/.test(wt) && /soopApi\.fetchPageMeta\(userId, false, false, '添加'\)/.test(ipcf) && /soopApi\.fetchPageMeta\(userId, true, false, '录制取名'\)/.test(ipcf) && /this\.fetchPageMeta\(channel, false, false, '取流复查'\)/.test(so), 'D70e 四个调用点各自带标签: 一处漏标就少一种可分派的形状, 而"谁在读这一页"正是请求面审计要回答的第一问。㊘(R28-2) 复查那一格从 fresh 改为吃微缓存 —— 标签不变, 变的只有"它要不要一个新读数"')
 }
 
 // ============================================================================
@@ -2283,7 +2283,7 @@ checkWithAllowlist(
   assert((pd.match(/this\.noteRisk\(/g) || []).length === 5, 'D74b 五种风控形状全部记账(403/429、≥500、接口回 HTML、不回 JSON、整表 result=false): 漏一种就等于那条路上泵照旧失明 —— 旧写法正是只认 403 抛错、不认账', `实数=${(pd.match(/this\.noteRisk\(/g) || []).length}`)
   assert((pd.match(/this\.noteRisk\([^)]*\)\s*\n\s*throw new RiskError/g) || []).length === 5, 'D74c 记账不许代替判决: 五处都必须在 noteRisk 之后照旧抛出 RiskError(熔断/轮次失败语义靠它, 只记不抛会把风控读成"没事")', `成对数=${(pd.match(/this\.noteRisk\([^)]*\)\s*\n\s*throw new RiskError/g) || []).length}`)
   assert(!/noteRisk/.test(segP('async fetchBj(')), 'D74d 业务错误不记账: bj 的 result=false 是"这号不存在/无权限"那一类, 不是平台压力信号 —— 把它记进冷却会让一个查无此人的房闷掉全部后台泵 5 分钟')
-  assert((wt.match(/api\.riskCooling\(\)/g) || []).length === 1, 'D74e watcher 里 Panda 这面钟恰好一处消费(预取泵): 间隙泵自己有 noteFailure→熔断, 两处都读会把同一个风控信号记两遍账', `实数=${(wt.match(/api\.riskCooling\(\)/g) || []).length}`)
+  assert((wt.match(/api\.riskCooling\(\)/g) || []).length === 3 && !/\.noteRisk\(/.test(wt), 'D74e watcher 里 Panda 这面钟恰好三处消费(轮次扇出面 / 间隙泵 / 预取泵), 且 watcher 一处记账都不写 —— ㊘(R28-3) 把消费面从一处扩到三处: 这本账只是读时间戳, 多读几处不会把同一个风控信号记两遍(记账全在 pandalive), 而只有一处在预取泵看它时, 轮次与间隙泵照旧在冷却期把整站吃满', `消费=${(wt.match(/api\.riskCooling\(\)/g) || []).length}`)
   assert(/if \(platform === 'pandalive' && api\.riskCooling\(\)\) \{\s*q\.length = 0\s*break\s*\}/.test(wt), 'D74f 预取泵看 Panda 的账整条收手且清队: 预取买的是 2~6 发链, 正是冷却期最不该重发的形状(与 SOOP 那一条同规约)')
   const er = segP('private enqueueRemint(userId: string): void {')
   assert(/if \(this\.riskCooling\(\)\) \{/.test(er) && /this\.remintTail = this\.remintTail\.then\(async \(\) => \{\s*\/\/ 链步内二次检查[\s\S]{0,80}if \(!this\.riskCooling\(\)\) \{/.test(er), 'D74g 重铸链头一道 + 链步内二次检查: 前序步刚把冷却立起来时, 已经排在链上的后续步也不许发问("冷却期零重铸"是结构保证, 不是时序运气)')
@@ -2377,6 +2377,56 @@ checkWithAllowlist(
   assert(/if \(a\?\.autoRecord\) q\.unshift\(userId\)\s*\r?\n\s*else q\.push\(userId\)/.test(ep2), 'D83a 自录房排队首: 队列排空要几分钟(实测 103 个房 ≈12 分钟), 排在尾巴上等于让录制自己等一整轮泵 —— 请求数一字不减, 只是把同一批发出的活排得更早(这是优先级调整, 不是减量)')
   // ---- D84 C6: 撤销的那一笔倒计时不许回来 ----
   assert(!/soopCooling/.test(wt) && !/watcher\.soopCooling/.test(fs.readFileSync(R('src', 'main', 'i18n.ts'), 'utf8')), 'D84a SOOP 冷却倒计时是本轮撤销的第二笔(改判), key 与调用点一起不留: 退避只由 soopFailStreak>=2 武装, 武装那一轮写的 message 本就是 watcher.soopDown, 冷却整轮跳过 ⇒ 那句原样留在顶栏 —— 盲区不静默, 补一句只是把它说两遍(D55e 站的就是这一格)')
+}
+
+// ============================================================================
+// D85~D90 轮28(㊘): 四张账各自到位之后, 把"同一件事打两遍"的剩下四处钉住
+//   这一轮没有新的判据, 只有把判据落到代码上: 主播状态读数该发的一发不少, 而"为已经拿到手的答案再买一遍"
+//   (加房的 bj 两发)、"为十秒内刚读过的页面再买一整页"(取流复查)、"被拦下时反而换更贵的问法"(Panda 扇出面)、
+//   "为没人等的秒开买整页"(SOOP 失明期预取) 四处各自收口, 外加一处完全隐形的读数面补留痕。
+//   D86b 是负断言: 本轮自己写过又撤掉的一笔(bnoCache 的第三个写入点), 不许在下一份报告里被当成缺陷再装一遍。
+// ============================================================================
+{
+  const wt = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
+  const fl = fs.readFileSync(R('src', 'main', 'ipc.ts'), 'utf8')
+  const so = fs.readFileSync(R('src', 'main', 'services', 'soop.ts'), 'utf8')
+  const pd = fs.readFileSync(R('src', 'main', 'services', 'pandalive.ts'), 'utf8')
+  const seg = (src, decl) => {
+    const i = src.indexOf(decl)
+    if (i < 0) return ''
+    const j = bodyEnd(src, i)
+    return src.slice(i, j < 0 ? undefined : j)
+  }
+  const add = seg(fl, 'ipcMain.handle(CH.anchorsAdd,')
+  // ---- D85 R28-1: 加房那一发 member/bj 的 media 真值当场用掉 ----
+  assert(/import \{ api, LiveItem, SESSION_PARTITION/.test(fl), 'D85a LiveItem 走类型导入而不是现场重新描述形状: media 那三格的判据必须与 applyBj 读同一份类型, 抄一份字段名就是给下一次改版留一处对不上的地方')
+  assert(/const info = await api\.fetchBj\(userId\)[\s\S]{0,400}if \(info\.media\?\.isLive\) bjLive = info\.media/.test(add), 'D85b fetchBj 那一发顺带回来的整包在播读数被留下(旧写法只取 nick/userIdx/userImg 三格、把 media 整包丢掉)')
+  assert(/isLive: isLive \|\| !!disc \|\| !!bjLive/.test(add) && /lastSeenAt: disc \|\| bjLive \? Date\.now\(\) : 0/.test(add), 'D85c 卡片按真值落库: 已在播的新房不再"离线落库 + 1.2 秒后对同一 userId 再发同一端点" —— 那第二发买的答案第一发已经拿在手里')
+  assert(/if \(anchor\.isLive && cfg\.monitor\[anchor\.platform\]\.prefetchStream\)[\s\S]{0,200}else \{[\s\S]{0,300}watcher\.trackIdle\(plat, userId\)/.test(add), 'D85d trackIdle 只在"真没有数据"时走: 分支读的是落库后的 anchor.isLive, 不是那句 fetchBj 之前的局部量(补洞的条件跟着真值走, 不跟着猜测走)')
+  assert((add.match(/api\.fetchBj\(/g) || []).length === 1, 'D85e 加房这一条链上 member/bj 只有一个调用点: 第二处就是那条重复本身', `实数=${(add.match(/api\.fetchBj\(/g) || []).length}`)
+  // ---- D86 R28-2: 复查那一页不再重买 + 场次号账本只有一个写入点 ----
+  assert(!/seedBroadNo/.test(so) && !/seedBroadNo/.test(wt), 'D86a 本轮初稿写过、随即撤掉的第三个写入点不许回来: 探针那条路本来就走 readPageMeta, 号已经入账了 —— 再补一处是同一件事两处真值(改判)')
+  assert((so.match(/this\.bnoCache\.set\(/g) || []).length === 2, 'D86b 场次号账本恰好两处写入(列表整表 + 任何一次真读到的页面): 少一处会漏掉一条来路, 多一处就是有两处各说各话', `实数=${(so.match(/this\.bnoCache\.set\(/g) || []).length}`)
+  assert(/const m = await this\.fetchPageMeta\(channel, false, false, '取流复查'\)/.test(seg(so, 'async fetchPlay(')), 'D86c 取流复查吃微缓存: 它要的三个判据(在播/号码变没变/页面那句话)一页 HTML 里都齐, 而十秒内刚读过的那一页就是最新读数 —— fresh 把微缓存与在途合并一并绕过, 于是探针几秒前买过的那一页在这里被原样重买')
+  // ---- D87 R28-3: 风控账管到轮次扇出面 + 那一面从此有留痕 ----
+  assert(/this\.pandaBlindStreak\+\+[\s\S]{0,200}风控冷却中: 本轮只发站内关注那一发/.test(seg(wt, 'private async roundPanda(')), 'D87a 冷却期读不到整表 = 收手而不是换问法, 且这一句必须出声: "被拦下"这件事在日志里过去完全隐形, 事后无人能解释那一轮为什么只有 1 发')
+  assert(/降级轮留痕: 站内关注列表连续 \$\{this\.pandaBlindStreak\} 轮不可用, 本轮逐房复查 \$\{this\.pandaUrgentCnt\} 发 \+ 间隙泵快照 \$\{this\.idleQueue\.length\} 间在排队/.test(wt), 'D87b 降级轮的扇出面有数可核(连续轮数 + 两个扇出面的量): 口径抄 ㊖ 那句 SOOP 降级探针回执 —— 只留痕不减发, 减发要先谈时效那笔账')
+  assert((wt.match(/this\.pandaUrgentCnt = urgent\.length/g) || []).length === 2, 'D87c 两条逐房复查路(bookmark 的 rest / roundByList)都落这一个数: 只写一处会让留痕报"0 发"而实际吃满 —— 留痕报错了比不报更坏', `实数=${(wt.match(/this\.pandaUrgentCnt = urgent\.length/g) || []).length}`)
+  assert(/if \(api\.riskCooling\(\)\) break\s*\r?\n\s*const a = this\.idleQueue\.shift\(\)!/.test(wt), 'D87d 间隙泵收手但不清队列: 熔断那一条清(它等的是整轮重排), 风控这一条等的只是 5 分钟, 把快照丢掉等于让恢复后的第一轮重新等一轮轮询')
+  // ---- D88 R28-4: SOOP 失明期的预取不为"没有号"买整页 ----
+  const pp4 = seg(wt, 'private async pumpPrewarm(')
+  assert(/if \(platform === 'soop' && this\.soopBlindStreak >= 3 && !soopApi\.hasBroadNo\(uid\)\) \{\s*q\.push\(uid\)/.test(pp4), 'D88a 门槛是"连续 3 轮整表失明"而不是"这一轮读不到": 一轮抖动就把预取关掉, 秒开要为它变慢一整场。跳过的写法是排回队尾(不作废)—— 检测面(每轮 ≤40 发整页)一发不少, 预取只是晚一场拿到号')
+  assert(/if \(\+\+skippedNoBno >= q\.length\) break/.test(pp4), 'D88b 整条队列都是这一形状时出泵而不是原地空转: 泵拿的是入队那一刻的数组引用, 一直 shift/push 会把这一趟变成死循环')
+  assert(/private soopBlindStreak = 0/.test(wt), 'D88c 失明连败计数住在 watcher(与 ㊖ 留痕共用一本账), 不在 SoopApi 里再造一个: 两处计数会各报各的轮数')
+  // ---- D89 R28-5: SOOP 门槛回执账 ----
+  assert(/private gates = new Map<string, \{ until: number; pack: PlayResult \}>\(\)/.test(so) && /private static GATE_TTL_MS = 15 \* 60_000/.test(so) && /private static GATE_TTL_MS = 15 \* 60_000/.test(pd), 'D89a 两站各有一本门槛账、同一档 TTL: ㊔ 台账当时写的是"两站同规约"而实现只有 Panda 一侧(勘误), 这一轮补齐 —— 补齐后这句话才第一次是真的')
+  assert((so.match(/this\.noteGate\(/g) || []).length === 2, 'D89b 只记两类不会自己好的回答("要登录且没托管账密" / "要密码而这一路没密码"): 密码不对下次可能改对、托管账号 60 秒后可能自愈, 把它们记账等于把可自愈的读数锁死在墙上', `实数=${(so.match(/this\.noteGate\(/g) || []).length}`)
+  assert(/if \(!this\.canAutoRelogin\(\)\) this\.noteGate\(channel, pack\)/.test(so) && /private canAutoRelogin\(\): boolean \{\s*return Boolean\(secrets\.get\(CRED_USER\) && secrets\.get\(CRED_PASS\)\)/.test(so), 'D89c 托管账密在不在, 决定"要登录"是不是一条终局: 判据必须是这一个而不是"这次失败了几回"')
+  const gp = seg(so, 'async getPlayCached(')
+  const gateIdx = gp.indexOf('this.gates.get(channel)')
+  const flyIdx = gp.indexOf('this.playInflight.get(key)')
+  assert(gateIdx > 0 && flyIdx > gateIdx && /if \(g && g\.until > Date\.now\(\) && !password\) return \{ \.\.\.g\.pack \}/.test(gp), 'D89d 短路放在在途合并之前、且带密码来与手动强刷一律绕开: 排在后面的房该立刻拿到那一句"这房要密码", 而不是再去撞一条注定被拒的 9~10 发链(改一次密码就重新问一次平台)')
+  assert(/this\.dropGate\(channel\)/.test(seg(so, 'invalidatePlay(')) && /this\.gates\.clear\(\)/.test(seg(so, 'clearPlayCache(): void {')), 'D89e 事件解除两条都在: 开播/作废/换号各自把账抹掉 —— 门槛账只许活到下一个事件, 否则"他刚开播"会被上一场的"取不到源"遮掉')
 }
 
 // ============================================================================
