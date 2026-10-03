@@ -24,13 +24,13 @@ function load(src: string): void {
   const video = videoEl.value
   if (!video || !src) return
   if (Hls.isSupported()) {
+    // 重试预算不在这里配: hls.js 1.x 里那三枚 *LoadingMaxRetry 旧字段已是死的(只留在默认值表里,
+    // 实际预算来自 loadPolicy: 清单 2 发 / 分片 4~6 发), 写在此处只会骗到下一个人。
+    // 本层要管的只有 NET_RETRY_MAX —— 它封顶的是"致命错误之后我们再武装一次 startLoad"的那个外层循环。
     hls = new Hls({
       lowLatencyMode: true,
       backBufferLength: 30,
-      liveSyncDurationCount: 3,
-      manifestLoadingMaxRetry: 2,
-      levelLoadingMaxRetry: 2,
-      fragLoadingMaxRetry: 4
+      liveSyncDurationCount: 3
     })
     hls.loadSource(src)
     hls.attachMedia(video)

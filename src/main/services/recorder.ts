@@ -208,7 +208,11 @@ class Task implements RecTask {
   async run(): Promise<void> {
     fs.mkdirSync(this.dirPath, { recursive: true })
     // ㊕: 用户按下录制的那一发取源算用户级(不等按站车道的后台队); 中途断线后的判活与续录仍是后台级
-    const play = await asUser(() => sourceFor(this.platform).getPlayCached(this.userId, this.password))
+    // ㊗(C5) 自动录制不是用户: 机器一开播批量起录时, 那几发若都盖 userMark, 车道对这一站的全部节流
+    // (一次一发 + 间隔)就被集体绕开 —— 恰恰在平台刚给出"这人开播了"的时刻叠速。自动那一路走后台车道。
+    const play = this.auto
+      ? await sourceFor(this.platform).getPlayCached(this.userId, this.password)
+      : await asUser(() => sourceFor(this.platform).getPlayCached(this.userId, this.password))
     if (!play.ok || !play.m3u8) {
       const err = new Error(play.error || mt('rec.fetchFail'))
       ;(err as Error & { needPassword?: boolean }).needPassword = play.needPassword

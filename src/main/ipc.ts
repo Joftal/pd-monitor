@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import {
-  CH, EV, AccountState, AccountStates, Anchor, AppInfo, DEFAULT_PLATFORM, FollowImportResult, isPlatform, isRoomId, parseRoomInput, Platform, PlayInfo, Settings, SoopAccountState, soopAvatarUrl, UpdateCheckResult
+  CH, EV, AccountState, AccountStates, Anchor, AppInfo, DEFAULT_PLATFORM, FollowImportResult, isPlatform, isRoomId, parseRoomInput, Platform, PlayInfo, roomKey, Settings, SoopAccountState, soopAvatarUrl, UpdateCheckResult
 } from '../shared/types'
 import { APP_META, cmpSemver } from '../shared/appmeta'
 import { api, SESSION_PARTITION, applyProxy, cachedSourceIdsAll } from './services/pandalive'
@@ -128,6 +128,25 @@ function roomErr(platform: unknown, userId: unknown): string | null {
  *  \r\n 放进去就是日志伪造/请求头注入口。合法密码(可见字符, 十几位)不受影响 */
 function safePwd(p: unknown): string {
   return typeof p === 'string' ? p.slice(0, 64).replace(/[\u0000-\u001f\u007f]/g, '') : ''
+}
+
+/** ㊗(C7) 「手动刷新/重试」那一发的下限, 与 tick() 同一条 8 秒纪律。
+ *  取流是当时唯一还没有下限的人手放大面: 它同时拿着 force(越过缓存)、fullVariants(全档菜单)、
+ *  asUser(越过按站车道)三重特权, 连点 N 下 = N 条完整取源链同时插队(SOOP 单链实测 8~10 发)。
+ *  闸只挡"刚强制取成功"的那一发(落账的也只有它): 失败从来不记账, 所以源真死了再点一次永远照发 ——
+ *  重复的是读数, 不是失败; 而进房那一发(非强制)也不记账, 免得把手动刷新那一按钮闸成哑的 */
+const PLAY_FRESH_MIN_MS = 8_000
+const freshTakenAt = new Map<string, number>()
+
+function freshThrottled(key: string): boolean {
+  const last = freshTakenAt.get(key) || 0
+  return last > 0 && Date.now() - last < PLAY_FRESH_MIN_MS
+}
+
+function markFreshTaken(key: string): void {
+  // 这张表只装"用户手动强取过源"的房, 正常规模是个位数; 真被长会话堆大了就摘掉已过窗口的(不引入第二套清理)
+  if (freshTakenAt.size >= 256) for (const [k, at] of freshTakenAt) if (Date.now() - at >= PLAY_FRESH_MIN_MS) freshTakenAt.delete(k)
+  freshTakenAt.set(key, Date.now())
 }
 
 /** 站内关注行的共用形状: SOOP 的 favorite 行与 Panda 的 bookmark 行都能结构匹配到这里 */
@@ -397,8 +416,11 @@ export function registerIpc(): void {
     // 密码房已验证源得以保留(playCache 免密复用契约), 不会二次进房重问密码。
     if (anchor.isLive && cfg.monitor[anchor.platform].prefetchStream) {
       watcher.prewarmNow(anchor.platform, anchor.userId)
+    } else {
+      // ㊗(C4) 未开播: 当场排进间隙泵队首, 下一发空档就复查它一次, 不用等整轮轮到(检测与否不看 prefetchStream)
+      watcher.trackIdle(plat, userId)
     }
-    // 不再触发 tick: 大厅数据已即时点亮; 列表不可见的由轮询规范的轮换兜底在后续轮次发现
+    // 不再触发 tick: 大厅数据已即时点亮; 列表不可见的由间隙泵(㊗ C4)与轮换兜底在后续轮次发现
     const win = BrowserWindow.getAllWindows()[0]
     win?.webContents.send(EV.anchors, store.listAnchors())
     return anchor
@@ -448,11 +470,15 @@ export function registerIpc(): void {
   ipcMain.handle(CH.livePlay, async (_e, platform: Platform, userId: string, password?: string, fresh?: boolean): Promise<PlayInfo> => {
     const bad = roomErr(platform, userId)
     if (bad) return { ok: false, error: bad }
+    // ㊗(C7) 刚成功强取过源的那 8 秒里不再重打整链, 退回复用手里那份 —— 用户要的是"能播", 不是"再打一次"
+    const roomKeyStr = roomKey(platform, userId)
+    const freshNow = !!fresh && !freshThrottled(roomKeyStr)
+    if (fresh && !freshNow) logger.info('ipc', `取流强制刷新节流: 距上一次强制取源不到 ${PLAY_FRESH_MIN_MS / 1000}s, 复用刚取到的那份 @${userId}`)
     let r
     try {
       // 播放器要完整清晰度菜单 ⇒ fullVariants=true(㊔): 后台预取只解了最高档的那份源在这里补齐全档
       // ㊕: 整条取流链打成用户级 —— 按站车道(后台请求一站一发)给这一发让路, 点开播不该排在预取队列后面
-      r = await asUser(() => sourceFor(platform).getPlayCached(userId, safePwd(password), !!fresh, true))
+      r = await asUser(() => sourceFor(platform).getPlayCached(userId, safePwd(password), freshNow, true))
     } catch (e) {
       // 网络异常/风控(403/429 等)——必须回落为 ok:false, 否则前端永远停在"获取直播流…"
       return { ok: false, error: mt('ipc.playFail', { msg: (e as Error).message || String(e) }) }
@@ -461,6 +487,7 @@ export function registerIpc(): void {
       // needLogin 必须透传: 前端据此弹"去登录"引导, 丢了就只剩一句无法行动的报错文案
       return { ok: false, needPassword: r.needPassword, needLogin: r.needLogin, error: r.error }
     }
+    if (freshNow) markFreshTaken(roomKeyStr) // 只有真强制取到源才落账: 失败与"复用缓存"都不许把下一次重试也闸掉
     // SOOP: 点开播就把开播时刻/密码房标记补回关注卡(零额外请求), 并拿回"与库里同一份"的房态给渲染层
     const merged = applyPlayMeta(platform, userId, r)
     return {

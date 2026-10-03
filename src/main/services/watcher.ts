@@ -55,6 +55,11 @@ class Watcher {
   /** 连败 / 退避 / 会话作废三枚是 Panda 独有的账本(它才发得出 RiskError, 也只有它有登录态可失效) */
   private errorStreak = 0
   private cooldownUntil = 0
+  /** ㊗(C1) 冷却期那一发预言机的再问时刻。旧写法冷却整轮 return, 于是 1~15 分钟里 Panda 的 158 个关注
+   *  一个都看不见 —— 而这一站最便宜的一发(1 发覆盖全关注)恰恰是唯一能判断"它自己好了没有"的读数。
+   *  熔断的成因正是同一发, 所以这里是抬节奏(5 分钟一发)而不是取消冷却; 读通即当场解除退避。 */
+  private cooldownOracleAt = 0
+  private static COOLDOWN_ORACLE_MS = 5 * 60_000
   private sessionDeadStreak = 0
   private discovery: DiscoveryItem[] = []
   /** 大厅快照的在飞请求(㊑): 全站榜不再搭轮询的车, 谁打开谁触发, 60 秒内复用(时刻记在 status.discoveryAt) */
@@ -128,6 +133,7 @@ class Watcher {
     this.running = true
     this.errorStreak = 0
     this.cooldownUntil = 0
+    this.cooldownOracleAt = 0 // ㊗ 新会话第一次撞冷却就该立刻问那一发, 不许继承上一场的那次问闸
     this.soopFailStreak = 0
     this.soopCooldownUntil = 0
     // ㊖ 重启即作废失明连败账本: 留痕里的轮数必须是本轮会话的真实连续长度(与 D55d 同规约)
@@ -234,7 +240,7 @@ class Watcher {
   }
 
   /** Panda 一轮: list(全站列表 + 本地匹配 + 大厅) 或 per-anchor(逐个 member/bj)。
-   *  冷却期什么都不发 —— 这一轮只更新"还在退避"这句话, 读数沿用上一轮 */
+   *  冷却期只发那一发预言机(㊗ C1, 5 分钟一次), 扇出面一条不发 —— 读数沿用上一轮, 但失明不再有整段 */
   private async roundPanda(cfg: Settings): Promise<void> {
     const P = this.status.byPlatform.pandalive
     this.status.mode = cfg.watchMode
@@ -244,13 +250,49 @@ class Watcher {
     const anchors = store.listAnchors().filter((a) => a.platform === 'pandalive')
     P.monitored = anchors.length
 
-    if (Date.now() < this.cooldownUntil) {
-      const remain = Math.ceil((this.cooldownUntil - Date.now()) / 1000)
-      P.message = mt('watcher.cooling', { remain })
+    // ㊗(C2) 零关注的早退(SOOP 那一条 :283-292 的孪生): 没有东西可失明就连退避时间戳一起作废,
+    // 而大厅不靠这一轮 —— ㊑ 之后那几页只在用户真站在「发现」那一屏时才发(refreshDiscovery 自带
+    // 60 秒复用 + 8 秒下限)。旧写法是"零关注也每轮翻满五页全站榜", 那一轮一个读数都不为谁而读
+    if (!anchors.length) {
+      this.pandaLiveFound = 0
+      this.errorStreak = 0
+      this.cooldownUntil = 0
+      P.circuitOpen = false
+      P.liveFound = 0
+      P.message = ''
       return
     }
+
     const pBegin = Date.now()
+    let sent = false
     try {
+      if (Date.now() < this.cooldownUntil) {
+        // ㊗(C1) 冷却期只停"扇出面"(全站榜分页、逐房 member/bj 复查、间隙泵快照), 不停那一发预言机:
+        // 它买的是全部关注的在播/下播, 是这一站每分钟最便宜的一次读数。读得到 = 这一站还在答话,
+        // 退避当场解除(intervalFor 注释里那句"熔断期压到 30s 是为了早点探到恢复"从此有落点 ——
+        // 旧写法 30 秒到点也只会走到上面那句 return, 探针根本没发出去过); 读不到就照旧安静到到期
+        if (Date.now() >= this.cooldownOracleAt + Watcher.COOLDOWN_ORACLE_MS) {
+          this.cooldownOracleAt = Date.now()
+          const found = await this.roundByBookmark(anchors, true)
+          if (found !== null) {
+            // 读到才算"这一轮真发了请求": null 那一支可能是没罐/探针节流(整轮零网络),
+            // 顶栏「上次拉取」不许被这种空转刷成刚刚
+            sent = true
+            // 在播数随手记下: 下面 finally 那句 P.liveFound 读的就是这一枚(不在这里落, 顶栏要显示上一场的数)
+            this.pandaLiveFound = found
+            this.cooldownUntil = 0
+            this.errorStreak = 0
+            P.circuitOpen = false
+            P.message = ''
+            logger.info('watcher', `冷却期预言机读通: 退避提前解除(关注=${anchors.length} 在播=${found})`)
+            return
+          }
+        }
+        const remain = Math.ceil((this.cooldownUntil - Date.now()) / 1000)
+        P.message = mt('watcher.cooling', { remain })
+        return
+      }
+      sent = true
       if (cfg.watchMode === 'list') {
         // 站内关注列表优先(1 发覆盖全部关注, 实测 158 条/90KB): 它直接对"我关注的人"发言,
         // 请求数与全站热度无关, 是这一站的风控面下限
@@ -266,10 +308,13 @@ class Watcher {
       P.circuitOpen = false
       P.message = ''
     } finally {
-      // 真发了请求才记时: 冷却轮在上面就 return 了, 不会走到这里被刷成"刚刚检查过"
-      P.liveFound = this.pandaLiveFound
-      P.roundMs = Date.now() - pBegin
-      P.lastRoundAt = Date.now()
+      // 真发了请求才记时: 冷却期里那一轮什么都没发(连那句"还在退避"都不刷新时间戳),
+      // 顶栏「上次拉取耗时」不许被空转轮刷成刚刚
+      if (sent) {
+        P.liveFound = this.pandaLiveFound
+        P.roundMs = Date.now() - pBegin
+        P.lastRoundAt = Date.now()
+      }
     }
   }
 
@@ -291,7 +336,10 @@ class Watcher {
       return
     }
     // 冷却轮(㊒③)整轮零请求: 失明时"每一轮都重发"的形状正是风控最忌讳的, 而这段时间本来也没有可读的数。
-    // 不推进 lastRoundAt/roundMs(真发了请求才记时, 与 Panda 冷却同规约), 读数与那句话沿用上一轮
+    // 不推进 lastRoundAt/roundMs(真发了请求才记时, 与 Panda 冷却同规约)
+    // ㊗ 这里曾按"冷却轮不出声"报过一笔要补一句倒计时 —— 复核判为重复读数并撤销(本轮第二笔改判):
+    // 退避只由 soopFailStreak>=2 武装, 而武装那一轮的 message 已经是 watcher.soopDown(关注数 + 连续失明轮数),
+    // 冷却轮跳过整轮 = 那句原样留在顶栏/工作区, 加上 D46c 那颗共用 heartbeat —— 盲区从来不静默, 补一句只是把它说两遍
     if (Date.now() < this.soopCooldownUntil) return
     const sBegin = Date.now()
     this.soopLiveFound = await this.roundSoop(soopAnchors, cfg.monitor.soop.requestGapMs)
@@ -379,11 +427,13 @@ class Watcher {
   /** Panda 轮询的预言机: 站内关注列表(/v1/live/bookmark)一发给出每个关注的在播/下播与场次元数据。
    *  返回 null = 列表不可用(未登录/风控/改版/整表脏, fetchBookmarks 内部已收敛为一句话),
    *  调用方必须回落到全站榜那一轮 —— 绝不把"没读到"当成"全员下播"。
-   *  与 SOOP 那一轮同规约: 三态必分, 下播要两轮才翻转(这一翻要发通知并作废旧源)。 */
-  private async roundByBookmark(anchors: Anchor[]): Promise<number | null> {
+   *  与 SOOP 那一轮同规约: 三态必分, 下播要两轮才翻转(这一翻要发通知并作废旧源)。
+   *  oracleOnly(㊗ C1, 冷却期探针): 只买这一发整表, 列表覆盖不到的那些房本轮不逐房复查、也不交间隙泵,
+   *  读不到也不把预言机记成 'list' —— 那一轮根本没打过全站榜, 写了就是一个假读数(轮次摘要会拿它说话) */
+  private async roundByBookmark(anchors: Anchor[], oracleOnly = false): Promise<number | null> {
     // 这一发要活会话才说话(实测匿名态必回 result:false): 没罐就直接不试, 全站榜那条是匿名用户的既有链路
     if (!api.hasSession()) {
-      this.pandaOracle = 'list'
+      if (!oracleOnly) this.pandaOracle = 'list'
       return null
     }
     // 罐里有 cookie ≠ 会话已证明: cookieValid 冷启动是 false, 服务端判死也翻回 false —— "没证明"与"已判死"共用一个假值。
@@ -395,21 +445,23 @@ class Watcher {
       // 服务端明确回"没登录"后 5 分钟内不再问: 紧随其后的全站榜响应本来就带 loginInfo 在替它说话。
       // netFail(网络/风控)不节流 —— 读不到 ≠ 判死, 下一轮照问
       if (Date.now() < this.pandaProbeUntil) {
-        this.pandaOracle = 'list'
+        if (!oracleOnly) this.pandaOracle = 'list'
         return null
       }
       const info = await api.checkLoginInfo()
       if (!info.isLogin) {
         if (!info.netFail) this.pandaProbeUntil = Date.now() + Watcher.LOGIN_PROBE_COOL_MS
-        this.pandaOracle = 'list'
+        if (!oracleOnly) this.pandaOracle = 'list'
         return null
       }
       api.cookieValid = true
     }
     const rows = await api.fetchBookmarks()
     if (rows === null) {
-      this.pandaOracle = 'list'
-      logger.warn('watcher', '站内关注列表不可用, 本轮回落全站榜分页')
+      if (!oracleOnly) {
+        this.pandaOracle = 'list'
+        logger.warn('watcher', '站内关注列表不可用, 本轮回落全站榜分页')
+      }
       return null
     }
     this.pandaOracle = 'bookmark'
@@ -427,7 +479,7 @@ class Watcher {
       const row = byId.get(a.userId)
       if (!row || (row.isLive && !row.live)) {
         // 站内没这条关注(应用内添加/官网侧已取关) 或"说在播却没给场次"= 判不了, 交回原探针链路
-        if (row) logger.info('watcher', `站内关注列表报在播但无场次信息, 回落 member/bj @${a.userId}`)
+        if (row && !oracleOnly) logger.info('watcher', `站内关注列表报在播但无场次信息, 回落 member/bj @${a.userId}`)
         missing.push(a)
         continue
       }
@@ -467,19 +519,23 @@ class Watcher {
     }
 
     // 列表覆盖不到的关注: 与旧链路同一份兜底(轮内复查曾开播的, 离线的那些交间隙泵)
-    const urgent = missing.filter((a) => a.isLive && !this.isGone(a))
-    for (const a of urgent) {
-      try {
-        liveFound += await this.applyBj(a, await api.fetchBj(a.userId))
-      } catch (e) {
-        if (e instanceof BjNotFoundError) {
-          this.onBjNotFound(a)
-          continue // 单点数据错误: 不污染本轮(不升级熔断/连败)
+    // ㊗(C1) 冷却探针不买这一单: 逐房 member/bj 与间隙泵快照都是扇出面, 正是退避期要停的那一类 ——
+    // 它们要等的下一发是"退解除之后的那一轮", 而这一发的读数已经落进卡里了
+    if (!oracleOnly) {
+      const urgent = missing.filter((a) => a.isLive && !this.isGone(a))
+      for (const a of urgent) {
+        try {
+          liveFound += await this.applyBj(a, await api.fetchBj(a.userId))
+        } catch (e) {
+          if (e instanceof BjNotFoundError) {
+            this.onBjNotFound(a)
+            continue // 单点数据错误: 不污染本轮(不升级熔断/连败)
+          }
+          throw e // 其余错误维持轮次失败语义
         }
-        throw e // 其余错误维持轮次失败语义
       }
+      this.setIdleQueue(missing.filter((a) => !a.isLive)) // 新快照整批替换, 但从上一窗口没扫到的那一间起排(㊖)
     }
-    this.setIdleQueue(missing.filter((a) => !a.isLive)) // 新快照整批替换, 但从上一窗口没扫到的那一间起排(㊖)
 
     // 会话存续证据: result:true 的整表只可能来自活会话(判死/风控都在 fetchBookmarks 里折成 null)
     if (api.hasSession()) {
@@ -1024,8 +1080,24 @@ class Watcher {
     if (a?.tags?.isPw) return
     const q = this.prewarmQueue[platform]
     if (q.includes(userId)) return
-    q.push(userId)
+    // ㊗(C8) 自录房排到队首: 队列排空要几分钟(实测 103 个房 ≈12 分钟), 而自录那一头是"开播就得有源",
+    // 排在尾巴上等于让录制自己等一整轮泵。请求数一字不减, 只是把同一批发出的活排得更早
+    if (a?.autoRecord) q.unshift(userId)
+    else q.push(userId)
     void this.pumpPrewarm(platform)
+  }
+
+  /** ㊗(C4) 手工添加的离线房当场进间隙泵: 旧写法它要等下一轮才被 setIdleQueue 收进快照
+   *  (实测 Panda 轮距 120s), 之后再排到那条几百间长的队尾 —— 而他刚刚才点"添加"。
+   *  排到队首而不是队尾: 这一间是用户主动要的, 与续扫游标那套"防尾部饿死"的公平账不冲突
+   *  (游标只服务整批快照轮换)。多花的至多是那一发 member/bj 的时刻, 不是次数: 下一轮它本来也要被扫 */
+  trackIdle(platform: Platform, userId: string): void {
+    if (platform !== 'pandalive') return // SOOP 没有间隙泵: 它的逐房探针每轮按游标重切整表, 新房当场就在里面
+    const a = store.listAnchors().find((x) => x.platform === platform && x.userId === userId)
+    if (!a || a.isLive || this.isGone(a)) return
+    if (this.idleQueue.some((x) => x.platform === platform && x.userId === userId)) return
+    this.idleQueue.unshift(a)
+    void this.pumpIdle()
   }
 
   /** 对外入口: 关注"已在播"主播时补一发预取(列表模式下该类主播永不再触发 onLiveStart, 预取泵对其缺席) */
