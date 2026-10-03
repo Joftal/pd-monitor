@@ -92,6 +92,10 @@ const world = {
   logInfo: [],
   logWarn: [],
   anchors: [],
+  /** ㊗ L 段: 取流处理器的调用现场(强制位/档级/成没成) + 替身的令牌序号与失败次数 */
+  playCalls: [],
+  playSeq: 0,
+  playFails: 0,
   /** ipcMain.handle 注册到的处理器 */
   ipc: {}
 }
@@ -234,7 +238,17 @@ const mocks = {
   'src/main/services/source.ts': {
     sourceFor: () => ({
       invalidatePlay: (uid) => world.invalidate.push(uid),
-      getPlayCached: async () => ({ ok: true }),
+      // ㊗ L 段要看得见处理器"传下来了什么": 强制位与档级是这个文件的唯一真值处, 替身若把参数丢了,
+      // 断言就退化成"确实调用过" —— 那是恒真。每次调用记一条, 返回值给一份带自增令牌的包(两次的 m3u8 必然不同)
+      getPlayCached: async (uid, pwd, force, fullV) => {
+        const fail = world.playFails > 0
+        if (fail) world.playFails--
+        else world.playSeq++
+        world.playCalls.push({ uid, force: !!force, fullVariants: !!fullV, fail })
+        return fail
+          ? { ok: false, error: 'playFail(sim)', needLogin: true }
+          : { ok: true, m3u8: `https://mock/x${world.playSeq}.m3u8`, variants: [{ url: `https://mock/x${world.playSeq}.m3u8`, bandwidth: 0 }], fetchedAt: Date.now() }
+      },
       fetchPlay: async () => ({ ok: true })
     }),
     applyPlayMeta() {}
@@ -375,6 +389,9 @@ function reset() {
   world.logInfo.length = 0
   world.logWarn.length = 0
   world.anchors = []
+  world.playCalls.length = 0
+  world.playSeq = 0
+  world.playFails = 0
   watcher.soopFailStreak = 0
   watcher.soopOfflineStreak.clear()
   soopApi.invalidateCookieCache()
@@ -1208,6 +1225,49 @@ world.pageFail = true
   await soopApi.fetchPageMeta('fb3').catch(() => {})
   assert(world.logWarn.filter((m) => /Node 兜底重发/.test(m)).length === 0, 'K3c 60 秒窗口内不逐条刷屏(DNS 黑洞期那是每请求一次的形态)')
   assert(soopApi.fallbackCnt === 2, 'K3d 窗口内的次数在累计, 等下一句一起报', `cnt=${soopApi.fallbackCnt}`)
+}
+
+// ============ L: 播放器那一条取流 IPC 的手动刷新下限(㊗ C7) ============
+// 这一节验的是处理器"把强制位传下去了没有": source.ts 在本套里是替身(真取流链由 F/G/H 段直接驱动 soopApi),
+// 所以断言落在 playCalls 那本参数账上 —— 验参数而不是验"调用过", 否则替身吞掉参数照样绿(㊖ 那一课的形态)
+console.log('L1 强制刷新的 8 秒下限: 刚成功过的那一发之内不再传 force')
+{
+  const playH = world.ipc[CH.livePlay]
+  assert(typeof playH === 'function', 'L1a livePlay 通道已注册')
+  reset()
+  world.anchors = [anchor({ userId: 'thr001', isLive: true })]
+  const first = await playH({}, 'soop', 'thr001', '', true)
+  assert(first.ok && world.playCalls.length === 1 && world.playCalls[0].force === true && world.playCalls[0].fullVariants === true, 'L1b 第一发强制刷新照旧要 force + 全档(下限不改变"该打的那一发", 也不牵连档级)', JSON.stringify(world.playCalls))
+  const second = await playH({}, 'soop', 'thr001', '', true)
+  assert(second.ok && world.playCalls.length === 2 && world.playCalls[1].force === false, 'L1c 8 秒内的第二发降级为"复用手里那份"(force=false → 命中 playCache, 整链一发都不重打; SOOP 单链实测 8~10 发, 连点 N 下过去就是 N 条链同时插队)', JSON.stringify(world.playCalls))
+  assert(world.playCalls[1].fullVariants === true, 'L1d 被闸掉的只有强制位: 全档那一参照传, 清晰度菜单不许跟着一起缩水')
+  assert(world.logInfo.filter((m) => /取流强制刷新节流/.test(m)).length === 1, 'L1e 降级要出声: 静默复用会让人以为「手动刷新」这个按钮坏了', world.logInfo.join(' | '))
+}
+
+console.log('L2 只有真强制取到源才落账: 失败、非强制、别的房都不立闸')
+{
+  const playH = world.ipc[CH.livePlay]
+  const forces = () => world.playCalls.map((c) => c.force).join(',')
+  reset()
+  world.anchors = [anchor({ userId: 'thr002', isLive: true })]
+  world.playFails = 1
+  const dead = await playH({}, 'soop', 'thr002', '', true)
+  assert(dead.ok === false && dead.needLogin === true, 'L2a 失败原样回报(needLogin 一并透传): 节流不许把失败刷成成功')
+  const retry = await playH({}, 'soop', 'thr002', '', true)
+  assert(retry.ok && forces() === 'true,true', 'L2b 紧接着的重试照拿 force: 失败从来不落账, "源真死了再点一次"永远有反应', forces())
+  // 进房那一发(非强制)同样不落账 —— 否则刚开播就点手动刷新会被自己几秒前的缓存闸成哑的
+  reset()
+  world.anchors = [anchor({ userId: 'thr003', isLive: true })]
+  await playH({}, 'soop', 'thr003', '', false)
+  const manual = await playH({}, 'soop', 'thr003', '', true)
+  assert(manual.ok && forces() === 'false,true', 'L2c 非强制那一发不立闸: 进房后立刻点手动刷新仍然要 force(它是读数, 不是重复的读数)', forces())
+  await playH({}, 'soop', 'thr003', '', true)
+  assert(forces() === 'false,true,false', 'L2d 而强制成功之后紧接着的那一发要落闸: 同一秒内两条完整链同时插队是这一节消灭的东西', forces())
+  // 账本按 平台+房 记: 同号的两平台、不同号的同一平台互不牵连
+  await playH({}, 'pandalive', 'thr003', '', true)
+  assert(forces().endsWith(',true') && world.playCalls.at(-1).force === true, 'L2e 对面平台的同号不共享这一格账(roomKey 复合键): 裸 userId 建表会让 SOOP 的节流把 Panda 那一发也闸掉', forces())
+  await playH({}, 'soop', 'thr004', '', true)
+  assert(world.playCalls.at(-1).force === true, 'L2f 同平台的别的房同理(闸是逐房的, 不是全站一刀)', forces())
 }
 
 // ---------- 汇总 ----------

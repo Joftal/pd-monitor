@@ -1634,7 +1634,7 @@ checkWithAllowlist(
   const bm = seg('private async roundByBookmark(')
   assert(bm.length > 0 && !/fetchLivePage|roundByList/.test(bm), 'D51b 预言机自己一页全站榜都不发(它只覆盖"我关注的人", 请求面与全站热度无关)', bm.slice(0, 60))
   assert(/if \(!api\.hasSession\(\)\) \{[\s\S]{0,120}return null/.test(bm), 'D51c 匿名(罐里没有会话)不发这一发(实测必回 result:false, 每轮白掷)')
-  assert(/if \(!api\.cookieValid\) \{[\s\S]{0,600}await api\.checkLoginInfo\(\)[\s\S]{0,200}api\.cookieValid = true/.test(bm), 'D51g 「罐在但没证明」先问一句 login_info 再决定(30 秒缓存在飞合并): 冷启动第一轮不该因为一个初值 false 就整轮落回全站榜四页 —— 真机实测过这个坑')
+  assert(/if \(!api\.cookieValid\) \{[\s\S]{0,600}await api\.checkLoginInfo\(\)[\s\S]{0,400}api\.cookieValid = true/.test(bm), 'D51g 「罐在但没证明」先问一句 login_info 再决定(30 秒缓存在飞合并): 冷启动第一轮不该因为一个初值 false 就整轮落回全站榜四页 —— 真机实测过这个坑')
   assert(/this\.pandaOracle = 'list'[\s\S]{0,200}return null/.test(bm) && /this\.pandaOracle = 'bookmark'/.test(bm), 'D51d 两条链各归各的账(轮次日志据此判本轮是"1 发问完 158"还是"真的看过全站")')
   // 边界必须收在这一个方法体内: `if (n < 2)` 在 SOOP 那两轮里各出现一次, 不设界会把它们当本条的证据(变异测试实测)
   const mo = seg('private markPandaOffline(')
@@ -1920,8 +1920,8 @@ checkWithAllowlist(
     const j = bodyEnd(pa, i)
     return pa.slice(i, j < 0 ? undefined : j)
   }
-  assert(/private static KEEPALIVE_MS = 60_000/.test(pa) && !/KEEPALIVE_MS = 15_000/.test(pa), 'D61a 泵周期 15s→60s 是改口不是加档(实测无心跳 27 分钟变体全活: 泵只需在没人看的时候别让会话饿死)')
-  assert(/const wait = Math\.min\(120_000, Math\.max\(PandaApi\.KEEPALIVE_MS, this\.playCache\.size \* 400\)\)/.test(pa) && /setTimeout\(\(\) => void loop\(\), wait\)/.test(pa), 'D61b 间隔随缓存规模自适应(每源 +400ms, 封顶 120s)且真作用在重排上 —— 只在首轮用基准值')
+  assert(/private static KEEPALIVE_MS = 300_000/.test(pa) && !/KEEPALIVE_MS = (15_000|60_000)/.test(pa), 'D61a 泵周期 60s→5 分钟(㊗ C3): 心跳在这里不是续命手段而是"尽早发现真死"—— 实测无心跳 27 分钟变体全活 + 现场一天只有 1 次「保活连续真死」, 判死要 2 次连击 ⇒ 最坏 10 分钟收尸仍远在水位线之前')
+  assert(/const wait = Math\.min\(900_000, Math\.max\(PandaApi\.KEEPALIVE_MS, this\.playCache\.size \* 2000\)\)/.test(pa) && /setTimeout\(\(\) => void loop\(\), wait\)/.test(pa), 'D61b 间隔随缓存规模自适应(㊗ C3: 每源 +2s, 封顶 900s)且真作用在重排上 —— 只在首轮用基准值; 300 源以内恒为 5 分钟基准, 更大规模时全场心跳之和不再随源数线性增长')
   assert(/private static KEEPALIVE_OFFLINE_TTL_MS = 30 \* 60_000/.test(pa) && /private static KEEPALIVE_GUEST_TTL_MS = 10 \* 60_000/.test(pa), 'D61c 源缓存有两道活性时限: 已下播 30 分钟 / 不在关注表 10 分钟(缓存不再是"取到就永久算有源")')
   const tk = segPa('private async keepaliveTick(')
   assert(/const anchors = new Map\(store\.listAnchors\(\)\.map\(\(a\) => \[roomKey\(a\.platform, a\.userId\), a\]\)\)/.test(tk), 'D61d 关注表按复合键建(playCache 是裸 userId, 直接拿裸号建表会让同号 SOOP 关注覆盖 Panda 的 isLive)')
@@ -1936,6 +1936,9 @@ checkWithAllowlist(
   assert(/const primary = pack\.variants\?\.\[0\]\?\.url \|\| ''/.test(ks) && !/pack\.m3u8/.test(ks), 'D61i 心跳只读主档(㊕ 改口轮23 那条"全档齐养"): 两轮实测 —— 变体静置 15/27 分钟全活, 而 master 的 IVS 令牌 exp=取源+600s 到点按令牌语义过期(那一发 403 无自然样本), 副档不靠心跳续命, master 进这一轮等于每 10 分钟误收一次尸')
   assert(/if \(st === 403 \|\| st === 404\) primaryDead = true/.test(ks) && (ks.match(/primaryDead = true/g) || []).length === 1, 'D61j 判死只有一处赋值、只认主档的 403/404: 网络层失败一个都不计, 否则断网恢复瞬间全量误杀+对瘫痪 API 群重铸', `赋值点数=${(ks.match(/primaryDead = true/g) || []).length}`)
   assert(/源保活泵已启动\(基准 \$\{PandaApi\.KEEPALIVE_MS \/ 1000\}s[^\n]*只在关注且在播的源入队\)/.test(pa), 'D61k 启动那一行把新口径念出来(周期 + 自适应 + 入队门), 真机一眼能认出泵是哪一版')
+  // 规模仿真里那枚公式是抄来的, 不是import 来的 —— 源改了它不改, 下一次拿它说话的量级就是上一版的(本轮 C3 正是靠这张表定的档)
+  const simKa = fs.readFileSync(R('scripts', 'sim-keepalive-scale.mjs'), 'utf8')
+  assert(/Math\.min\(900_000, Math\.max\(300_000, N \* 2000\)\)/.test(simKa), 'D61l 仿真的自适应间隔与 startKeepalive 同一枚公式(300s/2s/900s 三个常数一字不差): 它漂移一天, 依据它写下的结论就作废一天')
 }
 {
   const so = fs.readFileSync(R('src', 'main', 'services', 'soop.ts'), 'utf8')
@@ -1956,7 +1959,7 @@ checkWithAllowlist(
   assert(fp.includes('this.runPlayChain(channel, password, m, fullVariants)') && fp.includes('this.runPlayChain(channel, password, meta, fullVariants)'), 'D62d fullVariants 沿 fetchPlay 的两条重打分支一路传到底: 在 bno 复用那一跳上把它丢了, 预取就又变成整链')
   assert(/async getPlayCached\(channel: string, password = '', forceFresh = false, fullVariants = false\)/.test(so) && /getPlayCached\(id: string, password\?: string, forceFresh\?: boolean, fullVariants\?: boolean\)/.test(si), 'D62e 契约与实现对齐, 默认值是 false: 后台默认省档, 要全档必须明说(默认给全档 = 这个旋钮白装)')
   assert(!/getPlayCached\(userId: string, password = '', forceFresh = false, fullVariants/.test(pa), 'D62f Panda 不装这个旋钮: 它的取源是一发 play + 一次 master(变体免费), 省档省不下任何请求, 加了只会让人以为两边同形')
-  assert(/sourceFor\(platform\)\.getPlayCached\(userId, safePwd\(password\), !!fresh, true\)/.test(ipc), 'D62g 播放器那一条(唯一的用户意图取源入口)显式要全档 —— 清晰度菜单缺档比多 4 发更糟')
+  assert(/sourceFor\(platform\)\.getPlayCached\(userId, safePwd\(password\), freshNow, true\)/.test(ipc), 'D62g 播放器那一条(唯一的用户意图取源入口)显式要全档 —— 清晰度菜单缺档比多 4 发更糟; 第三参自 ㊗C7 起是收敛过的 freshNow(不是裸 !!fresh), 全档那一参不许跟着一起被闸掉')
   assert(/await sourceFor\(platform\)\.getPlayCached\(uid\)\.catch/.test(wt) && (wt.match(/getPlayCached\([^)]*,[^)]*,[^)]*,/g) || []).length === 0, 'D62h watcher 里所有预取都走默认档级(只解最高档), 一处都不许自己传全档', `四处参数调用=${(wt.match(/getPlayCached\([^)]*,[^)]*,[^)]*,/g) || []).length}`)
 }
 {
@@ -2119,10 +2122,13 @@ checkWithAllowlist(
     'D67b 间隔取自本平台那一格 requestGapMs(两平台各读各的, 与轮询分家同口径), 车道不另发明第二个节流数'
   )
   assert((so.match(/laneRun\(/g) || []).length === 1 && (pd.match(/laneRun\(/g) || []).length === 1, 'D67c 每个服务只有最下端那一处进车道: 中间层再包一遍 = 同一次请求被罚两遍(间隔翻倍 = 时效掉), 各层各包 = 谁也数不清一共等多久', `SOOP=${(so.match(/laneRun\(/g) || []).length} Panda=${(pd.match(/laneRun\(/g) || []).length}`)
-  assert(!/laneRun/.test(seg(pd, 'private async fetchText(')) && !/netGate/.test(hp) && /只管 API 站, 不管媒体\/CDN/.test(ng), 'D67d 媒体/CDN 面豁免且豁免理由在案: 保活泵 5 条泳道要在 60 秒里跑完 17 个房 × 若干档, 串成一条会把源饿死 —— 那正是要避免的重铸风暴')
+  assert(!/laneRun/.test(seg(pd, 'private async fetchText(')) && !/netGate/.test(hp) && /只管 API 站, 不管媒体\/CDN/.test(ng), 'D67d 媒体/CDN 面豁免且豁免理由在案: 播放在看的分片不能被排队, 保活泵一轮也要跑完全部在播源, 串成一条会把源饿死 —— 那正是要避免的重铸风暴')
   assert(/const MAX_WAIT_MS = 8_000/.test(ng) && /Math\.min\(Math\.max\(want, 0\), MAX_WAIT_MS\)/.test(ng), 'D67e 排队有 8 秒上限且是 clamp(不是丢弃): 时效性是这一层的第一目标, 挤不过去也要发出去 —— 让预取队列整体滞后是最坏结果')
   assert(/\* \(0\.9 \+ Math\.random\(\) \* 0\.2\)/.test(ng) && !/Math\.random\(\)/.test(ng.replace(/\* \(0\.9 \+ Math\.random\(\) \* 0\.2\)/, '')), 'D67f 抖动 ±10% 一处且只这一处: 固定间隔本身就是可识别的机器形状, 两处抖动会叠成猜不出的总时长')
-  assert(/return userMark\.getStore\(\) === true/.test(ng) && (ipcf.match(/asUser\(/g) || []).length === 1 && (rc.match(/asUser\(/g) || []).length === 1 && !/asUser/.test(wt), 'D67g 默认后台、用户显式: 忘了标记的后果是"照旧各发各的"(安全默认), 而不是把后台请求伪装成用户意图; 标记只有两处(播放器取流 + 录制首发)', `ipc=${(ipcf.match(/asUser\(/g) || []).length} rec=${(rc.match(/asUser\(/g) || []).length} watcher=${/asUser/.test(wt)}`)
+  // 数的是真调用点 `asUser(() => ...)` 而不是 `asUser(` —— 后者会被注释里那句"asUser(越过车道)"骗到(本轮实测)
+  const uIpc = (ipcf.match(/asUser\(\(\) =>/g) || []).length
+  const uRec = (rc.match(/asUser\(\(\) =>/g) || []).length
+  assert(/return userMark\.getStore\(\) === true/.test(ng) && uIpc === 1 && uRec === 1 && !/asUser/.test(wt), 'D67g 默认后台、用户显式: 忘了标记的后果是"照旧各发各的"(安全默认), 而不是把后台请求伪装成用户意图; 标记只有两处(播放器取流 + 手动录制首发)', `ipc=${uIpc} rec=${uRec} watcher=${/asUser/.test(wt)}`)
   assert(/if \(isUserCall\(\)\) \{[\s\S]{0,80}stamp\(lane\)[\s\S]{0,80}finally \{[\s\S]{0,40}stamp\(lane\)/.test(ng), 'D67h 用户那一发不等, 但起跑与落定都落笔: 否则"用户点一下 + 后台 17 发"会在同一瞬时刻叠成同一瞬时的 18 发')
   assert(/new AsyncLocalStorage<boolean>\(\)/.test(ng), 'D67i 标记沿异步链传递(不是逐层加参数): 快速道要覆盖的是整条链, 而 fetchPlay → runPlayChain → fetchAid → req 中间隔着四个私有函数')
   assert(/verify-netgate\.mjs/.test(pkg), 'D67j 车道套在 npm run verify 链里: 不在链里的脚本等于没写(它会与实现悄悄分家)')
@@ -2308,7 +2314,72 @@ checkWithAllowlist(
 }
 
 // ============================================================================
-console.log('\n' + '─'.repeat(72))
+// D77~D84 轮26(㊗): 按"主播状态优先, 其余尽量省"重排的那一版请求面
+//   这一轮的三条改判同样要站岗(撤销过的东西最容易在下一份报告里被原样再写一遍), 所以 D78/D84 是负断言。
+// ============================================================================
+{
+  const wt = fs.readFileSync(R('src', 'main', 'services', 'watcher.ts'), 'utf8')
+  const fl = fs.readFileSync(R('src', 'main', 'ipc.ts'), 'utf8')
+  const rp = (() => {
+    const i = wt.indexOf('private async roundPanda(')
+    const j = bodyEnd(wt, i)
+    return wt.slice(i, j < 0 ? undefined : j)
+  })()
+  const bm = (() => {
+    const i = wt.indexOf('private async roundByBookmark(')
+    const j = bodyEnd(wt, i)
+    return wt.slice(i, j < 0 ? undefined : j)
+  })()
+  // ---- D77 C1: 冷却期停的是扇出面, 不停那一发预言机 ----
+  assert(/private cooldownOracleAt = 0/.test(wt) && /private static COOLDOWN_ORACLE_MS = 5 \* 60_000/.test(wt), 'D77a 冷却期那一发预言机有自己的再问时刻(5 分钟): 熔断期 30 秒一跳的旧写法一个探针都没发出去过, intervalFor 那句"压到 30s 是为了早点探到恢复"因此是句空话')
+  assert(/this\.running = true[\s\S]{0,200}this\.cooldownOracleAt = 0/.test(wt), 'D77b 重启即作废这一次问闸(与 D55d 同规约): 新会话第一次撞冷却就该立刻问, 不许继承上一场的那次时间戳')
+  assert(/this\.cooldownOracleAt = Date\.now\(\)[\s\S]{0,80}const found = await this\.roundByBookmark\(anchors, true\)/.test(rp), 'D77c 先落时间戳再发问: 这一发要是抛了(风控高压下的常态), 没落账就是 30 秒后再撞一次 —— 5 分钟节奏必须由时间戳而不是由结果守住')
+  assert(/if \(found !== null\) \{[\s\S]{0,300}sent = true/.test(rp) && (rp.match(/sent = true/g) || []).length === 2, 'D77d "读到"才算这一轮真发了请求: roundByBookmark 回 null 的那几条支路(没罐/探针节流)整轮零网络, 顶栏「上次拉取」不许被这种空转刷成刚刚(第二处 sent 是正常轮)', `实数=${(rp.match(/sent = true/g) || []).length}`)
+  assert(/if \(found !== null\) \{[\s\S]{0,400}this\.cooldownUntil = 0[\s\S]{0,120}this\.errorStreak = 0/.test(rp), 'D77e 读通即当场解除退避: 冷却买的是"别再打了", 不是"打死也不听" —— 平台已经答话了还继续静默 1~15 分钟, 那段时间是白瞎的 158 个关注')
+  assert(/const found = await this\.roundByBookmark\(anchors, true\)[\s\S]{0,400}this\.pandaLiveFound = found/.test(rp), 'D77f 在播数必须在 return 之前落到 pandaLiveFound: finally 那句 P.liveFound 读的就是这一枚, 漏了它顶栏就显示上一场的数(而且是"刚刚拉的"那一枚时钟下的上一场)')
+  assert((bm.match(/if \(!oracleOnly\) this\.pandaOracle = 'list'/g) || []).length === 3 && /this\.pandaOracle = 'bookmark'/.test(bm), 'D77g 冷却探针不许把预言机记成 list: 那一轮根本没打过全站榜, 写了就是一个假读数(轮次摘要与顶栏都拿它说话)。' + "'bookmark' 那一支不加闸是故意的 —— 冷却轮真读到了整表", `三处闸=${(bm.match(/if \(!oracleOnly\) this\.pandaOracle = 'list'/g) || []).length}`)
+  // 锚在"闸 + 它第一眼"上: 这个函数里 !oracleOnly 的块状写法有两处(上面 rows===null 那一处也长这样), 只认紧接着 const urgent 的那一处
+  const fanIdx = bm.search(/if \(!oracleOnly\) \{\s*\r?\n\s*const urgent = missing\.filter/)
+  const sessIdx = bm.indexOf('if (api.hasSession()) {')
+  const fanout = bm.slice(fanIdx, sessIdx)
+  assert(fanIdx > 0 && sessIdx > fanIdx && /this\.setIdleQueue\(missing/.test(fanout) && !/this\.pandaOracle/.test(fanout), 'D77h 扇出面(逐房 member/bj + 间隙泵快照)整块在 !oracleOnly 闸内, 而会话存续记账(sessionDeadStreak/cookieValid)两边都跑: 那一发 result:true 的整表就是活会话证据, 冷却轮没理由不为它记账', `闸=${fanIdx} 记账=${sessIdx}`)
+  assert(!/if \(oracleOnly\) \{[\s\S]{0,120}return /.test(bm), 'D77i 早退式写法(if (oracleOnly) \{ pushAnchors; return \})不许回来: 它看着更干净, 但会把会话存续记账一起跳掉 —— 冷却轮读到整表却不再为"罐还活着"落笔, cookieValid 那一格就被这一轮自己说成没证据')
+  // ---- D78 C2: 只落地零关注早退, 大厅年龄闸一笔撤销 ----
+  assert(/if \(!anchors\.length\) \{[\s\S]{0,300}this\.cooldownUntil = 0[\s\S]{0,200}return/.test(rp), 'D78a 零关注 Panda 也早退(SOOP 那一条的孪生): 没有东西可失明, 连退避时间戳一起作废, 也不为一间不存在的房翻五页全站榜')
+  assert(!/hallFetchedAt|lastListScanAt|listScanAge/.test(wt), 'D78b 大厅回落的"年龄闸"是本轮撤销的一笔, 不许回来: 复核改判 —— 子间隔重读(用户立即刷新)可能真的携带新开播, 给回落加缓存买到的是漏检而不是省发(报告 B1 那句"零检测成本"判错了)')
+  // ---- D79 C4: 刚添加的离线房当场进间隙泵 ----
+  const ti = (() => {
+    const i = wt.indexOf('trackIdle(platform: Platform, userId: string): void {')
+    const j = bodyEnd(wt, i)
+    return wt.slice(i, j < 0 ? undefined : j)
+  })()
+  assert(ti.length > 0 && /if \(platform !== 'pandalive'\) return/.test(ti) && /if \(!a \|\| a\.isLive \|\| this\.isGone\(a\)\) return/.test(ti), 'D79a 间隙泵补队按当下真值收口: 不在表里/已在播/查无此人一律不排, SOOP 那一侧根本没有这条泵(它的逐房探针每轮按游标重切整表)')
+  assert(/this\.idleQueue\.some\([\s\S]{0,120}\)\)\s*return[\s\S]{0,120}this\.idleQueue\.unshift\(a\)/.test(ti), 'D79b 去重在排入之前、排的是队首: 这一间是用户刚点"添加"的, 与续扫游标那套"防尾部饿死"的公平账不冲突(游标只服务整批快照轮换)')
+  assert(/watcher\.trackIdle\(plat, userId\)/.test(fl) && /else \{\s*\r?\n\s*\/\/ ㊗\(C4\)/.test(fl), 'D79c 手工添加那一条接线: 在播走预取泵, 离线走间隙泵 —— 旧写法它要等下一轮才被 setIdleQueue 收进快照, 之后再排到几百间长的队尾')
+  // ---- D80 C5: 自动录制不借用户快速道 ----
+  const rc2 = fs.readFileSync(R('src', 'main', 'services', 'recorder.ts'), 'utf8')
+  assert(/const play = this\.auto\s*\r?\n\s*\? await sourceFor\(this\.platform\)\.getPlayCached\(this\.userId, this\.password\)\s*\r?\n\s*: await asUser\(/.test(rc2), 'D80a 首发取源按发起者分流: 手动那一条 asUser, 自动那一条走后台车道 —— 机器一开播批量起录时全员盖 userMark = 集体绕开按站节流, 恰在平台刚说"这人开播了"的时刻叠速')
+  assert((rc2.match(/asUser\(\(\) =>/g) || []).length === 1, 'D80b 录制文件里用户级标记只有一处(首发), 判活与续录一律后台级: 第二处就是第二条插队路', `实数=${(rc2.match(/asUser\(\(\) =>/g) || []).length}`)
+  // ---- D81 C7a: 强制刷新有 8 秒下限, 且只有真成功才落账 ----
+  assert(/const PLAY_FRESH_MIN_MS = 8_000/.test(fl) && /const freshNow = !!fresh && !freshThrottled\(roomKeyStr\)/.test(fl), 'D81a 取流那一发补上下限(与 tick() 同一条 8 秒纪律): 它同时拿着 force、fullVariants、asUser 三重特权, 连点 N 下 = N 条完整取源链同时插队(SOOP 单链实测 8~10 发)')
+  assert(/if \(!r\.ok\) \{[\s\S]{0,200}return[\s\S]{0,120}if \(freshNow\) markFreshTaken\(roomKeyStr\)/.test(fl), 'D81b 落账在失败早退之后、且只认"真强制取到源"那一发: 失败绝不闸掉下一次重试(源真死了再点一次永远照发), 而进房那一发(非强制)也不落账 —— 免得把手动刷新那个按钮闸成哑的')
+  assert(/function markFreshTaken\(key: string\): void \{[\s\S]{0,300}freshTakenAt\.set\(key, Date\.now\(\)\)/.test(fl) && (fl.match(/freshTakenAt\.set\(/g) || []).length === 1, 'D81c 落账函数真的写那一笔且只有这一扇门: 本条抓的是本轮初稿 —— 当时它只做"超过 256 条就清扫", 一次 set 都没写, 于是节流永远读不到东西、整个 C7 是台空转的闸', `写入点=${(fl.match(/freshTakenAt\.set\(/g) || []).length}`)
+  // ---- D82 C7b: 播放器那三枚死旋钮 ----
+  const hp2 = fs.readFileSync(R('src', 'renderer', 'src', 'components', 'HlsPlayer.vue'), 'utf8')
+  assert(!/manifestLoadingMaxRetry|levelLoadingMaxRetry|fragLoadingMaxRetry/.test(hp2), 'D82a 三枚 *LoadingMaxRetry 已从配置里删掉: hls.js 1.7.1 只在默认值表里留着这些旧名, 真正的预算来自 loadPolicy(清单 2 发/分片 4~6 发) —— 写在这里不生效, 只会骗到下一个人')
+  assert(/loadPolicy/.test(hp2) && /const NET_RETRY_MAX = 3/.test(hp2), 'D82b 死字段撤了, 但"本层只管外层循环"这件事留在注释里, 且 NET_RETRY_MAX 那条真计数还在: 别让下一次审计再来装一遍这三个旋钮')
+  // ---- D83 C8: 自录房排到预取队首 ----
+  const ep2 = (() => {
+    const i = wt.indexOf('private enqueuePrewarm(platform: Platform, userId: string): void {')
+    const j = bodyEnd(wt, i)
+    return wt.slice(i, j < 0 ? undefined : j)
+  })()
+  assert(/if \(a\?\.autoRecord\) q\.unshift\(userId\)\s*\r?\n\s*else q\.push\(userId\)/.test(ep2), 'D83a 自录房排队首: 队列排空要几分钟(实测 103 个房 ≈12 分钟), 排在尾巴上等于让录制自己等一整轮泵 —— 请求数一字不减, 只是把同一批发出的活排得更早(这是优先级调整, 不是减量)')
+  // ---- D84 C6: 撤销的那一笔倒计时不许回来 ----
+  assert(!/soopCooling/.test(wt) && !/watcher\.soopCooling/.test(fs.readFileSync(R('src', 'main', 'i18n.ts'), 'utf8')), 'D84a SOOP 冷却倒计时是本轮撤销的第二笔(改判), key 与调用点一起不留: 退避只由 soopFailStreak>=2 武装, 武装那一轮写的 message 本就是 watcher.soopDown, 冷却整轮跳过 ⇒ 那句原样留在顶栏 —— 盲区不静默, 补一句只是把它说两遍(D55e 站的就是这一格)')
+}
+
+// ============================================================================
 console.log('\n' + '─'.repeat(72))
 console.log(`设计契约: 通过 ${PASS} / 失败 ${FAIL}`)
 if (FAIL) {

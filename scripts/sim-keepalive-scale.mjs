@@ -96,7 +96,7 @@ for (const N of [10, 25, 50, 100, 200]) {
   await api.keepaliveTick()
   const ms = Date.now() - t0
   const beats = N * 1 // ㊕ 扇出收口: 每源一轮只读主档一发(旧写法 N × VARIANTS, 副档不靠心跳续命)
-  const adaptiveWait = Math.min(120_000, Math.max(60_000, N * 400)) // 与 startKeepalive 自适应一致
+  const adaptiveWait = Math.min(900_000, Math.max(300_000, N * 2000)) // 与 startKeepalive 自适应一致(㊗ C3: 基准 60s→5min, 0.4s/源→2s/源, 封顶 120s→900s)
   const effMs = Math.max(ms, adaptiveWait)
   const mbPerBeatKb = beats * 2.5 // 2.5KB/清单
   const mbPerDay = ((mbPerBeatKb * 24 * 3600 * 1000) / effMs / 1024).toFixed(0)
@@ -104,4 +104,4 @@ for (const N of [10, 25, 50, 100, 200]) {
     `  ${String(N).padStart(7)} | ${(ms / 1000).toFixed(1).padStart(7)}s | ${(effMs / 1000).toFixed(1).padStart(14)}s | ${(beats / (ms / 1000)).toFixed(1).padStart(7)}/s | ${mbPerDay} MB`
   )
 }
-console.log('\n注: 有效心跳间隔 = max(每轮实际耗时, 自适应间隔 min(120s, max(60s, N×0.4s))) — 4 泳道并发 + 规模自适应')
+console.log('\n注: 有效心跳间隔 = max(每轮实际耗时, 自适应间隔 min(900s, max(300s, N×2s))) — 4 泳道并发 + 规模自适应(㊗ C3)')

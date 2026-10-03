@@ -251,7 +251,7 @@ console.log('\n■ N9 源码接线: 用户级标记只在"用户亲自在等"的
   const so = src('src/main/services/soop.ts')
   const pd = src('src/main/services/pandalive.ts')
   const ng = src('src/main/services/netGate.ts')
-  check('N9-1 播放器取流打用户级', /r = await asUser\(\(\) => sourceFor\(platform\)\.getPlayCached\(userId, safePwd\(password\), !!fresh, true\)\)/.test(ipc))
+  check('N9-1 播放器取流打用户级(且 force 位过 8 秒下限的收敛结果, ㊗ C7)', /r = await asUser\(\(\) => sourceFor\(platform\)\.getPlayCached\(userId, safePwd\(password\), freshNow, true\)\)/.test(ipc))
   check('N9-2 录制首发改用户级, 断线后的判活那一发仍是后台级', (rec.match(/asUser\(\(\) => sourceFor/g) || []).length === 1)
   check('N9-3 watcher(探针/预取/保活重铸)一处都不标记 = 全在车道里', !/asUser/.test(wt))
   check('N9-4 SOOP 每一发都走 req → laneRun, 间隔取自己的那一格', /return laneRun\(hostOf\(url\), store\.getSettings\(\)\.monitor\.soop\.requestGapMs, \(\) => this\.sendReq\(url, init, timeoutMs\)\)/.test(so))
