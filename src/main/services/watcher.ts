@@ -72,6 +72,12 @@ class Watcher {
   /** 本轮 Panda 用的是哪条真值链 + 预言机覆盖到的关注数(只服务轮次摘要日志, 让"1 发覆盖 158"可被事后核对) */
   private pandaOracle: 'bookmark' | 'list' = 'bookmark'
   private pandaCovered = 0
+  /** ㊘(R28-3) Panda 侧的"降级轮"账本与留痕口径: 与 soopBlindStreak(㊖)同一件事的两面 ——
+   *  预言机不可用而兜底链读得动的那些轮次, 逐房扇出面(全站榜 5 页 + member/bj)会吃满 api 站的车道,
+   *  而这一面过去在日志里完全隐形(fetchBj 成功路径零日志)。只留痕 + 风控期收手, 不给自己加预算:
+   *  全站榜不含离线关注(它只有 500 个在播房间), 那些房在降级轮【只有】逐房这一条路能读到 */
+  private pandaBlindStreak = 0
+  private pandaUrgentCnt = 0
   /** 在播数分平台记: Panda 冷却/熔断的那几轮不复查 Panda, 只能沿用上次已知值, 不能被 SOOP 覆盖成 0 */
   private pandaLiveFound = 0
   private soopLiveFound = 0
@@ -296,8 +302,36 @@ class Watcher {
       if (cfg.watchMode === 'list') {
         // 站内关注列表优先(1 发覆盖全部关注, 实测 158 条/90KB): 它直接对"我关注的人"发言,
         // 请求数与全站热度无关, 是这一站的风控面下限
-        const viaBookmark = await this.roundByBookmark(anchors)
-        this.pandaLiveFound = viaBookmark === null ? await this.roundByList(anchors) : viaBookmark
+        // ㊘(R28-3) 风控账管到轮次扇出面: 这一站已经亲口报过 403/429/≥500/接口回 HTML(那本账在
+        // pandalive.noteRisk), 而旧写法只有预取泵与保活重铸看它 —— 于是"被拦下"这一事件本身就成为
+        // 换发数的扳机: bookmark 被选择性拦掉 → 同一轮改打全站榜 5 页 + 上轮在播逐房复查(现场 5~7 发)
+        // + 间隙泵在轮距窗口里吃得下的约 100 发快照(㊖③ 那本账: 120s ÷ 1.2s ≈ 100 间)
+        // ⇒ 现场量级 ≈110 发/轮, 轮距 120s 就是 ≈8 万发/天, 而健康的一轮只有 1 发。收手窗口 ≤5 分钟, 期间平台在拒答,
+        // 那些请求一发也换不回读数 —— 与 SOOP 的探针收手(:847)同语义, 不是拿时效换流量。
+        // 预言机那一发照发: 它读通了就是"这一站还在答话", 当场把整表真值落进卡里, 一分钟时效都不丢。
+        const riskHold = api.riskCooling()
+        const viaBookmark = await this.roundByBookmark(anchors, riskHold)
+        if (viaBookmark === null && riskHold) {
+          this.pandaBlindStreak++
+          logger.info('watcher', `风控冷却中: 本轮只发站内关注那一发, 全站榜与逐房复查收手(连续 ${this.pandaBlindStreak} 轮列表不可用)`)
+          return
+        }
+        if (viaBookmark === null) {
+          this.pandaBlindStreak++
+          this.pandaLiveFound = await this.roundByList(anchors)
+          // ㊘(R28-3) 留痕: 这一面在日志里过去是彻底隐形的 —— fetchBj 成功路径零日志、限速队列也不落行,
+          // 于是"降级轮把整站吃满"这件事只有事后数包才知道。口径抄 SOOP 那句降级探针回执(㊖):
+          // 只在列表不可用的轮次出声, 并把连续不可用的轮数带上(与 ㊖ 一样: 减发要先谈时效, 这里只留痕)
+          if (this.pandaUrgentCnt || this.idleQueue.length) {
+            logger.info(
+              'watcher',
+              `降级轮留痕: 站内关注列表连续 ${this.pandaBlindStreak} 轮不可用, 本轮逐房复查 ${this.pandaUrgentCnt} 发 + 间隙泵快照 ${this.idleQueue.length} 间在排队`
+            )
+          }
+        } else {
+          this.pandaBlindStreak = 0
+          this.pandaLiveFound = viaBookmark
+        }
       } else {
         // 逐个模式只管"怎么查我的关注", 大厅是另一件事(㊑: 全站榜按需刷新, 与 watchMode 无关),
         // 所以这里不再清空快照 —— 旧实现清它是为了让大厅报"模式不可用", 现在同一个 tab 自己会去拉
@@ -523,6 +557,7 @@ class Watcher {
     // 它们要等的下一发是"退解除之后的那一轮", 而这一发的读数已经落进卡里了
     if (!oracleOnly) {
       const urgent = missing.filter((a) => a.isLive && !this.isGone(a))
+      this.pandaUrgentCnt = urgent.length // ㊘: 降级轮留痕要报的就是这个数
       for (const a of urgent) {
         try {
           liveFound += await this.applyBj(a, await api.fetchBj(a.userId))
@@ -692,6 +727,7 @@ class Watcher {
     // - urgent: 上轮还在播的, 全部立即复查(防止误判下播) —— 轮内完成
     // - rest: 离线关注交间隙泵(pumpIdle)在轮询空档持续轮扫 —— 发现延迟 ≈ N×gap, 与轮询间隔脱钩
     const urgent = missing.filter((a) => a.isLive && !this.isGone(a))
+    this.pandaUrgentCnt = urgent.length // ㊘(R28-3) 降级轮留痕要报的就是这一个数
     for (const a of urgent) {
       try {
         const info = await api.fetchBj(a.userId)
@@ -1039,6 +1075,9 @@ class Watcher {
           this.idleQueue.length = 0
           break
         }
+        // ㊘(R28-3): 风控冷却期这条泵也收手 —— 它吃的正是同一站同凭证的逐房那一发, 而轮次收手若只收一半,
+        // 间隙里它照样把车道填满。与熔断那一条不同: 不清队列(下一轮 setIdleQueue 会换上新快照)
+        if (api.riskCooling()) break
         const a = this.idleQueue.shift()!
         // 消费计数(㊖): 换快照时游标要续到"这一窗口实际看过几间"之后 —— 被守卫跳过的那几间也算看过
         this.idleDrained++
@@ -1124,6 +1163,7 @@ class Watcher {
     if (this.prewarmPumping[platform]) return
     this.prewarmPumping[platform] = true
     const q = this.prewarmQueue[platform]
+    let skippedNoBno = 0
     try {
       while (q.length) {
         // 让路(㊕): 停轮即停泵、轮次在飞时先不发预取 —— 与 pumpIdle 同规约。
@@ -1159,6 +1199,16 @@ class Watcher {
         // 掉线的那一间下一场开播会由 onLiveStart 重新排队, 这里跳过不亏时效
         const a = store.listAnchors().find((x) => x.platform === platform && x.userId === uid)
         if (!a || !a.isLive) continue
+        // ㊘(R28-4): 关注列表连续失明的那一段, 预取不再为"手上没有场次号"的房间买那一整页。
+        // 整页在这段是逐房检测路径(每轮 ≤40 发, 由探针预算与环形游标管着)—— 那一面照旧一发不少;
+        // 预取再买一份就是同一页两遍, 而它买的是"秒开", 没有人在等。排回队尾不作废:
+        // 探针那一发真读到的页会把号写进同一本账(soop.ts:770), 轮次落地的续泵(:243)会再来一趟,
+        // 于是这一房只是晚一场拿到源
+        if (platform === 'soop' && this.soopBlindStreak >= 3 && !soopApi.hasBroadNo(uid)) {
+          q.push(uid)
+          if (++skippedNoBno >= q.length) break // 整条队列都是这一形状 = 这一趟无事可做, 出泵等下一次点泵
+          continue
+        }
         const gap = store.getSettings().monitor[platform].requestGapMs
         if (platform === 'pandalive') api.setGap(gap)
         const r = await sourceFor(platform).getPlayCached(uid).catch(() => undefined) // 失败静默(不打扰用户流)

@@ -5,7 +5,7 @@ import {
   CH, EV, AccountState, AccountStates, Anchor, AppInfo, DEFAULT_PLATFORM, FollowImportResult, isPlatform, isRoomId, parseRoomInput, Platform, PlayInfo, roomKey, Settings, SoopAccountState, soopAvatarUrl, UpdateCheckResult
 } from '../shared/types'
 import { APP_META, cmpSemver } from '../shared/appmeta'
-import { api, SESSION_PARTITION, applyProxy, cachedSourceIdsAll } from './services/pandalive'
+import { api, LiveItem, SESSION_PARTITION, applyProxy, cachedSourceIdsAll } from './services/pandalive'
 import { sourceFor, applyPlayMeta } from './services/source'
 import { maskLoginId, soopApi } from './services/soop'
 import { store } from './services/store'
@@ -355,6 +355,8 @@ export function registerIpc(): void {
     let isLive = false
     /** 大厅之外(目前只有 SOOP)从播放页顺手拿到的截图 */
     let pageThumb = ''
+    /** ㊘(R28-1): member/bj 那一发顺带回来的在播读数(标题/标签/观众数), 与 applyBj 同一判据 */
+    let bjLive: LiveItem | null = null
 
     // 优化: 大厅(discovery)里已有该主播数据时直接复用, 省一次 fetchBj 请求且即时点亮
     // 大厅与 fetchBj 都是 pandalive 专有能力, 其它平台先按裸 ID 落库, 由各自轮询补全
@@ -369,6 +371,10 @@ export function registerIpc(): void {
         nick = info.nick || userId
         userIdx = info.userIdx
         userImg = info.userImg
+        // ㊘(R28-1): 这一发的响应里本来就带着"此刻在不在播"和整卡读数, 旧写法只取上面三格、把 media 整包丢掉,
+        // 于是新房按离线落库 → 下面走 trackIdle → 间隙泵 1.2 秒后对同一 userId 再发一次同端点。
+        // 同一件事打两遍，而第一发买回来的真值白扔 —— 判据与 applyBj 一致(只看 media.isLive)
+        if (info.media?.isLive) bjLive = info.media
       } catch {
         /* 主播信息拉取失败也允许添加, 等轮询补全 */
       }
@@ -393,20 +399,22 @@ export function registerIpc(): void {
       userIdx,
       nick,
       userImg,
-      isLive: isLive || !!disc,
-      title: disc?.title || title,
+      isLive: isLive || !!disc || !!bjLive,
+      title: disc?.title || bjLive?.title || title,
       tags: disc
         ? { isAdult: disc.isAdult, isPw: disc.isPw, type: disc.type, liveType: disc.liveType }
-        : null,
-      startTime: disc?.startTime || '',
-      viewerCount: disc?.viewers || 0,
-      likes: disc?.likes || 0,
-      fans: disc?.fans || 0,
-      thumbUrl: disc?.thumbUrl || pageThumb,
+        : bjLive
+          ? { isAdult: !!bjLive.isAdult, isPw: !!bjLive.isPw, type: bjLive.type || '', liveType: bjLive.liveType || '' }
+          : null,
+      startTime: disc?.startTime || bjLive?.startTime || '',
+      viewerCount: disc?.viewers || bjLive?.user || 0,
+      likes: disc?.likes || bjLive?.likeCnt || 0,
+      fans: disc?.fans || bjLive?.fanCnt || 0,
+      thumbUrl: disc?.thumbUrl || bjLive?.thumbUrl || pageThumb,
       autoRecord: cfg.autoRecordDefault[plat],
       addedAt: Date.now(),
-      lastSeenAt: disc ? Date.now() : 0,
-      lastLiveAt: disc?.startTime || ''
+      lastSeenAt: disc || bjLive ? Date.now() : 0,
+      lastLiveAt: disc?.startTime || bjLive?.startTime || ''
     }
     store.addAnchor(anchor)
     watcher.unmarkGone(plat, userId) // 也可能是已修正的新 ID: 允许重新探活

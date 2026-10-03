@@ -563,6 +563,11 @@ class SoopApi {
   private reloginAt = 0
   private reloginInflight: Promise<boolean> | null = null
 
+  /** ㊘(R28-5): 托管了账密 = 会话过期这一类能在后台自愈, 门槛账不许把"要登录"记成终局 */
+  private canAutoRelogin(): boolean {
+    return Boolean(secrets.get(CRED_USER) && secrets.get(CRED_PASS))
+  }
+
   async tryAutoLogin(): Promise<boolean> {
     const username = secrets.get(CRED_USER)
     const password = secrets.get(CRED_PASS)
@@ -867,6 +872,12 @@ class SoopApi {
     return hit.bno
   }
 
+  /** ㊘(R28-4): 这一间手上有没有"还活着的场次号" —— 预取泵用它判断要不要先买一整页。
+   *  这本账不需要额外的写入点: 列表整表(:718)与任何一次真读到的页面(:770)都已经在写它 */
+  hasBroadNo(channel: string): boolean {
+    return Boolean(this.freshBroadNo(channel))
+  }
+
   async fetchPlay(channel: string, password = '', fullVariants = true): Promise<PlayResult> {
     // ㊔: fullVariants=false 只解最高档(预取泵用的省发型)。这一路的成本不是"一发":
     // 每个清晰度要 1 发 aid + 1 发 broad_stream_assign(实测档位=4 ⇒ 单房 4 页/整链 8~10 发),
@@ -880,7 +891,10 @@ class SoopApi {
       if (r.ok || r.needPassword || r.needLogin) return r
       logger.info('soop', `复用列表场次号未成功(${r.error || '未知'}), 回读播放页核对 @${channel}`)
       this.bnoCache.delete(channel)
-      const m = await this.fetchPageMeta(channel, false, true, '取流复查')
+      // ㊘(R28-2): 这一发不再是 fresh —— 它问的是"这一页怎么说", 而十秒内刚读过的那一页就是最新读数
+      // (探针/上一次链都写在 pageCache 里)。旧写法把微缓存与在途合并一并绕过, 于是探针几秒前买过的那一页
+      // 在这里被原样重买; 它要的三个判据(living/号码变没变/那句话)一页 HTML 里都齐, 十秒的窗口换不来新信息
+      const m = await this.fetchPageMeta(channel, false, false, '取流复查')
       // 页面说没在播 = 那一场已经断了(原判据由整链头部给出); 号码变了 = 新一场, 用新号重走;
       // 页面说在播且号码没变 = 失败与场次号无关, 原样回报即可, 不重打整链
       if (!m.living || m.broadNo !== known) return this.runPlayChain(channel, password, m, fullVariants)
@@ -902,8 +916,20 @@ class SoopApi {
       logger.info('soop', `自动重登成功, 当场重试拉流 @${channel}`)
       info = await this.fetchChannelInfo(channel, meta.broadNo, password)
     }
-    if (info.result === RESULT_LOGIN) return { ok: false, needLogin: true, error: mt('soop.needLogin') }
-    if (info.needPwd && !password) return { ok: false, needPassword: true, error: mt('soop.pwRequired') }
+    if (info.result === RESULT_LOGIN) {
+      const pack: PlayResult = { ok: false, needLogin: true, error: mt('soop.needLogin') }
+      // ㊘(R28-5): 没有托管账密时这一句是"这一房此刻取不到源"的终局回答 —— 记进门槛账,
+      // 15 分钟内不再替同一个房间重打整链。托管了账密的不在账内: 上面 tryAutoLogin 只受 60 秒冷却管着,
+      // 下一发就可能自愈, 记账等于把登录态锁死在墙上
+      if (!this.canAutoRelogin()) this.noteGate(channel, pack)
+      return pack
+    }
+    if (info.needPwd && !password) {
+      // 密码房而这一路没有密码(预取泵永远没有密码): 整链的其余 8~9 发都是白付, 记一笔
+      const pack: PlayResult = { ok: false, needPassword: true, error: mt('soop.pwRequired') }
+      this.noteGate(channel, pack)
+      return pack
+    }
     // 密码房 + 已交过一发密码 + 平台仍不给播放信息: 只可能是密码不对。必须报成"可重填"的形态,
     // 否则会把它当笼统接口失败 —— 用户看到的是"SOOP 拒绝返回播放信息", 既不知错在哪也无从重试
     if (info.result !== RESULT_OK) {
@@ -987,6 +1013,24 @@ class SoopApi {
   private bumpEpoch(channel: string): void {
     this.playEpoch.set(channel, (this.playEpoch.get(channel) || 0) + 1)
   }
+
+  // ---- 门槛回执的账(㊘ R28-5, 抄 Panda ㊔ 那本): 平台明说过不去的那一类, 一段时间内不再替它重打整链 ----
+  /** 只收两类不会自己好的回答: "要登录且没托管账密可重登" / "这房要密码而这一路没有密码"。
+   *  密码不对(下一次可能改对)与登录态可自愈(60s 冷却后再来)都不记账 —— 与 Panda GATE_CODES 同一取舍。
+   *  一次进房的代价在这里是 9~10 发(bnoCache 未命中时还要多一整页), 而旧写法只缓存 r.ok,
+   *  于是被拒的那一句从来没有落进任何账: 同一间每点一次就重打一遍整链 */
+  private gates = new Map<string, { until: number; pack: PlayResult }>()
+  private static GATE_TTL_MS = 15 * 60_000
+
+  private noteGate(channel: string, pack: PlayResult): void {
+    this.gates.set(channel, { until: Date.now() + SoopApi.GATE_TTL_MS, pack })
+  }
+
+  /** 事件解除: 开播/作废/换号/带密码来/手动强刷都该重新问一次平台 */
+  private dropGate(channel: string): void {
+    this.gates.delete(channel)
+  }
+
   async getPlayCached(channel: string, password = '', forceFresh = false, fullVariants = false): Promise<PlayResult> {
     // 在途键同时表达密码槽位与扇出档级(㊔): 把"要全档"的 caller 合进一条只解最高档的在途链,
     // 等于塞给它一份残缺的清晰度菜单 —— 宁可各走一条链(最多多 4 发, 且只在预取与进房撞在同一瞬时的窄口上)
@@ -996,6 +1040,10 @@ class SoopApi {
       // 命中规则(㊔): 只要最高档的那一方, 手里这份是不是满档都够用(满档包含最高档);
       // 要满档菜单的那一方, 一份只解了最高档的包绝不能给它 —— 那就是"清晰度菜单缺档"而不是"秒开"
       if (c && c.ok && (!fullVariants || !c.partial)) return c
+      // 门槛账短路(㊘ R28-5): 带密码来的那一次不看账(密码本身就是新信息), 手动强刷同样绕开 ——
+      // 与 Panda 的 `&& !password` + forceFresh 双豁免同规约；放在在途合并之前, 免得排着队的房再去撞一条注定被拒的链
+      const g = this.gates.get(channel)
+      if (g && g.until > Date.now() && !password) return { ...g.pack }
       const flying = this.playInflight.get(key)
       if (flying) return flying
     }
@@ -1031,6 +1079,7 @@ class SoopApi {
   invalidatePlay(channel: string): void {
     this.bumpEpoch(channel)
     this.playCache.delete(channel)
+    this.dropGate(channel) // ㊘: 事件(重开播/收尸/手动强刷)一发生就该重新问一次平台, 门槛账只许活到下一个事件
     // 在飞的几条(带密/不带密 × 全档/只最高档, ㊔)一并摘掉: 留着等于让新 caller 合进一条注定作废的链, 复活走后门
     for (const pw of ['', '#pw']) for (const fan of ['', '#top']) this.playInflight.delete(`${channel}${pw}${fan}`)
     this.deadStreak.delete(channel)
@@ -1064,6 +1113,7 @@ class SoopApi {
     this.playCache.clear()
     this.playInflight.clear()
     this.deadStreak.clear()
+    this.gates.clear() // ㊘: 上一个账号的"要登录/要密码"对这一个账号毫无意义(与 Panda 换号清账同语义)
     this.riskUntil = 0 // 上一号的风控静默不该闷住新账号的泵(与 Panda 熔断随换号撤退同语义)
     broadcastSrcCache()
   }
